@@ -331,15 +331,13 @@ def read_token() -> str | None:
         return None
 
     if _is_token_expired(oauth):
-        # The OAuth refresh grant needs a refresh token. Some subscription logins
-        # store an empty one — then neither we nor a fresh `claude` can renew the
-        # token headlessly (it just 401s). The durable fix is a long-lived token:
-        # `claude setup-token` -> set CLAUDE_CODE_OAUTH_TOKEN.
-        if not oauth.get("refreshToken"):
-            _auth_hint = "Token expired - run: claude setup-token"
-            return None
+        # Autonomous refresh, same mechanisms as clawdmeter: the OAuth refresh-token
+        # grant, then (windowless, rate-limited) letting Claude Code refresh its own
+        # token. Both need a usable refresh path though — if the stored refreshToken
+        # is empty AND a fresh `claude` can't renew (it 401s), nothing headless can,
+        # and the durable fix is a long-lived token: `claude setup-token`.
         tok = _refresh_token(oauth, creds) or _refresh_via_claude_code()
-        _auth_hint = "" if tok else "Token expired - run: claude setup-token"
+        _auth_hint = "" if tok else "Token expired - run: claude setup-token (long-lived)"
         return tok
 
     _auth_hint = ""
