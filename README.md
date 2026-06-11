@@ -9,7 +9,11 @@ you can point it at **your own webhook** (n8n, Node‑RED, anything). Everything
 configured from a built‑in **web UI** — WiFi, what to show, the symbol list, and
 **OTA firmware updates**.
 
-> Not affiliated with GeekMagic. This replaces the stock firmware entirely.
+It can also flip into a **Claude usage meter**: an animated pixel‑art mascot plus
+your **5‑hour and 7‑day Claude usage** bars, fed over WiFi by a tiny local
+[daemon](daemon/). Pick the mode in the web UI.
+
+> Not affiliated with GeekMagic or Anthropic. This replaces the stock firmware entirely.
 
 ![what it shows](docs/screen.svg)
 
@@ -23,6 +27,8 @@ configured from a built‑in **web UI** — WiFi, what to show, the symbol list,
   (`BTC-USD`) and FX (`EURUSD=X`) all work.
 - 🌐 **Or your own webhook** (n8n, Node‑RED, anything) if you'd rather own the
   data source — the device just renders the small JSON contract it's given.
+- 🦀 **Claude usage mode** — an animated pixel mascot + 5h/7d usage bars with reset
+  countdowns, served from a small local [daemon](daemon/) (no cable, polled over WiFi).
 - 🛠 **Full web UI** — connect to WiFi, configure the AP/hotspot, pick what to
   show, manage the symbol list, set brightness/orientation/colours.
 - ⬆️ **OTA updates** — flash new firmware from the browser, no cable needed.
@@ -122,7 +128,7 @@ Or with PlatformIO (wiring connected): `pio run -t upload`.
 |-----|-----------------|
 | **Status** | Live device info (mode, IP, signal, heap, uptime) and current ticker values. “Refresh data now” forces a poll. |
 | **WiFi** | Scan & join a network; configure the AP name/password and the mDNS hostname. |
-| **Display** | Brightness (+ optional auto‑brightness), orientation, backlight polarity, colour scheme, rotation/refresh intervals, **data source** (Yahoo Finance or custom webhook), webhook URL, chart timeframe & points, and **what to show** (name, price, change, chart, timeframe label, “updated N s ago”, rotation dots). |
+| **Display** | **Mode** (Stock ticker or Claude usage) and its URL; brightness (+ optional auto‑brightness), orientation, backlight polarity, colour scheme, rotation/refresh intervals, **data source** (Yahoo Finance or custom webhook), webhook URL, chart timeframe & points, and **what to show** (name, price, change, chart, timeframe label, “updated N s ago”, rotation dots). |
 | **Symbols** | Up to **8** tickers. `symbol` is the Yahoo ticker (e.g. `AAPL`, `NESN.SW`, `BTC-USD`, `EURUSD=X`); `name` is an optional friendly label that overrides the source's name. |
 | **Update** | OTA firmware upload, reboot, factory reset. |
 
@@ -198,6 +204,44 @@ never needs to know the device's IP, and it keeps working if the IP changes.
 > symbols (priced in CHF), so a dedicated cash.ch path would add fragility for no
 > gain. Use the custom‑webhook mode if you ever need a bespoke Swiss source.
 
+## Claude usage mode
+
+Switch **Display → Mode** to **Claude usage** and the device stops showing tickers
+and instead shows your Claude consumption — the same idea as a desk usage meter,
+but on the SmallTV over WiFi (the device's USB is power‑only; nothing is wired).
+
+It renders two states:
+
+- **Stats** (data flowing): a small mascot, your **5‑hour** and **7‑day**
+  utilization as big percentages with fill bars (green → amber → red as you
+  approach the cap) and **reset countdowns**.
+- **Idle animation** (no data): when the daemon stops sending — PC asleep, daemon
+  stopped, network down — the screen plays an animated pixel‑art mascot. The
+  creature's mood (calm → working → dancing) reflects how fast your session is
+  burning. As soon as data arrives again it snaps back to the stats.
+
+### Setup
+
+1. On the PC that runs Claude Code, start the daemon (reads the OAuth token Claude
+   Code already stored; serves the numbers on your LAN):
+
+   ```sh
+   cd daemon
+   pip install -r requirements.txt
+   python smalltv_usage_daemon.py          # http://0.0.0.0:8787/
+   ```
+
+   (Windows: double‑click `daemon/start-daemon.bat`.) Full details, the response
+   contract, and run‑at‑startup tips are in **[`daemon/`](daemon/README.md)**.
+
+2. In the web UI → **Display → Mode → Claude usage**, set **Usage URL** to
+   `http://<that-pc-ip>:8787/` and **Save**.
+
+The device only ever pulls a few percentages over your LAN; the token never
+leaves your machine. The mascot animations are a curated subset of the
+[claudepix](https://claudepix.vercel.app) pixel‑art set, re‑rendered on the
+ST7789.
+
 ## Building from source
 
 Requires [PlatformIO](https://platformio.org/):
@@ -218,14 +262,21 @@ src/
   Net.*             WiFi STA / fallback AP / captive portal / mDNS
   WebPortal.*       web server, REST API, OTA endpoint
   webui.h           the single-page UI (HTML/CSS/JS, served from PROGMEM)
-  Display.*         ST7789 rendering (Arduino_GFX), sparkline, status screens
+  Display.*         ST7789 rendering (Arduino_GFX): tickers, usage meters, mascot
   StockClient.*     webhook fetch (HTTP/HTTPS) + JSON parse + poll timing
   StockData.h       per-ticker runtime struct
+  UsageClient.*     Claude usage fetch (from the daemon) + poll timing
+  UsageData.h       usage runtime struct (5h/7d % + resets + status)
+  Mascot.*          mascot animation state machine + burn-rate mood tracker
+  mascot_frames.h   generated PROGMEM pixel-art frames (tools/extract_mascot.py)
+tools/              extract_mascot.py — regenerates mascot_frames.h from the source
+daemon/             local HTTP daemon that serves Claude usage to the device
 n8n/                webhook contract + importable workflow
 ```
 
-Footprint: ~527 KB flash (of 1 MB) and ~50 % RAM at boot — plenty of headroom for
-OTA (which needs room for two sketch copies).
+Footprint: ~574 KB flash (of 1 MB) and ~51 % RAM at boot — plenty of headroom for
+OTA (which needs room for two sketch copies). The mascot frame data (~33 KB) lives
+in flash (PROGMEM), not the heap.
 
 ## Recovery / going back
 
@@ -253,6 +304,10 @@ OTA (which needs room for two sketch copies).
   - [Times-Z/GeekMagic-Open-Firmware](https://github.com/Times-Z/GeekMagic-Open-Firmware)
   - [Installing ESPHome on GEEKMAGIC SmallTV (HA community)](https://community.home-assistant.io/t/installing-esphome-on-geekmagic-smart-weather-clock-smalltv-pro/618029)
   - [Puddle of Code — My Own GeekMagic SmallTV](https://puddleofcode.com/story/my-own-geekmagic-smalltv/)
+- Claude usage mode is a re-implementation of
+  [clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) for this hardware
+  (HTTP/WiFi instead of serial); the mascot frames come from
+  [claudepix](https://claudepix.vercel.app).
 - Libraries: [Arduino_GFX](https://github.com/moononournation/Arduino_GFX),
   [ArduinoJson](https://arduinojson.org/).
 

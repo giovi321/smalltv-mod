@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include "Settings.h"
 #include "StockData.h"
+#include "UsageData.h"
 
 void displayBegin(const Settings& s);
 void displaySetBrightness(uint8_t pct, bool inverted);
@@ -17,3 +18,7 @@ void displayMessage(const char* title, const char* msg, uint16_t titleColor);
 // Main ticker view
 void displayStock(const StockData& d, uint8_t pageIndex, uint8_t pageCount,
                   const Settings& s);
+
+// Claude usage view
+void displayUsage(const UsageData& u, const Settings& s);   // stats: mascot + 5h/7d meters
+void displayMascot(const uint8_t* cells, const uint16_t* palette, bool restart); // idle anim

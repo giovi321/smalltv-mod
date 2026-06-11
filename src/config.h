@@ -44,7 +44,21 @@
 #define MAX_URL_LEN     200    // webhook base URL
 
 // ---------------------------------------------------------------------------
-// Data source
+// Display mode — what the device shows
+//   0 = stock / crypto ticker (Yahoo or webhook, see SRC_* below)
+//   1 = Claude usage meter (mascot + 5h/7d usage bars, fed by the daemon/)
+// ---------------------------------------------------------------------------
+#define MODE_STOCKS  0
+#define MODE_USAGE   1
+#define DEFAULT_MODE MODE_STOCKS
+
+// Claude usage mode: once data stops arriving for this long (PC asleep, daemon
+// stopped, network down) the screen switches from the stats to the idle mascot
+// animation. Effective timeout also scales with the poll period (see main.cpp).
+#define USAGE_STALE_GRACE_MS  20000UL
+
+// ---------------------------------------------------------------------------
+// Data source (stock mode)
 //   0 = custom webhook (n8n / Node-RED / your own HTTP endpoint)
 //   1 = Yahoo Finance, fetched directly by the device (no backend needed)
 // ---------------------------------------------------------------------------

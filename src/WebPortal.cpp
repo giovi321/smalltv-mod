@@ -8,6 +8,9 @@
 #include "Display.h"
 #include "StockClient.h"
 
+// Defined in main.cpp — re-init usage client + force a repaint after a config change.
+extern void appInvalidate();
+
 static ESP8266WebServer server(80);
 static Settings*        S = nullptr;
 static bool             g_reboot = false;
@@ -84,6 +87,7 @@ static void handlePostConfig() {
   if (S->rotation != oldRot) displaySetRotation(S->rotation);
   stocksInit(*S);
   stocksForceRefresh();
+  appInvalidate();          // re-init usage client + repaint (covers mode/URL changes)
 
   bool wifiChanged = (S->staSsid != oldSsid) || (S->staPass != oldPass);
 

@@ -19,9 +19,15 @@ struct Settings {
   String apPass;        // empty => open network
   String hostname;      // mDNS name => http://<hostname>.local
 
-  // --- Data source ---
+  // --- Mode ---
+  uint8_t mode;         // MODE_STOCKS or MODE_USAGE (see config.h)
+
+  // --- Data source (stock mode) ---
   uint8_t source;       // SRC_WEBHOOK or SRC_YAHOO (see config.h)
   String webhookUrl;    // custom webhook base URL (only used when source=webhook)
+
+  // --- Claude usage mode ---
+  String usageUrl;      // daemon HTTP endpoint, e.g. http://192.168.1.10:8787/
   String range;         // chart timeframe token (e.g. "1d", "5d", "1mo", "1y")
   uint16_t points;      // sparkline points requested
   uint16_t pollSec;     // refresh period

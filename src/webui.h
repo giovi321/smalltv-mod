@@ -55,14 +55,14 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <button data-t="status" class="active">Status</button>
  <button data-t="wifi">WiFi</button>
  <button data-t="display">Display</button>
- <button data-t="symbols">Symbols</button>
+ <button data-t="symbols" class="stockonly">Symbols</button>
  <button data-t="update">Update</button>
 </nav>
 <main>
  <!-- STATUS -->
  <section id="status" class="tab active">
   <div class="card"><h2>Device</h2><div id="statusBox" class="muted">Loading...</div></div>
-  <div class="card"><h2>Tickers</h2><div id="tickBox" class="muted">-</div>
+  <div class="card stockonly"><h2>Tickers</h2><div id="tickBox" class="muted">-</div>
    <button class="btn sec" style="margin-top:10px" onclick="refreshNow()">Refresh data now</button></div>
  </section>
 
@@ -88,6 +88,16 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
 
  <!-- DISPLAY -->
  <section id="display" class="tab">
+  <div class="card"><h2>Mode</h2>
+   <label>What this device shows</label>
+   <select id="mode" onchange="modeChanged()">
+    <option value="stocks">Stock / crypto ticker</option>
+    <option value="usage">Claude usage</option>
+   </select>
+   <div id="usageRow"><label>Usage daemon URL</label>
+    <input id="usageUrl" type="url" placeholder="http://192.168.1.10:8787/"></div>
+   <small class="hint" id="modeHint"></small>
+  </div>
   <div class="card"><h2>Screen</h2>
    <label>Brightness: <span id="brVal"></span>%</label>
    <input id="brightness" type="range" min="0" max="100" oninput="brVal.textContent=this.value">
@@ -100,7 +110,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <select id="colorInverted"><option value="false">Green up / Red down</option>
     <option value="true">Red up / Green down</option></select>
   </div>
-  <div class="card"><h2>Rotation &amp; data</h2>
+  <div class="card stockonly"><h2>Rotation &amp; data</h2>
    <div class="row">
     <div><label>Show each ticker (s)</label><input id="rotateSec" type="number" min="2" max="300"></div>
     <div><label>Refresh data (s)</label><input id="pollSec" type="number" min="10" max="3600"></div>
@@ -118,7 +128,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    </div>
    <small class="hint" id="srcHint"></small>
   </div>
-  <div class="card"><h2>What to show</h2>
+  <div class="card stockonly"><h2>What to show</h2>
    <div class="chk"><input id="showName" type="checkbox"><label>Name / symbol</label></div>
    <div class="chk"><input id="showPrice" type="checkbox"><label>Price</label></div>
    <div class="chk"><input id="showChange" type="checkbox"><label>Change &amp; % change</label></div>
@@ -171,7 +181,7 @@ document.querySelectorAll('nav button').forEach(function(b){b.onclick=function()
 }});
 
 var BOOL=['autoBrightness','backlightInverted','showName','showPrice','showChange','showChart','showRangeLabel','showUpdatedAgo','showPageDots'];
-var TEXT=['staSsid','apSsid','apPass','hostname','webhookUrl','range'];
+var TEXT=['staSsid','apSsid','apPass','hostname','webhookUrl','usageUrl','range'];
 var NUM=['brightness','rotateSec','pollSec','points'];
 
 function loadConfig(){return j('/api/config').then(function(c){C=c;
@@ -182,9 +192,16 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  $('rotation').value=c.rotation;
  $('colorInverted').value=c.colorInverted?'true':'false';
  $('source').value=c.source||'yahoo';srcChanged();
+ $('mode').value=c.mode||'stocks';modeChanged();
  $('apPass').placeholder=c.apPassSet?'(unchanged)':'(open)';
  renderSyms(c.symbols||[]);
 })}
+function modeChanged(){var u=$('mode').value==='usage';
+ $('usageRow').style.display=u?'block':'none';
+ $('modeHint').innerHTML=u
+  ?'Shows your Claude <b>5h</b> &amp; <b>7d</b> usage from the local daemon (see <code>daemon/</code>). The screen plays the idle animation until the daemon starts sending data.'
+  :'Shows live stock / crypto prices.';
+ document.querySelectorAll('.stockonly').forEach(function(e){e.style.display=u?'none':''});}
 function srcChanged(){var y=$('source').value!=='webhook';
  $('webhookRow').style.display=y?'none':'block';
  $('srcHint').innerHTML=y
@@ -199,6 +216,7 @@ function collect(){
  o.rotation=parseInt($('rotation').value);
  o.colorInverted=$('colorInverted').value==='true';
  o.source=$('source').value;
+ o.mode=$('mode').value;
  var p=$('staPass').value; if(p)o.staPass=p;
  o.symbols=[];
  document.querySelectorAll('#symTable tr').forEach(function(tr){

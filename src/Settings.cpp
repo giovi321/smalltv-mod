@@ -11,8 +11,10 @@ void Settings::setDefaults() {
   apPass  = DEFAULT_AP_PASS;
   hostname = DEFAULT_HOSTNAME;
 
+  mode = DEFAULT_MODE;
   source = DEFAULT_SOURCE;
   webhookUrl = "";
+  usageUrl = "";
   range = DEFAULT_RANGE;
   points = DEFAULT_POINTS;
   pollSec = DEFAULT_POLL_SEC;
@@ -93,9 +95,11 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
     root["apPass"]   = s.apPass;
   }
 
-  // Data
+  // Mode + data
+  root["mode"]        = (s.mode == MODE_USAGE) ? "usage" : "stocks";
   root["source"]      = (s.source == SRC_YAHOO) ? "yahoo" : "webhook";
   root["webhookUrl"]  = s.webhookUrl;
+  root["usageUrl"]    = s.usageUrl;
   root["range"]       = s.range;
   root["points"]      = s.points;
   root["pollSec"]     = s.pollSec;
@@ -141,11 +145,16 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   // AP password: apply as-is when present (empty allowed => open AP).
   if (root["apPass"].is<const char*>()) s.apPass = root["apPass"].as<String>();
 
+  if (root["mode"].is<const char*>()) {
+    String m = root["mode"].as<String>();
+    s.mode = m.equalsIgnoreCase("usage") ? MODE_USAGE : MODE_STOCKS;
+  }
   if (root["source"].is<const char*>()) {
     String src = root["source"].as<String>();
     s.source = src.equalsIgnoreCase("yahoo") ? SRC_YAHOO : SRC_WEBHOOK;
   }
   if (root["webhookUrl"].is<const char*>()) s.webhookUrl = root["webhookUrl"].as<String>();
+  if (root["usageUrl"].is<const char*>())   s.usageUrl = root["usageUrl"].as<String>();
   if (root["range"].is<const char*>())      s.range = root["range"].as<String>();
   if (root["points"].is<int>())             s.points = constrain((int)root["points"], 0, MAX_SPARK_POINTS);
   if (root["pollSec"].is<int>())            s.pollSec = max(10, (int)root["pollSec"]);

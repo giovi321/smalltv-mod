@@ -13,6 +13,10 @@ firmware*.bin
 # Reference material (proprietary / third-party — not redistributable)
 sources/
 
+# Python (daemon / tools)
+__pycache__/
+*.pyc
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

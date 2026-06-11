@@ -1,4 +1,5 @@
 #include "Display.h"
+#include "Mascot.h"
 #include <Arduino_GFX_Library.h>
 #include <SPI.h>
 
@@ -25,6 +26,13 @@ class Arduino_ST7789_SmallTV : public Arduino_ST7789 {
 #define C_DGRAY  0x4208
 #define C_YELLOW 0xFFE0
 #define C_BLUE   0x041F
+
+// Claude-usage palette (Anthropic-inspired dark theme, RGB565 of the originals)
+#define C_ACCENT  0xDBAA   // terra-cotta 0xd97757
+#define C_UGREEN  0x7C6B   // green 0x788c5d
+#define C_PANEL   0x18E3   // card fill 0x1f1f1e
+#define C_BARBG   0x2945   // unfilled bar track 0x2a2a28
+#define C_DIM     0xB574   // secondary text 0xb0aea5
 
 static Arduino_DataBus* bus = nullptr;
 static Arduino_GFX*     gfx = nullptr;
@@ -278,4 +286,123 @@ void displayStock(const StockData& d, uint8_t pageIndex, uint8_t pageCount,
   // Stale/error dot (top-left) when last refresh failed but we have old data.
   // (Top-right now holds the range label.)
   if (d.error) gfx->fillCircle(6, 6, 3, C_RED);
+}
+
+// ===========================================================================
+// Claude usage view
+// ===========================================================================
+
+// Mascot diff state for the flicker-free full-screen idle animation.
+static bool            s_mascotPrimed  = false;
+static const uint16_t* s_mascotPalette = nullptr;
+static uint8_t         s_prevCells[MASCOT_GRID * MASCOT_GRID];
+
+// Draw a 20x20 mascot frame at (x0,y0), cellPx per cell. Reads PROGMEM frame data.
+static void blitMascot(const uint8_t* cells, const uint16_t* palette,
+                       int x0, int y0, int cellPx) {
+  for (int i = 0; i < MASCOT_GRID * MASCOT_GRID; i++) {
+    uint8_t code = pgm_read_byte(&cells[i]);
+    uint16_t color = (code < MASCOT_PALETTE_SIZE) ? pgm_read_word(&palette[code]) : 0;
+    int gx = i % MASCOT_GRID, gy = i / MASCOT_GRID;
+    gfx->fillRect(x0 + gx * cellPx, y0 + gy * cellPx, cellPx, cellPx, color);
+  }
+}
+
+static void fmtReset(int mins, char* out, size_t n) {
+  if (mins <= 0) { strlcpy(out, "now", n); return; }
+  int d = mins / 1440, h = (mins % 1440) / 60, m = mins % 60;
+  if (d > 0)      snprintf(out, n, "%dd %dh", d, h);
+  else if (h > 0) snprintf(out, n, "%dh %02dm", h, m);
+  else            snprintf(out, n, "%dm", m);
+}
+
+static uint16_t barColor(float pct) {
+  if (pct >= 90) return C_RED;
+  if (pct >= 75) return C_ACCENT;
+  return C_UGREEN;
+}
+
+// One usage card: big %, a 5h/7d label, a fill bar coloured by load, and the
+// reset countdown. `top` is the card's top y; the card is 82px tall.
+static void drawMeter(int top, const char* label, float pct, int resetMins) {
+  const int x = 8, w = 224, h = 82;
+  gfx->fillRoundRect(x, top, w, h, 8, C_PANEL);
+
+  char pc[8];
+  snprintf(pc, sizeof(pc), "%d%%", (int)lroundf(constrain(pct, 0.0f, 100.0f)));
+  uint8_t sz = fitSize(pc, 150, 5);
+  gfx->setTextSize(sz);
+  gfx->setTextColor(C_WHITE);
+  gfx->setCursor(x + 14, top + 10);
+  gfx->print(pc);
+
+  int lw = textW(label, 2);
+  gfx->setTextSize(2);
+  gfx->setTextColor(C_DIM);
+  gfx->setCursor(x + w - lw - 14, top + 12);
+  gfx->print(label);
+
+  int bx = x + 14, by = top + 52, bw = w - 28, bh = 12;
+  gfx->fillRoundRect(bx, by, bw, bh, bh / 2, C_BARBG);
+  int fw = (int)(bw * constrain(pct, 0.0f, 100.0f) / 100.0f);
+  if (fw >= bh)     gfx->fillRoundRect(bx, by, fw, bh, bh / 2, barColor(pct));
+  else if (fw > 0)  gfx->fillRect(bx, by, fw, bh, barColor(pct));
+
+  char rs[16], line[28];
+  fmtReset(resetMins, rs, sizeof(rs));
+  snprintf(line, sizeof(line), "Resets in %s", rs);
+  gfx->setTextSize(2);
+  gfx->setTextColor(C_DIM);
+  gfx->setCursor(x + 14, top + 64);
+  gfx->print(line);
+}
+
+void displayUsage(const UsageData& u, const Settings& s) {
+  if (!gfx) return;
+  (void)s;
+  s_mascotPrimed = false;   // force a full redraw next time the idle animation shows
+  gfx->fillScreen(C_BLACK);
+
+  // Header: a small calm mascot pose + title.
+  blitMascot(mascotIdleCells(), mascotIdlePalette(), 6, 4, 2);
+  gfx->setTextSize(3);
+  gfx->setTextColor(C_WHITE);
+  gfx->setCursor(56, 12);
+  gfx->print("CLAUDE");
+
+  if (!u.valid) {
+    drawCentered(u.error ? "daemon error" : "waiting...", 120, 2, C_DIM);
+    return;
+  }
+
+  // A non-"allowed" status (warning / rejected) gets a small accent flag.
+  if (u.status[0] && strncmp(u.status, "allowed", 7) != 0) {
+    gfx->fillCircle(228, 18, 5, C_ACCENT);
+  }
+
+  drawMeter(50,  "5h", u.sessionPct, u.sessionResetMin);
+  drawMeter(138, "7d", u.weeklyPct,  u.weeklyResetMin);
+}
+
+void displayMascot(const uint8_t* cells, const uint16_t* palette, bool restart) {
+  if (!gfx || !cells || !palette) return;
+  const int CP = TFT_WIDTH / MASCOT_GRID;                 // 240 / 20 = 12
+  const int x0 = (TFT_WIDTH  - MASCOT_GRID * CP) / 2;
+  const int y0 = (TFT_HEIGHT - MASCOT_GRID * CP) / 2;
+
+  // Full redraw on (re)entry or whenever the palette changes (animation switch);
+  // otherwise only repaint the cells that changed since the last frame.
+  bool full = restart || !s_mascotPrimed || palette != s_mascotPalette;
+  if (full) gfx->fillScreen(C_BLACK);
+
+  for (int i = 0; i < MASCOT_GRID * MASCOT_GRID; i++) {
+    uint8_t code = pgm_read_byte(&cells[i]);
+    if (!full && code == s_prevCells[i]) continue;
+    s_prevCells[i] = code;
+    uint16_t color = (code < MASCOT_PALETTE_SIZE) ? pgm_read_word(&palette[code]) : 0;
+    int gx = i % MASCOT_GRID, gy = i / MASCOT_GRID;
+    gfx->fillRect(x0 + gx * CP, y0 + gy * CP, CP, CP, color);
+  }
+  s_mascotPrimed  = true;
+  s_mascotPalette = palette;
 }
