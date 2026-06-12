@@ -10,8 +10,9 @@ configured from a built‑in **web UI** — WiFi, what to show, the symbol list,
 **OTA firmware updates**.
 
 It can also flip into a **Claude usage meter**: an animated pixel‑art mascot plus
-your **5‑hour and 7‑day Claude usage** bars, fed over WiFi by a tiny local
-[daemon](daemon/). Pick the mode in the web UI.
+your **5‑hour and 7‑day Claude usage** bars, fed over WiFi by the
+**[clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon)** running on
+your PC. Pick the mode in the web UI.
 
 > Not affiliated with GeekMagic or Anthropic. This replaces the stock firmware entirely.
 
@@ -28,7 +29,8 @@ your **5‑hour and 7‑day Claude usage** bars, fed over WiFi by a tiny local
 - **Or your own webhook** (n8n, Node‑RED, anything) if you'd rather own the
   data source — the device just renders the small JSON contract it's given.
 - **Claude usage mode** — an animated pixel mascot + 5h/7d usage bars with reset
-  countdowns, served from a small local [daemon](daemon/) (no cable, polled over WiFi).
+  countdowns, fed by the [clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon)
+  on your PC (no cable; pushed or polled over WiFi).
 - **Full web UI** — connect to WiFi, configure the AP/hotspot, pick what to
   show, manage the symbol list, set brightness/orientation/colours.
 - **OTA updates** — flash new firmware from the browser, no cable needed.
@@ -222,27 +224,32 @@ It renders two states:
 
 ### Setup
 
-1. On the PC that runs Claude Code, start the daemon (reads the OAuth token Claude
-   Code already stored; serves the numbers on your LAN):
+> The PC-side daemon is its own project: **[clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon)**.
+> It reads the OAuth token Claude Code already stored and delivers your usage to
+> the device. (It also drives the USB [Clawdmeter](https://github.com/giovi321/clawdmeter-win) — one tool, three transports: serial / HTTP push / HTTP serve.)
+
+1. On the PC that runs Claude Code:
 
    ```sh
-   cd daemon
+   git clone https://github.com/giovi321/clawdmeter-daemon
+   cd clawdmeter-daemon
    pip install -r requirements.txt
-   python smalltv_usage_daemon.py          # http://0.0.0.0:8787/
+   # push to the SmallTV (works even behind Wi-Fi client isolation):
+   python clawdmeter_daemon.py --push-to <smalltv-ip-or-hostname>
+   # ...or serve and let the device pull:
+   python clawdmeter_daemon.py --serve          # http://0.0.0.0:8787/
    ```
 
-   On **Windows** it runs with a **system-tray icon** (the mascot): double-click
-   `daemon/start-daemon.bat` to start it silently now, or `daemon/install.bat` to
-   auto-start it at login. Full details and the response contract are in
-   **[`daemon/`](daemon/README.md)**. The same daemon is also maintained as the
-   shared **[clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon)**
-   (serial / HTTP push / HTTP serve, one tool for both the SmallTV and the
-   USB Clawdmeter).
+   On **Windows** it runs with a **system-tray icon** (the mascot) and can
+   auto-start at login — pick the transport from its menu. See the
+   [clawdmeter-daemon README](https://github.com/giovi321/clawdmeter-daemon) for
+   tray/autostart and a durable login token.
 
-2. In the web UI → **Display → Mode → Claude usage**, set **Usage URL** to
-   `http://<that-pc-ip>:8787/` and **Save**.
+2. In the web UI → **Display → Mode → Claude usage**. For **push**, leave the
+   **Usage URL** blank; for **serve/pull**, set it to `http://<that-pc-ip>:8787/`.
+   **Save**.
 
-The device only ever pulls a few percentages over your LAN; the token never
+The device only ever receives a few percentages over your LAN; the token never
 leaves your machine. The mascot animations are a curated subset of the
 [claudepix](https://claudepix.vercel.app) pixel‑art set, re‑rendered on the
 ST7789.
@@ -275,9 +282,11 @@ src/
   Mascot.*          mascot animation state machine + burn-rate mood tracker
   mascot_frames.h   generated PROGMEM pixel-art frames (tools/extract_mascot.py)
 tools/              extract_mascot.py — regenerates mascot_frames.h from the source
-daemon/             local HTTP daemon that serves Claude usage to the device
 n8n/                webhook contract + importable workflow
 ```
+
+The PC-side usage daemon lives in its own repo:
+[clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon).
 
 Footprint: ~574 KB flash (of 1 MB) and ~51 % RAM at boot — plenty of headroom for
 OTA (which needs room for two sketch copies). The mascot frame data (~33 KB) lives

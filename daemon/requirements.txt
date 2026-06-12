@@ -1,4 +1,0 @@
-httpx>=0.27
-# Tray icon (Windows/macOS/Linux). Omit these if you only ever run --no-tray.
-pystray>=0.19
-Pillow>=10.0
