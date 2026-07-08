@@ -8,6 +8,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# The release-attach step needs write access to create/update the release asset.
+permissions:
+  contents: write
+
 jobs:
   firmware:
     runs-on: ubuntu-latest
