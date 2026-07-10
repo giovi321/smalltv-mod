@@ -8,7 +8,7 @@ The three board targets share one codebase and build from [PlatformIO](https://p
 ```bash
 pio run -e smalltv                 # ESP8266
 pio run -e smalltv_c2              # ESP32-C2
-pio run -e smalltv_esp32           # NM-TV-154 (classic ESP32, experimental)
+pio run -e smalltv_esp32           # NM-TV-154 (classic ESP32)
 pio run -e smalltv_c2 -t upload    # build + flash the C2 over USB-C
 pio device monitor -e smalltv_c2   # serial logs @ 115200
 ```

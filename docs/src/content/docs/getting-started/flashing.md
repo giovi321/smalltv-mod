@@ -57,9 +57,9 @@ With a source checkout, `pio run -e smalltv_c2 -t upload` does the same thing.
 Use the system esptool, not the one bundled with PlatformIO. The bundled version hangs entering download mode on this board's CH340C. The `smalltv_c2` PlatformIO env is configured to call the system esptool for uploads for this reason.
 :::
 
-## NM-TV-154 (classic ESP32), experimental
+## NM-TV-154 (classic ESP32)
 
-Same procedure as the ESP32-C2, with `--chip esp32`. This target is untested on hardware, so treat the first flash as a test and report the result on [issue #1](https://github.com/giovi321/smalltv-mod/issues/1). Build the image from source with `pio run -e smalltv_esp32`; no prebuilt image is published yet.
+Same procedure as the ESP32-C2, with `--chip esp32`. Build the image from source with `pio run -e smalltv_esp32`; no prebuilt image is published yet.
 
 ### Back up the stock image first
 

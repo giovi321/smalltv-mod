@@ -19,9 +19,7 @@
 
 The GeekMagic SmallTV is a cheap desk gadget: a little cube with a 1.54" colour screen, an ESP inside, and a USB-C port. This firmware throws away the stock apps and turns it into three things you actually watch. It shows a **stock and crypto ticker** with prices, change, and a sparkline. It flips into a **Claude usage meter** with an animated mascot and your 5-hour and 7-day usage bars. And it becomes a **live plane radar** centred on your location, pulled from a free public feed. One image carries all three; you switch between them in a built-in web UI, and you update over WiFi.
 
-This firmware builds for three boards from one codebase. The original SmallTV runs an **ESP8266**; a second version sold under the same "smart weather clock" look uses an **ESP32-C2 (ESP8684)** instead. A third build targets the **NMMiner NM-TV-154** (PCB marked "NM-TV-Miner"), a classic-ESP32 BTC lottery miner in the same cube with the same screen. Pick yours below.
-
-> The NM-TV-154 target is new and untested on hardware. If you own one, flash a test build and report what you see on [issue #1](https://github.com/giovi321/smalltv-mod/issues/1) so the pin map and colour order can be confirmed.
+This firmware builds for three boards from one codebase. The original SmallTV runs an **ESP8266**; a second version sold under the same "smart weather clock" look uses an **ESP32-C2 (ESP8684)** instead. A third build targets the **NMMiner NM-TV-154** (PCB marked "NM-TV-Miner"), a classic-ESP32 BTC lottery miner in the same cube with the same screen, confirmed working by a community tester in [issue #1](https://github.com/giovi321/smalltv-mod/issues/1). Pick yours below.
 
 <p align="center">
   <img src="docs/public/assets/screen.svg" alt="The SmallTV running its three modes: stock ticker, Claude usage, and plane radar" width="900" />
@@ -35,7 +33,7 @@ Check the board before you build, because the variants flash differently.
 |---|---|---|---|
 | Photo | <img src="docs/public/assets/product-8266.png" alt="The SmallTV (ESP8266)" width="240"> | <img src="docs/public/assets/product-c2.png" alt="The SmallTV (ESP32-C2)" width="240"> | no photo yet |
 | MCU | ESP-12F (ESP8266), 4 MB flash | ESP32-C2 / ESP8684, 4 MB flash | ESP32-WROOM-32E, 4 MB flash |
-| Build env | `smalltv` | `smalltv_c2` | `smalltv_esp32` (experimental) |
+| Build env | `smalltv` | `smalltv_c2` | `smalltv_esp32` |
 | Display | 1.54" 240×240 IPS ST7789 | same panel, RGB order | same panel |
 | Flashing | OTA from the stock web UI, or UART header | USB-C via the onboard CH340C (esptool) | USB via esptool |
 | Tell-tale | ESP8266 module, no USB-serial chip | CH340C chip next to the USB-C port | PCB reads "NM-TV-Miner" |
@@ -75,7 +73,7 @@ python -m esptool --chip esp32c2 --port COM3 read_flash 0x0 0x400000 stock-backu
 python -m esptool --chip esp32c2 --port COM3 --baud 921600 write_flash 0x0 firmware.factory.bin
 ```
 
-**NM-TV-154 (ESP32).** Experimental. Flash over USB with esptool the same way as the C2, with `--chip esp32` and the `smalltv_esp32` build's `firmware.factory.bin`. Back up the stock image first (`read_flash 0x0 0x400000 stock-backup.bin`). Build the image from source (`pio run -e smalltv_esp32`) and report results on [issue #1](https://github.com/giovi321/smalltv-mod/issues/1).
+**NM-TV-154 (ESP32).** Flash over USB with esptool the same way as the C2, with `--chip esp32` and the `smalltv_esp32` build's `firmware.factory.bin`. Back up the stock image first (`read_flash 0x0 0x400000 stock-backup.bin`). Build the image from source with `pio run -e smalltv_esp32`; no prebuilt image is published yet.
 
 After the first flash, every board updates from the browser under the web UI's Update tab.
 
@@ -105,7 +103,7 @@ Requires [PlatformIO](https://platformio.org/). Pick the env for your board:
 ```bash
 pio run -e smalltv                 # ESP8266
 pio run -e smalltv_c2              # ESP32-C2
-pio run -e smalltv_esp32           # NM-TV-154 (classic ESP32, experimental)
+pio run -e smalltv_esp32           # NM-TV-154 (classic ESP32)
 pio run -e smalltv_c2 -t upload    # build + flash the C2 over USB-C
 pio device monitor -e smalltv_c2   # serial logs @ 115200
 ```

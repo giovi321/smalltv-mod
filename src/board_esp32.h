@@ -4,8 +4,8 @@
 //
 // Pin map taken from the vendor's own custom-firmware guide (TFT_eSPI User_Setup
 // values): https://www.nmminer.com/2026/03/02/how-to-develop-nm-tv-custom-firmware/
-// NOT yet verified on hardware — this target is being brought up with a community
-// tester (issue #1). RGB-vs-BGR colour order is the main open question.
+// Verified on hardware by a community tester (issue #1): display, RGB colour
+// order, backlight PWM, and the 4 MB flash layout all confirmed working.
 #pragma once
 
 #define TFT_SCLK   14
@@ -20,8 +20,7 @@
 #define TFT_PWR_PIN 21
 #define TFT_PWR_ON  LOW
 
-// Panel colour order: unverified on this unit. Both siblings are RGB, so start
-// there; if red and blue come out swapped on hardware, set this to 1.
+// Panel colour order: verified RGB on hardware (issue #1), like the other boards.
 #define TFT_BGR     0
 
 // Backlight is active-low (vendor guide: TFT_BACKLIGHT_ON LOW). Runtime-overridable.

@@ -5,7 +5,7 @@ description: The three supported boards (ESP8266, ESP32-C2, and the classic-ESP3
 
 Three boards wear the same cube. Confirm which one you have before you flash it, because they use different chips and flash differently. The screen is the same 1.54" 240×240 ST7789 IPS panel on all of them.
 
-The GeekMagic SmallTV is a 45 × 35 × 40 mm cube with a 28 × 28 mm colour screen and a USB-C port for power. It sells for about 6 to 8 EUR on AliExpress. A second version of the hardware, sold under the same "smart weather clock" listing, swaps the ESP8266 for an ESP32-C2 but keeps the case and screen. A third device, the NMMiner NM-TV-154 BTC lottery miner, uses the same cube and screen with a classic ESP32 inside; support for it is experimental.
+The GeekMagic SmallTV is a 45 × 35 × 40 mm cube with a 28 × 28 mm colour screen and a USB-C port for power. It sells for about 6 to 8 EUR on AliExpress. A second version of the hardware, sold under the same "smart weather clock" listing, swaps the ESP8266 for an ESP32-C2 but keeps the case and screen. A third device, the NMMiner NM-TV-154 BTC lottery miner, uses the same cube and screen with a classic ESP32 inside.
 
 ## Tell them apart
 
@@ -75,16 +75,16 @@ The ESP32-C2 routes SPI through the GPIO matrix, so the display pins are arbitra
 
 The pins are set in `src/board_esp32c2.h`. Two panel quirks are worth knowing: the display needs SPI mode 3, and its colour order is RGB. Both are handled in `src/Gfx.cpp`. If red and blue look swapped on your unit, flip `TFT_BGR` in the board header and reflash.
 
-## NM-TV-154 (classic ESP32), experimental
+## NM-TV-154 (classic ESP32)
 
 | | |
 |---|---|
 | MCU | ESP32-WROOM-32E (ESP32-D0WD-V3), 40 MHz crystal, 4 MB flash |
-| Display | 1.54" 240×240 IPS ST7789, SPI |
+| Display | 1.54" 240×240 IPS ST7789, SPI, RGB colour order |
 | Sold as | NMMiner NM-TV-154 BTC lottery miner, PCB marked "NM-TV-Miner" |
 | Build env | `smalltv_esp32` |
 
-This target is untested on hardware. The pin map comes from [NMMiner's own custom-firmware guide](https://www.nmminer.com/2026/03/02/how-to-develop-nm-tv-custom-firmware/) for the device, so it should be right, but nobody has confirmed a working screen yet. If you own one, flash a test build and report what you see on [issue #1](https://github.com/giovi321/smalltv-mod/issues/1). The open questions are the colour order (RGB vs BGR) and the backlight behaviour.
+The pin map comes from [NMMiner's own custom-firmware guide](https://www.nmminer.com/2026/03/02/how-to-develop-nm-tv-custom-firmware/) for the device and is confirmed working on hardware by a community tester in [issue #1](https://github.com/giovi321/smalltv-mod/issues/1): display, colours, backlight PWM, and the 4 MB flash layout all check out.
 
 ### Pin map
 

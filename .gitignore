@@ -31,3 +31,5 @@ daemon/run_daemon.vbs
 Thumbs.db
 *.swp
 *~
+
+.playwright-mcp/
