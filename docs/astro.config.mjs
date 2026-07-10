@@ -9,7 +9,7 @@ export default defineConfig({
     starlight({
       title: 'smalltv-mod',
       description:
-        'Open-source firmware for the GeekMagic SmallTV (ESP8266) and its ESP32-C2 knockoff: ticker, Claude usage meter, and plane radar.',
+        'Open-source firmware for the GeekMagic SmallTV in its ESP8266 and ESP32-C2 versions: ticker, Claude usage meter, and plane radar.',
       logo: {
         src: './src/assets/logo.svg',
         replacesTitle: false,

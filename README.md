@@ -19,7 +19,7 @@
 
 The GeekMagic SmallTV is a cheap desk gadget: a little cube with a 1.54" colour screen, an ESP inside, and a USB-C port. This firmware throws away the stock apps and turns it into three things you actually watch. It shows a **stock and crypto ticker** with prices, change, and a sparkline. It flips into a **Claude usage meter** with an animated mascot and your 5-hour and 7-day usage bars. And it becomes a **live plane radar** centred on your location, pulled from a free public feed. One image carries all three; you switch between them in a built-in web UI, and you update over WiFi.
 
-There are two versions of this hardware in the wild, and this firmware builds for both. The original SmallTV runs an ESP8266. A cheaper knockoff sold under the same "smart weather clock" look uses an **ESP32-C2 (ESP8684)** instead. Same screen, different chip, so the firmware ships two build targets from one codebase. Pick yours below.
+There are two versions of this hardware in the wild, and this firmware builds for both. One runs an **ESP8266**; a second version sold under the same "smart weather clock" look uses an **ESP32-C2 (ESP8684)** instead. Same screen, different chip, so the firmware ships two build targets from one codebase. Pick yours below.
 
 <p align="center">
   <img src="docs/public/assets/screen.svg" alt="The SmallTV running its three modes: stock ticker, Claude usage, and plane radar" width="900" />
@@ -29,7 +29,7 @@ There are two versions of this hardware in the wild, and this firmware builds fo
 
 Check the board before you build, because the two variants flash differently.
 
-| | Original SmallTV | Knockoff |
+| | SmallTV (ESP8266) | SmallTV (ESP32-C2) |
 |---|---|---|
 | MCU | ESP-12F (ESP8266), 4 MB flash | ESP32-C2 / ESP8684, 4 MB flash |
 | Build env | `smalltv` | `smalltv_c2` |
@@ -37,10 +37,11 @@ Check the board before you build, because the two variants flash differently.
 | Flashing | OTA from the stock web UI, or UART header | USB-C via the onboard CH340C (esptool) |
 | Tell-tale | ESP8266 module, no USB-serial chip | CH340C chip next to the USB-C port |
 
-If your board has a **CH340C** chip beside the USB-C port and the main chip reads **ESP8684**, you have the ESP32-C2 knockoff. Full teardown photos and pin maps are in [Hardware and variants](https://giovi321.github.io/smalltv-mod/getting-started/hardware/).
+If your board has a **CH340C** chip beside the USB-C port and the main chip reads **ESP8684**, you have the ESP32-C2 model. Full teardown photos and pin maps are in [Hardware and variants](https://giovi321.github.io/smalltv-mod/getting-started/hardware/).
 
 <p align="center">
-  <img src="docs/public/assets/product-c2.png" alt="The ESP32-C2 SmallTV knockoff in two colours" width="640" />
+  <img src="docs/public/assets/product-8266.png" alt="The SmallTV (ESP8266)" width="380" />
+  <img src="docs/public/assets/product-c2.png" alt="The SmallTV (ESP32-C2)" width="380" />
 </p>
 
 ## What it does
@@ -64,9 +65,9 @@ Or [build it yourself](#building-from-source).
 
 The right method depends on your board. The steps below are the short version; the [Flashing guide](https://giovi321.github.io/smalltv-mod/getting-started/flashing/) covers recovery, backups, and troubleshooting.
 
-**Original SmallTV (ESP8266).** The stock firmware exposes an OTA updater, so you can install this without opening the device. Find its IP, browse to `http://<device-ip>/update`, and upload `smalltv-mod-firmware.bin`. Back up the stock image first if you might want it back.
+**SmallTV (ESP8266).** The stock firmware exposes an OTA updater, so you can install this without opening the device. Find its IP, browse to `http://<device-ip>/update`, and upload `smalltv-mod-firmware.bin`. Back up the stock image first if you might want it back.
 
-**Knockoff (ESP32-C2).** Flash over the USB-C cable with esptool, which talks to the onboard CH340C. Auto-reset works, so no button is needed. Back up the stock image first, then write the build:
+**SmallTV (ESP32-C2).** Flash over the USB-C cable with esptool, which talks to the onboard CH340C. Auto-reset works, so no button is needed. Back up the stock image first, then write the build:
 
 ```bash
 # back up the original 4 MB image first

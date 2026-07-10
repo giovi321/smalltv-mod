@@ -5,22 +5,24 @@ description: The two SmallTV board variants (ESP8266 and ESP32-C2), how to tell 
 
 Two boards wear the same cube. Confirm which one you have before you flash it, because they use different chips and flash differently. The screen is the same 1.54" 240×240 ST7789 IPS panel on both.
 
-The GeekMagic SmallTV is a 45 × 35 × 40 mm cube with a 28 × 28 mm colour screen and a USB-C port for power. It sells for about 6 to 8 EUR on AliExpress. A cheaper knockoff, sold under the same "smart weather clock" listing, swaps the ESP8266 for an ESP32-C2 but keeps the case and screen.
+The GeekMagic SmallTV is a 45 × 35 × 40 mm cube with a 28 × 28 mm colour screen and a USB-C port for power. It sells for about 6 to 8 EUR on AliExpress. A second version of the hardware, sold under the same "smart weather clock" listing, swaps the ESP8266 for an ESP32-C2 but keeps the case and screen.
 
 ## Tell them apart
 
 Look at the board through the case vents, or open it (four clips, no glue).
 
-- **Original SmallTV**: an ESP8266 module, no separate USB-serial chip. Flashes over the air.
-- **Knockoff**: a bare **ESP8684** chip (that is the ESP32-C2) plus a **CH340C** USB-serial chip next to the USB-C port. Flashes over USB-C.
+- **SmallTV (ESP8266)**: an ESP8266 module, no separate USB-serial chip. Flashes over the air.
+- **SmallTV (ESP32-C2)**: a bare **ESP8684** chip (that is the ESP32-C2) plus a **CH340C** USB-serial chip next to the USB-C port. Flashes over USB-C.
 
-The two chips on the knockoff are the giveaway. The main SoC is marked `ESP8684`, and the small 16-pin chip by the USB-C port is the `CH340C`.
+The two chips on the ESP32-C2 board are the giveaway. The main SoC is marked `ESP8684`, and the small 16-pin chip by the USB-C port is the `CH340C`.
 
-![The ESP8684 (ESP32-C2) main chip on the knockoff board](/smalltv-mod/assets/board-c2-esp8684.jpg)
+![The ESP8684 (ESP32-C2) main chip on the ESP32-C2 board](/smalltv-mod/assets/board-c2-esp8684.jpg)
 
 ![The CH340C USB-serial chip next to the USB-C port](/smalltv-mod/assets/board-c2-ch340c.jpg)
 
-## Original SmallTV (ESP8266)
+## SmallTV (ESP8266)
+
+![The SmallTV (ESP8266)](/smalltv-mod/assets/product-8266.png)
 
 | | |
 |---|---|
@@ -43,7 +45,9 @@ Hardware SPI on the ESP8266 uses fixed clock and data pins. The rest are the Sma
 | CS | 15 | boot-strap pin |
 | Backlight | 5 | PWM, active-low |
 
-## Knockoff (ESP32-C2 / ESP8684)
+## SmallTV (ESP32-C2 / ESP8684)
+
+![The SmallTV (ESP32-C2)](/smalltv-mod/assets/product-c2.png)
 
 | | |
 |---|---|

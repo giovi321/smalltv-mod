@@ -7,7 +7,7 @@ Flash the method that matches your board. The ESP8266 installs over the air from
 
 Get the firmware image from the [Actions tab](https://github.com/giovi321/smalltv-mod/actions) (latest `build` run) or the [Releases page](https://github.com/giovi321/smalltv-mod/releases), or [build it yourself](/smalltv-mod/reference/building/).
 
-## Original SmallTV (ESP8266)
+## SmallTV (ESP8266)
 
 ### Over the air, from the stock web UI
 
@@ -31,7 +31,7 @@ esptool.py --port COM5 read_flash 0x0 0x400000 stock-backup.bin
 esptool.py --port COM5 write_flash 0x0 smalltv-mod-firmware.bin
 ```
 
-## Knockoff (ESP32-C2 / ESP8684)
+## SmallTV (ESP32-C2 / ESP8684)
 
 The ESP32-C2 has no OTA path from the stock firmware, so the first install goes over the USB-C cable. The onboard CH340C handles it with auto-reset, so no button is needed. You need a system Python with esptool (`pip install esptool`).
 
