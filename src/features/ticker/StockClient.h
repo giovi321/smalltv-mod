@@ -1,4 +1,5 @@
-// StockClient.h — fetches ticker data from the configured webhook
+// StockClient.h — fetches ticker data from the configured source
+// (Yahoo Finance, cash.ch, or a custom webhook)
 #pragma once
 #include <Arduino.h>
 #include "Settings.h"

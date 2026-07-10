@@ -31,7 +31,8 @@ void TickerSettings::setDefaults() {
 }
 
 void TickerSettings::toJson(JsonObject o) const {
-  o["source"]         = (source == SRC_YAHOO) ? "yahoo" : "webhook";
+  o["source"]         = (source == SRC_YAHOO) ? "yahoo"
+                      : (source == SRC_CASH)  ? "cash" : "webhook";
   o["webhookUrl"]     = webhookUrl;
   o["range"]          = range;
   o["points"]         = points;
@@ -57,7 +58,8 @@ void TickerSettings::toJson(JsonObject o) const {
 void TickerSettings::fromJson(JsonObjectConst o) {
   if (o["source"].is<const char*>()) {
     String src = o["source"].as<String>();
-    source = src.equalsIgnoreCase("yahoo") ? SRC_YAHOO : SRC_WEBHOOK;
+    source = src.equalsIgnoreCase("yahoo") ? SRC_YAHOO
+           : src.equalsIgnoreCase("cash")  ? SRC_CASH : SRC_WEBHOOK;
   }
   if (o["webhookUrl"].is<const char*>()) webhookUrl = o["webhookUrl"].as<String>();
   if (o["range"].is<const char*>())      range = o["range"].as<String>();

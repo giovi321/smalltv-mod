@@ -12,7 +12,7 @@
 // Firmware identity
 // ---------------------------------------------------------------------------
 #define FW_NAME     "smalltv-mod"
-#define FW_VERSION  "2.2.0"
+#define FW_VERSION  "2.3.0"
 
 // Project / update references (shown in the web UI; used by the GitHub self-update)
 #define REPO_URL      "https://github.com/giovi321/smalltv-mod"
@@ -42,7 +42,7 @@
 // Limits (bound RAM usage on the ESP8266)
 // ---------------------------------------------------------------------------
 #define MAX_SYMBOLS       8    // max tickers in the rotation
-#define MAX_SYMBOL_LEN   16    // e.g. "BTC-USD", "EURUSD=X"
+#define MAX_SYMBOL_LEN   24    // e.g. "BTC-USD", cash.ch key "147478611-246-333"
 #define MAX_NAME_LEN     20    // friendly name shown on screen
 #define MAX_SPARK_POINTS 60    // sparkline samples kept per symbol
 #define MAX_URL_LEN     200    // webhook base URL
@@ -82,9 +82,12 @@
 // Data source (stock mode)
 //   0 = custom webhook (n8n / Node-RED / your own HTTP endpoint)
 //   1 = Yahoo Finance, fetched directly by the device (no backend needed)
+//   2 = cash.ch, fetched directly by the device (Swiss instruments, incl.
+//       off-exchange structured products that Yahoo doesn't carry)
 // ---------------------------------------------------------------------------
 #define SRC_WEBHOOK  0
 #define SRC_YAHOO    1
+#define SRC_CASH     2
 #define DEFAULT_SOURCE  SRC_YAHOO            // works out of the box, no server
 
 // Yahoo Finance public chart endpoint. A browser-like User-Agent is required —
@@ -96,6 +99,16 @@
 #define YAHOO_CHART_HOST2 "query2.finance.yahoo.com"
 #define YAHOO_CHART_PATH  "/v8/finance/chart/"
 #define YAHOO_USER_AGENT  "Mozilla/5.0 (SmallTV)"
+
+// cash.ch public GraphQL endpoint. The device sends two small hand-written
+// GraphQL queries per symbol as plain GETs (?query=...): a ~200 B quote and a
+// slim daily-close series for the sparkline. No API key, no cookies, no
+// required headers, and the server negotiates 2 KB TLS fragments (MFLN), so
+// the same bounded BearSSL buffer as Yahoo works. The symbol is the cash.ch
+// listing key `valor-marketId-currencyId` (see the docs for how to find it).
+#define CASH_GQL_HOST   "www.cash.ch"
+#define CASH_GQL_PATH   "/_/api/graphql/prod"
+#define CASH_USER_AGENT "Mozilla/5.0 (SmallTV)"
 
 // ---------------------------------------------------------------------------
 // Plane radar (MODE_RADAR)

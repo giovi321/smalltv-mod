@@ -8,9 +8,19 @@
 
 The SmallTV **pulls** data — it periodically calls your webhook once per ticker.
 Any backend that speaks the small JSON contract below works (n8n, Node-RED, a
-Flask app, a static file…). The included [`smalltv-stock-webhook.json`](smalltv-stock-webhook.json)
-is a ready-to-import n8n workflow that sources data from Yahoo Finance — the same
-endpoint the firmware now calls on its own.
+Flask app, a static file…). Two ready-to-import n8n workflows are included:
+
+- [`smalltv-stock-webhook.json`](smalltv-stock-webhook.json) sources everything
+  from Yahoo Finance — the same endpoint the firmware calls on its own.
+- [`smalltv-stock-webhook-cash.json`](smalltv-stock-webhook-cash.json) routes
+  cash.ch listing keys (symbols like `147478611-246-333`) to cash.ch's public
+  GraphQL API and everything else to Yahoo, so Yahoo tickers and Swiss
+  instruments mix in one rotation. The firmware can also query cash.ch
+  directly (see [Data sources](https://giovi321.github.io/smalltv-mod/reference/data-sources/)),
+  but the built-in source setting is global — the webhook variant is how you mix.
+
+Import one or the other — both use the webhook path `stock`, so n8n will refuse
+to activate them side by side.
 
 ## Request (device → your webhook)
 

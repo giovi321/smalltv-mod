@@ -1,0 +1,151 @@
+{
+  "name": "SmallTV Stock Webhook (Yahoo + cash.ch)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "stock",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "smalltv-stock",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read what the SmallTV asked for and build the source URLs.\n// Symbols that look like a cash.ch listing key (valor-marketId-currencyId,\n// e.g. 147478611-246-333) are routed to cash.ch; everything else goes to Yahoo.\nconst q = $input.first().json.query || {};\nconst symbol = (q.symbol || 'AAPL').toString().trim();\nconst range = (q.range || '1d').toString().toLowerCase();\nconst points = Math.max(0, parseInt(q.points || '48')) || 48;\n\nconst isCash = /^\\d+-\\d+-\\d+$/.test(symbol);\n\n// cash.ch: daily closes to request per timeframe. The server trims to the\n// newest N inside a fixed catch-all from/to window; history holds ~6 months.\nconst daysMap = { '1d':2, '5d':5, '1mo':22, '3mo':65, '6mo':130, 'ytd':130, '1y':260, '2y':400, '5y':400, 'max':400 };\nconst days = daysMap[range] || 130;\n\nconst gql = 'https://www.cash.ch/_/api/graphql/prod?query=';\nconst quoteQ = `query{quoteList(listingKeys:\"${symbol}\"){quoteList{edges{node{...on Instrument{lval iNetVperprV perfPercentage mCur mShortName}}}}}}`;\nconst chartQ = `query{integration{solid{chart(listingKey:\"${symbol}\" frequency:\"1d\" from:\"2020-01-01\" to:\"2100-01-01\" max:\"${days}\"){timeserie{prices{close}}}}}}`;\n\n// Yahoo: map the chart timeframe to a sensible candle interval.\nconst intervalMap = { '1d':'5m', '5d':'30m', '1mo':'1d', '3mo':'1d', '6mo':'1d', 'ytd':'1d', '1y':'1wk', '2y':'1wk', '5y':'1mo', 'max':'1mo' };\nconst interval = intervalMap[range] || '1d';\n\nreturn [{ json: {\n  symbol, range, points, isCash,\n  cashQuoteUrl: gql + encodeURIComponent(quoteQ),\n  cashChartUrl: gql + encodeURIComponent(chartQ),\n  yahooUrl: `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=${interval}`\n} }];"
+      },
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "Prepare",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              "leftValue": "={{ $json.isCash }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "66666666-6666-4666-8666-666666666666",
+      "name": "Is cash.ch key?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [620, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Prepare').first().json.cashQuoteUrl }}",
+        "options": {
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "id": "77777777-7777-4777-8777-777777777777",
+      "name": "Cash Quote",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [820, 180],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Prepare').first().json.cashChartUrl }}",
+        "options": {
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "id": "88888888-8888-4888-8888-888888888888",
+      "name": "Cash Chart",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1020, 180],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform the two cash.ch GraphQL payloads into the SmallTV contract.\n// Every numeric quote field is a JSON string, so parseFloat is mandatory:\n// the firmware rejects string-encoded numbers.\nconst p = $('Prepare').first().json;\nconst quote = $('Cash Quote').first().json;\nlet chart = {};\ntry { chart = $('Cash Chart').first().json; } catch (e) {}\n\nlet node = null;\ntry { node = quote.data.quoteList.quoteList.edges[0].node; } catch (e) {}\n\nconst price = node && node.lval != null ? parseFloat(node.lval) : null;\nconst change = node && node.iNetVperprV != null ? parseFloat(node.iNetVperprV) : null;\nconst changePct = node && node.perfPercentage != null ? parseFloat(node.perfPercentage) : null;\n\nlet closes = [];\ntry { closes = chart.data.integration.solid.chart.timeserie.prices.map(x => x.close).filter(v => v != null); } catch (e) {}\n\nfunction downsample(arr, n) {\n  if (n <= 0 || arr.length <= n) return arr;\n  const out = [];\n  const step = (arr.length - 1) / (n - 1);\n  for (let i = 0; i < n; i++) out.push(arr[Math.round(i * step)]);\n  return out;\n}\nconst round = (v, d) => v == null || isNaN(v) ? null : Math.round(v * Math.pow(10, d)) / Math.pow(10, d);\nconst spark = downsample(closes, p.points).map(v => round(v, 4));\n\nconst cur = { USD:'$', EUR:'\\u20ac', GBP:'\\u00a3', JPY:'\\u00a5', CHF:'CHF ' };\n\nreturn [{ json: {\n  symbol: p.symbol,\n  name: (node && node.mShortName) || p.symbol,\n  price: round(price, 4),\n  currency: node && node.mCur ? (cur[node.mCur] || node.mCur + ' ') : '',\n  change: round(change, 4),\n  changePct: round(changePct, 2),\n  spark,\n  range: p.range.toUpperCase(),\n  ok: price != null && !isNaN(price)\n}}];"
+      },
+      "id": "99999999-9999-4999-8999-999999999999",
+      "name": "Map Cash",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1220, 180]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Prepare').first().json.yahooUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "User-Agent", "value": "Mozilla/5.0 (SmallTV)" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "33333333-3333-4333-8333-333333333333",
+      "name": "Yahoo Finance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [820, 420],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform the Yahoo chart payload into the SmallTV contract.\nconst p = $('Prepare').first().json;\nconst r = $input.first().json;\nconst res = r && r.chart && r.chart.result && r.chart.result[0];\n\nif (!res || !res.meta) {\n  return [{ json: { symbol: p.symbol, ok: false } }];\n}\nconst meta = res.meta;\nconst price = meta.regularMarketPrice;\nconst prev = (meta.chartPreviousClose != null ? meta.chartPreviousClose : meta.previousClose);\n\nlet closes = [];\ntry { closes = res.indicators.quote[0].close.filter(v => v != null); } catch (e) {}\n\nfunction downsample(arr, n) {\n  if (n <= 0 || arr.length <= n) return arr;\n  const out = [];\n  const step = (arr.length - 1) / (n - 1);\n  for (let i = 0; i < n; i++) out.push(arr[Math.round(i * step)]);\n  return out;\n}\nconst round = (v, d) => v == null ? null : Math.round(v * Math.pow(10, d)) / Math.pow(10, d);\nconst spark = downsample(closes, p.points).map(v => round(v, 4));\n\nconst change = (price != null && prev != null) ? price - prev : null;\nconst changePct = (change != null && prev) ? (change / prev * 100) : null;\nconst cur = { USD:'$', EUR:'\\u20ac', GBP:'\\u00a3', JPY:'\\u00a5', CHF:'CHF ' };\n\nreturn [{ json: {\n  symbol: p.symbol,\n  name: meta.shortName || meta.symbol || p.symbol,\n  price: round(price, 4),\n  currency: cur[meta.currency] || (meta.currency || ''),\n  change: round(change, 4),\n  changePct: round(changePct, 2),\n  spark,\n  range: p.range.toUpperCase(),\n  ok: price != null\n}}];"
+      },
+      "id": "44444444-4444-4444-8444-444444444444",
+      "name": "Map Yahoo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1020, 420]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "55555555-5555-4555-8555-555555555555",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1440, 300]
+    }
+  ],
+  "connections": {
+    "Webhook":         { "main": [[{ "node": "Prepare",         "type": "main", "index": 0 }]] },
+    "Prepare":         { "main": [[{ "node": "Is cash.ch key?", "type": "main", "index": 0 }]] },
+    "Is cash.ch key?": { "main": [
+      [{ "node": "Cash Quote",    "type": "main", "index": 0 }],
+      [{ "node": "Yahoo Finance", "type": "main", "index": 0 }]
+    ] },
+    "Cash Quote":      { "main": [[{ "node": "Cash Chart", "type": "main", "index": 0 }]] },
+    "Cash Chart":      { "main": [[{ "node": "Map Cash",   "type": "main", "index": 0 }]] },
+    "Map Cash":        { "main": [[{ "node": "Respond",    "type": "main", "index": 0 }]] },
+    "Yahoo Finance":   { "main": [[{ "node": "Map Yahoo",  "type": "main", "index": 0 }]] },
+    "Map Yahoo":       { "main": [[{ "node": "Respond",    "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

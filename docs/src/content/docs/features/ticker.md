@@ -25,8 +25,10 @@ Add up to 8 tickers in the **Symbols** tab. The `symbol` field is the Yahoo tick
 | Crypto | `BTC-USD`, `ETH-EUR` |
 | FX | `EURUSD=X`, `EURCHF=X` |
 
+With the cash.ch source the `symbol` field takes a cash.ch listing key instead (`valor-marketId-currencyId`, e.g. `147478611-246-333`), which covers Swiss structured products and AMCs that Yahoo does not list. [Data sources](/smalltv-mod/reference/data-sources/) explains how to find a listing key.
+
 ## Timing and data
 
 Two intervals control the display: how often each symbol is shown (rotation) and how often data is refreshed (poll). Both are set in the Display tab. The default poll of 120 seconds is fine for 8 symbols.
 
-Where the prices come from is a separate choice. By default the device fetches Yahoo Finance directly over HTTPS with no backend. You can also point it at your own webhook. Both are covered in [Data sources](/smalltv-mod/reference/data-sources/).
+Where the prices come from is a separate choice. By default the device fetches Yahoo Finance directly over HTTPS with no backend. It can fetch cash.ch directly the same way for Swiss instruments, or call your own webhook. All three are covered in [Data sources](/smalltv-mod/reference/data-sources/).

@@ -100,6 +100,47 @@ static void yahooCurrency(const char* code, char* out, size_t n) {
   snprintf(out, n, "%s ", code);     // "CHF 79.73", "EUR 1.08", ...
 }
 
+// ---- URL builders: cash.ch --------------------------------------------------
+// cash.ch answers hand-written GraphQL sent as a plain GET ?query=... — no
+// auth, no cookies, no required headers (see config.h). The symbol is the
+// cash.ch listing key (valor-marketId-currencyId).
+
+// Daily closes to request per chart timeframe. The server trims to the newest
+// N (max=N) inside a fixed catch-all from/to window, so the device needs no
+// clock; asking for more than cash.ch stores (~6 months) just returns it all.
+static uint16_t cashRangeDays(const String& r) {
+  if (r == "1d")  return 2;          // >=2 points so a line can be drawn
+  if (r == "5d")  return 5;
+  if (r == "1mo") return 22;
+  if (r == "3mo") return 65;
+  if (r == "6mo" || r == "ytd") return 130;
+  if (r == "1y")  return 260;
+  return 400;                        // 2y/5y/max: everything available
+}
+
+static String buildCashUrl(const String& query) {
+  String url = F("https://" CASH_GQL_HOST CASH_GQL_PATH "?query=");
+  url += urlEncode(query.c_str());
+  return url;
+}
+
+static String buildCashQuoteUrl(const char* symbol) {
+  String q = F("query{quoteList(listingKeys:\"");
+  q += symbol;
+  q += F("\"){quoteList{edges{node{...on Instrument{"
+         "lval iNetVperprV perfPercentage mCur mShortName}}}}}}");
+  return buildCashUrl(q);
+}
+
+static String buildCashChartUrl(const Settings& s, const char* symbol) {
+  String q = F("query{integration{solid{chart(listingKey:\"");
+  q += symbol;
+  q += F("\" frequency:\"1d\" from:\"2020-01-01\" to:\"2100-01-01\" max:\"");
+  q += String(cashRangeDays(s.ticker.range));
+  q += F("\"){timeserie{prices{close}}}}}}");
+  return buildCashUrl(q);
+}
+
 // ---- parse: custom webhook contract ---------------------------------------
 static bool parseWebhook(const Settings& s, StockData& d, Stream& stream) {
   // Filter so unexpected/large fields don't blow up the heap.
@@ -255,8 +296,115 @@ static bool parseYahoo(const Settings& s, StockData& d, Stream& stream) {
   return true;
 }
 
+// ---- parse: cash.ch quote ---------------------------------------------------
+// {"data":{"quoteList":{"quoteList":{"edges":[{"node":{"lval":"1086.51",
+//  "iNetVperprV":"7.36","perfPercentage":"0.68","mCur":"USD",...}}]}}}}
+// Numeric fields arrive as JSON *strings*, so read them as text and atof().
+static bool parseCashQuote(const Settings& s, StockData& d, Stream& stream) {
+  JsonDocument filter;
+  JsonObject node =
+      filter["data"]["quoteList"]["quoteList"]["edges"][0]["node"].to<JsonObject>();
+  node["lval"]           = true;   // last value (price)
+  node["iNetVperprV"]    = true;   // absolute day change
+  node["perfPercentage"] = true;   // day change in %
+  node["mCur"]           = true;
+  node["mShortName"]     = true;
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(
+      doc, stream, DeserializationOption::Filter(filter));
+  if (err) return false;
+
+  JsonObjectConst n = doc["data"]["quoteList"]["quoteList"]["edges"][0]["node"];
+  const char* lval = n["lval"] | "";       // empty => unknown key / no fix yet
+  if (!lval[0]) return false;
+  float price = atof(lval);
+  if (isnan(price) || price <= 0) return false;
+  d.price = price;
+
+  yahooCurrency(n["mCur"] | "", d.currency, sizeof(d.currency));
+
+  if (!d.userNamed) {
+    const char* nm = n["mShortName"] | (const char*)d.symbol;
+    if (nm && nm[0]) strlcpy(d.name, nm, MAX_NAME_LEN);
+  }
+
+  const char* chg = n["iNetVperprV"]    | "";
+  const char* pct = n["perfPercentage"] | "";
+  d.hasChange = chg[0] || pct[0];
+  if (d.hasChange) {
+    d.change    = atof(chg);
+    d.changePct = pct[0] ? atof(pct) : 0;
+    if (!pct[0]) {                          // derive % from the absolute change
+      float prev = price - d.change;
+      d.changePct = (prev != 0) ? (d.change / prev * 100.0f) : 0;
+    }
+  }
+
+  String rl = s.ticker.range;
+  rl.toUpperCase();
+  strlcpy(d.rangeLabel, rl.c_str(), sizeof(d.rangeLabel));
+
+  d.valid = true;
+  d.error = false;
+  d.lastOkMs = millis();
+  return true;
+}
+
+// ---- parse: cash.ch daily-close series --------------------------------------
+// {"data":{"integration":{"solid":{"chart":{"timeserie":{"prices":
+//  [{"close":998.45},...]}}}}}} — closes are real JSON numbers here (unlike
+// the quote), oldest -> newest. Downsampling mirrors the Yahoo parser.
+static bool parseCashChart(const Settings& s, StockData& d, Stream& stream) {
+  JsonDocument filter;
+  filter["data"]["integration"]["solid"]["chart"]["timeserie"]["prices"][0]["close"] = true;
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(
+      doc, stream, DeserializationOption::Filter(filter));
+  if (err) return false;
+
+  JsonArrayConst prices =
+      doc["data"]["integration"]["solid"]["chart"]["timeserie"]["prices"];
+  if (prices.isNull()) return false;         // unknown key / empty series
+
+  uint16_t want = s.ticker.points;
+  if (want > MAX_SPARK_POINTS) want = MAX_SPARK_POINTS;
+  if (want < 2) return true;                 // chart not wanted; keep quote data
+
+  uint16_t valid = 0;
+  for (JsonObjectConst p : prices)
+    if (p["close"].is<float>() || p["close"].is<int>()) valid++;
+  if (valid < 2) return false;               // keep the previous sparkline
+
+  d.sparkCount = 0;
+  if (valid <= want) {
+    for (JsonObjectConst p : prices) {
+      if (!p["close"].is<float>() && !p["close"].is<int>()) continue;
+      if (d.sparkCount >= MAX_SPARK_POINTS) break;
+      d.spark[d.sparkCount++] = p["close"].as<float>();
+    }
+  } else {
+    uint16_t i = 0, k = 0;
+    float last = 0;
+    for (JsonObjectConst p : prices) {
+      if (!p["close"].is<float>() && !p["close"].is<int>()) continue;
+      last = p["close"].as<float>();
+      // k-th output maps to valid-index round(k*(valid-1)/(want-1)).
+      uint16_t target =
+          (uint16_t)(((uint32_t)k * (valid - 1) + (want - 1) / 2) / (want - 1));
+      if (i == target && k < want) { d.spark[d.sparkCount++] = last; k++; }
+      i++;
+    }
+    if (d.sparkCount > 0) d.spark[d.sparkCount - 1] = last;  // pin newest
+  }
+  return true;
+}
+
 // ---- one HTTP(S) GET + parse ----------------------------------------------
-static bool fetchUrl(const Settings& s, const String& url, bool yahoo, StockData& d) {
+enum ParseKind : uint8_t { PARSE_WEBHOOK, PARSE_YAHOO, PARSE_CASH_QUOTE, PARSE_CASH_CHART };
+
+static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, StockData& d) {
   bool https = url.startsWith("https://");
 
   std::unique_ptr<NetClient> client;
@@ -264,7 +412,8 @@ static bool fetchUrl(const Settings& s, const String& url, bool yahoo, StockData
     // TLS needs a big contiguous chunk of heap. If we're low, skip this fetch and
     // flag an error instead of letting the TLS allocation fail and reset-loop.
     if (ESP.getFreeHeap() < 16000) return false;
-    // Yahoo TLS records are <=~1.3KB; a 2 KB receive buffer frees heap on ESP8266.
+    // Yahoo sends <=~1.3 KB TLS records and cash.ch negotiates 2 KB MFLN
+    // fragments, so a 2 KB receive buffer frees heap on the ESP8266.
     client.reset(platformMakeSecureClient(2048));
   } else {
     client.reset(new WiFiClient());
@@ -275,9 +424,11 @@ static bool fetchUrl(const Settings& s, const String& url, bool yahoo, StockData
   http.setReuse(false);
   if (!http.begin(*client, url)) return false;
   http.addHeader("Accept", "application/json");
-  if (yahoo) {
+  if (kind == PARSE_YAHOO) {
     http.setUserAgent(F(YAHOO_USER_AGENT));   // empty UA => HTTP 429 from Yahoo
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  } else if (kind != PARSE_WEBHOOK) {
+    http.setUserAgent(F(CASH_USER_AGENT));    // cash.ch requires none; sent to be identifiable
   }
 
   int code = http.GET();
@@ -286,8 +437,13 @@ static bool fetchUrl(const Settings& s, const String& url, bool yahoo, StockData
     return false;
   }
 
-  bool ok = yahoo ? parseYahoo(s, d, http.getStream())
-                  : parseWebhook(s, d, http.getStream());
+  bool ok;
+  switch (kind) {
+    case PARSE_YAHOO:      ok = parseYahoo(s, d, http.getStream());     break;
+    case PARSE_CASH_QUOTE: ok = parseCashQuote(s, d, http.getStream()); break;
+    case PARSE_CASH_CHART: ok = parseCashChart(s, d, http.getStream()); break;
+    default:               ok = parseWebhook(s, d, http.getStream());   break;
+  }
   http.end();
   return ok;
 }
@@ -298,13 +454,28 @@ static bool fetchSymbol(const Settings& s, StockData& d) {
     // A single back-to-back HTTPS fetch occasionally drops on the ESP8266, so
     // retry once on the alternate mirror before giving up (this is what made one
     // symbol intermittently fail while others in the same poll succeeded).
-    if (fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST1, d.symbol), true, d)) return true;
+    if (fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST1, d.symbol), PARSE_YAHOO, d)) return true;
     delay(150);
-    return fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST2, d.symbol), true, d);
+    return fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST2, d.symbol), PARSE_YAHOO, d);
+  }
+
+  if (s.ticker.source == SRC_CASH) {
+    // Quote first (price + day change, ~200 B); retry once for the same
+    // transient-TLS reason as Yahoo. The sparkline comes from a second slim
+    // request whose failure is non-fatal — a stale chart beats no data.
+    if (!fetchUrl(s, buildCashQuoteUrl(d.symbol), PARSE_CASH_QUOTE, d)) {
+      delay(150);
+      if (!fetchUrl(s, buildCashQuoteUrl(d.symbol), PARSE_CASH_QUOTE, d)) return false;
+    }
+    if (s.ticker.showChart && s.ticker.points >= 2) {
+      delay(150);
+      fetchUrl(s, buildCashChartUrl(s, d.symbol), PARSE_CASH_CHART, d);
+    }
+    return true;
   }
 
   if (s.ticker.webhookUrl.length() < 8) return false;
-  return fetchUrl(s, buildWebhookUrl(s, d.symbol), false, d);
+  return fetchUrl(s, buildWebhookUrl(s, d.symbol), PARSE_WEBHOOK, d);
 }
 
 // ---------------------------------------------------------------------------

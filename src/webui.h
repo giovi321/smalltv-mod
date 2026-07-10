@@ -124,6 +124,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <label>Data source</label>
    <select id="source" onchange="srcChanged()">
     <option value="yahoo">Yahoo Finance (direct, no server)</option>
+    <option value="cash">cash.ch (direct, Swiss instruments)</option>
     <option value="webhook">Custom webhook (n8n / your own)</option>
    </select>
    <div id="webhookRow"><label>Webhook URL</label>
@@ -304,11 +305,13 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  var ap=$('apPass'); if(ap)ap.placeholder=c.apPassSet?'(unchanged)':'(open)';
 })}
 
-function srcChanged(){if(!$('source'))return;var y=$('source').value!=='webhook';
- $('webhookRow').style.display=y?'none':'block';
- $('srcHint').innerHTML=y
-  ?'The device fetches <b>Yahoo Finance</b> directly over HTTPS — no server needed. Use Yahoo symbols (e.g. <code>AAPL</code>, <code>NESN.SW</code>, <code>BTC-USD</code>, <code>EURUSD=X</code>).'
-  :'The device requests <code>?symbol=..&amp;range=..&amp;points=..</code> from this URL and expects the SmallTV JSON contract back.';}
+function srcChanged(){if(!$('source'))return;var v=$('source').value;
+ $('webhookRow').style.display=v==='webhook'?'block':'none';
+ $('srcHint').innerHTML=v==='webhook'
+  ?'The device requests <code>?symbol=..&amp;range=..&amp;points=..</code> from this URL and expects the SmallTV JSON contract back.'
+  :v==='cash'
+  ?'The device fetches <b>cash.ch</b> directly over HTTPS — no server needed. Symbols are cash.ch <b>listing keys</b> (<code>valor-market-currency</code>); see the docs for how to find one.'
+  :'The device fetches <b>Yahoo Finance</b> directly over HTTPS — no server needed. Use Yahoo symbols (e.g. <code>AAPL</code>, <code>NESN.SW</code>, <code>BTC-USD</code>, <code>EURUSD=X</code>).';}
 function radarSrcChanged(){if(!$('radarSource'))return;var d=$('radarSource').value!=='webhook';
  $('radarWebhookRow').style.display=d?'none':'block';
  $('radarSrcHint').innerHTML=d

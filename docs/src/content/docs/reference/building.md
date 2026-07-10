@@ -44,7 +44,7 @@ src/                    shared core (device, net, web, settings)
     usage/              UsageMode + UsageClient + Mascot
     radar/              RadarMode + RadarClient
 partitions/             ESP32 flash layout (shared by both ESP32 targets)
-n8n/                    webhook contract and importable workflow
+n8n/                    webhook contract and importable workflows
 ```
 
 ## ESP32 toolchain notes
