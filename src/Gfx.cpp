@@ -45,6 +45,12 @@ Arduino_GFX* gfxDev() { return gfx; }
 
 // ---------------------------------------------------------------------------
 void gfxBegin(const Settings& s) {
+#ifdef TFT_PWR_PIN
+  // Boards with a switched panel power rail (NM-TV-154): energize the display
+  // before anything else or the panel never comes up.
+  pinMode(TFT_PWR_PIN, OUTPUT);
+  digitalWrite(TFT_PWR_PIN, TFT_PWR_ON);
+#endif
   // Backlight FIRST: do it before the panel/SPI init so the screen lights up even
   // if panel init has trouble. A dark backlight then means the sketch didn't get
   // this far (early crash / bad flash) — a useful boot indicator.
@@ -52,12 +58,13 @@ void gfxBegin(const Settings& s) {
   platformAnalogWriteInit(TFT_BL);
   gfxSetBrightness(s.brightness, s.backlightInverted);
 
-#if defined(SMALLTV_ESP32C2)
+#if defined(SMALLTV_ESP32C2) || defined(SMALLTV_ESP32)
   // Hardware SPI via the Arduino SPI library (IDF spi_master driver) on explicit
   // GPIOs. The register-level Arduino_ESP32SPI hangs in begin() on the C2, and
   // Arduino_SWSPI's fast-IO path doesn't cover the C2 — Arduino_HWSPI uses the
   // stock driver (what the working ESPHome config used) and honors SPI mode 3
-  // (see the subclass). CS is tied to GND (TFT_CS == -1, never toggled).
+  // (see the subclass). Pins come from the board header; a TFT_CS of -1 means
+  // the panel's CS is tied to GND and is never toggled.
   bus = new Arduino_HWSPI(TFT_DC, TFT_CS, TFT_SCLK, TFT_MOSI, GFX_NOT_DEFINED, &SPI);
 #else
   bus = new Arduino_HWSPI(TFT_DC, TFT_CS);   // ESP8266 HW-SPI (fixed SCLK/MOSI)

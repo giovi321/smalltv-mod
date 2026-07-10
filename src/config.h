@@ -1,8 +1,9 @@
 // config.h — compile-time constants for smalltv-mod
 //
-// Hardware: two board variants, both a 1.54" 240x240 ST7789 IPS panel:
+// Hardware: three board variants, all a 1.54" 240x240 ST7789 IPS panel:
 //   - Original GeekMagic SmallTV: ESP-12F (ESP8266)      [board_esp8266.h]
 //   - Knockoff SmallTV:           ESP32-C2 / ESP8684      [board_esp32c2.h]
+//   - NMMiner NM-TV-154:          classic ESP32 (WROOM-32E) [board_esp32.h]
 // The board-specific pin map + panel quirks live in the board headers, selected
 // below by the build-time target macro. Everything else here is shared.
 #pragma once
@@ -11,7 +12,7 @@
 // Firmware identity
 // ---------------------------------------------------------------------------
 #define FW_NAME     "smalltv-mod"
-#define FW_VERSION  "2.1.0"
+#define FW_VERSION  "2.2.0"
 
 // Project / update references (shown in the web UI; used by the GitHub self-update)
 #define REPO_URL      "https://github.com/giovi321/smalltv-mod"
@@ -28,6 +29,8 @@
 // ---------------------------------------------------------------------------
 #if defined(SMALLTV_ESP32C2)
   #include "board_esp32c2.h"
+#elif defined(SMALLTV_ESP32)
+  #include "board_esp32.h"
 #else
   #include "board_esp8266.h"
 #endif

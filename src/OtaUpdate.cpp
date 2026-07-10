@@ -79,12 +79,12 @@ OtaLatest otaCheckLatest(const Settings& s) {
 }
 
 String otaUpdateFromGitHub(const Settings& s) {
-#if defined(SMALLTV_ESP32C2)
-  // No C2 release asset is published (local builds only), and the ESP8266 asset
-  // is not a valid image for this chip. Use the manual firmware upload (Update
-  // tab) instead. otaCheckLatest() still reports the newest published version.
+#if defined(SMALLTV_ESP32C2) || defined(SMALLTV_ESP32)
+  // No ESP32 release assets are published (local builds only), and the ESP8266
+  // asset is not a valid image for these chips. Use the manual firmware upload
+  // (Update tab) instead. otaCheckLatest() still reports the newest version.
   (void)s;
-  return F("GitHub self-update is off on the ESP32-C2 build - use manual firmware upload");
+  return F("GitHub self-update is off on this build - use manual firmware upload");
 #else
   OtaLatest r = otaCheckLatest(s);
   if (!r.ok) return "check failed: " + r.error;

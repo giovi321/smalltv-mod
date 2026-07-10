@@ -29,7 +29,7 @@ GET https://opendata.adsb.fi/api/v3/lat/<lat>/lon/<lon>/dist/<nm>
 
 No API key. The device parses the feed and keeps the closest 24 aircraft. The endpoint is rate-limited to about one request a second, so keep the refresh interval sensible. The default is 10 seconds.
 
-On the ESP8266, HTTPS is tight on RAM. The device probes the server's Maximum Fragment Length support so its TLS buffer can stay small. If adsb.fi ever sends large TLS records without that support, the direct fetch can fail in busy airspace; use the webhook source below if that happens. The ESP32-C2 has more RAM and does not need the probe.
+On the ESP8266, HTTPS is tight on RAM. The device probes the server's Maximum Fragment Length support so its TLS buffer can stay small. If adsb.fi ever sends large TLS records without that support, the direct fetch can fail in busy airspace; use the webhook source below if that happens. The ESP32 boards have more RAM and do not need the probe.
 
 ### Custom webhook, a LAN proxy
 

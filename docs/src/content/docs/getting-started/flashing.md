@@ -3,7 +3,7 @@ title: Flashing
 description: How to install smalltv-mod on each board, back up the stock firmware first, and recover if something goes wrong.
 ---
 
-Flash the method that matches your board. The ESP8266 installs over the air from its stock web UI. The ESP32-C2 installs over the USB-C cable with esptool. Back up the stock image first on either board so you can always go back.
+Flash the method that matches your board. The ESP8266 installs over the air from its stock web UI. The ESP32-C2 and the NM-TV-154 install over the USB cable with esptool. Back up the stock image first on any board so you can always go back.
 
 Get the firmware image from the [Actions tab](https://github.com/giovi321/smalltv-mod/actions) (latest `build` run) or the [Releases page](https://github.com/giovi321/smalltv-mod/releases), or [build it yourself](/smalltv-mod/reference/building/).
 
@@ -57,12 +57,34 @@ With a source checkout, `pio run -e smalltv_c2 -t upload` does the same thing.
 Use the system esptool, not the one bundled with PlatformIO. The bundled version hangs entering download mode on this board's CH340C. The `smalltv_c2` PlatformIO env is configured to call the system esptool for uploads for this reason.
 :::
 
+## NM-TV-154 (classic ESP32) — experimental
+
+Same procedure as the ESP32-C2, with `--chip esp32`. This target is untested on hardware, so treat the first flash as a test and report the result on [issue #1](https://github.com/giovi321/smalltv-mod/issues/1). Test images are published as pre-releases on the [Releases page](https://github.com/giovi321/smalltv-mod/releases).
+
+### Back up the stock image first
+
+The NMMiner stock firmware is not redistributed anywhere official, so this backup is your only way back:
+
+```bash
+python -m esptool --chip esp32 --port COM3 read_flash 0x0 0x400000 stock-backup.bin
+```
+
+If `esptool flash_id` reports more than 4 MB of flash, adjust the read length to match.
+
+### Write this firmware
+
+```bash
+python -m esptool --chip esp32 --port COM3 --baud 921600 write_flash 0x0 firmware.factory.bin
+```
+
+With a source checkout, `pio run -e smalltv_esp32 -t upload` does the same thing.
+
 ## After the first flash
 
-Both boards then update from the browser. Open the web UI, go to the **Update** tab, and upload a new firmware image. On the ESP8266 you can also let the device pull the newest GitHub release itself. The ESP32-C2 uses the manual browser upload.
+Every board then updates from the browser. Open the web UI, go to the **Update** tab, and upload a new firmware image. On the ESP8266 you can also let the device pull the newest GitHub release itself. The ESP32 boards use the manual browser upload.
 
 ## Recovery
 
 - **Re-flash anything** (your stock backup or this firmware) with the method for your board.
 - **Factory reset** in the Update tab wipes saved settings and restarts in SETUP MODE. It does not change the firmware.
-- On the ESP32-C2, if a bad flash leaves the device unresponsive, it still enters download mode over USB-C, so esptool can always rewrite it.
+- On the ESP32 boards, if a bad flash leaves the device unresponsive, it still enters download mode over USB, so esptool can always rewrite it.

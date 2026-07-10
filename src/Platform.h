@@ -2,13 +2,14 @@
 //
 // It pulls in the arch-specific SDK headers and exposes a small, uniform surface
 // (class aliases + inline shims) so the rest of the firmware stays chip-agnostic.
-// Target is chosen by a build-time macro: -D SMALLTV_ESP32C2 (ESP8684 knockoff)
-// or -D SMALLTV_ESP8266 (original SmallTV, the default).
+// Target is chosen by a build-time macro: -D SMALLTV_ESP32C2 (ESP8684 knockoff),
+// -D SMALLTV_ESP32 (classic ESP32, NM-TV-154), or -D SMALLTV_ESP8266 (original
+// SmallTV, the default). Both ESP32 targets share the Arduino core 3.x branch.
 #pragma once
 #include <Arduino.h>
 
-#if defined(SMALLTV_ESP32C2)
-// ============================ ESP32-C2 (ESP8684) ============================
+#if defined(SMALLTV_ESP32C2) || defined(SMALLTV_ESP32)
+// ================== ESP32 family (C2/ESP8684 + classic ESP32) ==================
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -30,8 +31,8 @@ static inline void platformAnalogWriteInit(uint8_t pin) { (void)pin; /* analogWr
 static inline bool platformScanIsOpen(int i) { return WiFi.encryptionType(i) == WIFI_AUTH_OPEN; }
 static inline String platformUpdateError() { return String(Update.errorString()); }
 
-// Reset / crash info. ESP32-C2 (RISC-V) exposes no exception PC through the
-// Arduino API, so epc/addr stay empty; panics/WDTs are still flagged as crashes.
+// Reset / crash info. The ESP32 Arduino API exposes no exception PC (on the C2
+// or the classic ESP32), so epc/addr stay empty; panics/WDTs still flag crashes.
 struct PlatformReset { String reason; bool wasCrash; char epc[16]; char addr[16]; };
 static inline PlatformReset platformResetInfo() {
   PlatformReset r; r.wasCrash = false; r.epc[0] = 0; r.addr[0] = 0;

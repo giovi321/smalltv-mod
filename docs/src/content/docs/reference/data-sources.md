@@ -53,4 +53,4 @@ cash.ch exposes only a GraphQL API behind Akamai bot protection, and direct requ
 
 ## TLS on the ESP8266
 
-HTTPS is RAM-tight on the ESP8266. It works, but for a webhook on your own LAN, plain HTTP is more reliable if you see instability. The ESP32-C2 has more headroom and runs HTTPS without the tuning the ESP8266 needs.
+HTTPS is RAM-tight on the ESP8266. It works, but for a webhook on your own LAN, plain HTTP is more reliable if you see instability. The ESP32 boards have more headroom and run HTTPS without the tuning the ESP8266 needs.
