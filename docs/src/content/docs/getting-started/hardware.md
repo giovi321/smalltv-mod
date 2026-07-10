@@ -77,6 +77,8 @@ The pins are set in `src/board_esp32c2.h`. Two panel quirks are worth knowing: t
 
 ## NM-TV-154 (classic ESP32)
 
+![The NM-TV-154 running its stock NMMiner firmware](/smalltv-mod/assets/product-esp32.png)
+
 | | |
 |---|---|
 | MCU | ESP32-WROOM-32E (ESP32-D0WD-V3), 40 MHz crystal, 4 MB flash |

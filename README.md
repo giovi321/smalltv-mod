@@ -31,7 +31,7 @@ Check the board before you build, because the variants flash differently.
 
 | | SmallTV (ESP8266) | SmallTV (ESP32-C2) | NM-TV-154 (ESP32) |
 |---|---|---|---|
-| Photo | <img src="docs/public/assets/product-8266.png" alt="The SmallTV (ESP8266)" width="240"> | <img src="docs/public/assets/product-c2.png" alt="The SmallTV (ESP32-C2)" width="240"> | no photo yet |
+| Photo | <img src="docs/public/assets/product-8266.png" alt="The SmallTV (ESP8266)" width="240"> | <img src="docs/public/assets/product-c2.png" alt="The SmallTV (ESP32-C2)" width="240"> | <img src="docs/public/assets/product-esp32.png" alt="The NM-TV-154 (ESP32)" width="240"> |
 | MCU | ESP-12F (ESP8266), 4 MB flash | ESP32-C2 / ESP8684, 4 MB flash | ESP32-WROOM-32E, 4 MB flash |
 | Build env | `smalltv` | `smalltv_c2` | `smalltv_esp32` |
 | Display | 1.54" 240×240 IPS ST7789 | same panel, RGB order | same panel |
