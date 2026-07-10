@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="smalltv-mod">
+  <rect x="7" y="13" width="50" height="38" rx="6" fill="none" stroke="#22c55e" stroke-width="3"/>
+  <polyline points="15,38 23,30 30,34 37,22 44,28 50,20" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24 51 L24 57 M40 51 L40 57" stroke="#22c55e" stroke-width="3" stroke-linecap="round"/>
+  <path d="M20 57 L28 57 M36 57 L44 57" stroke="#22c55e" stroke-width="3" stroke-linecap="round"/>
+</svg>

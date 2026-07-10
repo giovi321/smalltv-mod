@@ -1,0 +1,55 @@
+---
+title: smalltv-mod
+description: Open-source firmware for the GeekMagic SmallTV and its ESP32-C2 knockoff. Stock ticker, Claude usage meter, and plane radar in one image.
+template: splash
+hero:
+  tagline: One firmware, three modes, two boards. Turn a cheap SmallTV cube into a ticker, a Claude usage meter, or a plane radar.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Get started
+      link: /smalltv-mod/getting-started/hardware/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/giovi321/smalltv-mod
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+The GeekMagic SmallTV is a small cube with a 1.54" colour screen, an ESP inside, and a USB-C port. This firmware replaces the stock apps with three modes you switch between in a built-in web UI, and it updates over WiFi.
+
+![The SmallTV running its three modes](/smalltv-mod/assets/screen.svg)
+
+## The three modes
+
+<CardGrid>
+  <Card title="Stock and crypto ticker" icon="seti:default">
+    Price, change, percent change, and a sparkline for up to 8 rotating symbols. Data from Yahoo Finance with no backend, or your own webhook.
+  </Card>
+  <Card title="Claude usage meter" icon="seti:crystal">
+    An animated mascot plus your 5-hour and 7-day usage bars with reset countdowns, fed over WiFi by the clawdmeter-daemon on your PC.
+  </Card>
+  <Card title="Plane radar" icon="rocket">
+    A scope centred on your location with nearby aircraft, headings, speed vectors, and callsigns, from the free adsb.fi feed or a LAN webhook.
+  </Card>
+</CardGrid>
+
+## Two hardware variants
+
+The same-looking cube ships with one of two chips. This firmware builds for both from one codebase. Confirm which board you have before you flash it.
+
+<CardGrid>
+  <LinkCard title="Original SmallTV (ESP8266)" href="/smalltv-mod/getting-started/hardware/" description="ESP-12F. Flashes over the air from the stock web UI." />
+  <LinkCard title="Knockoff (ESP32-C2 / ESP8684)" href="/smalltv-mod/getting-started/hardware/" description="CH340C next to the USB-C port. Flashes over USB-C with esptool." />
+</CardGrid>
+
+## Start here
+
+<CardGrid>
+  <LinkCard title="Hardware and variants" href="/smalltv-mod/getting-started/hardware/" />
+  <LinkCard title="Flashing" href="/smalltv-mod/getting-started/flashing/" />
+  <LinkCard title="First-time setup" href="/smalltv-mod/getting-started/setup/" />
+  <LinkCard title="Building from source" href="/smalltv-mod/reference/building/" />
+</CardGrid>
