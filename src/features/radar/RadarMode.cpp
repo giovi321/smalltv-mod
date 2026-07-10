@@ -132,7 +132,13 @@ static void drawRadar(const Settings& s) {
     if (s.radar.showLabels && a.callsign[0]) {
       int lw = (int)strlen(a.callsign) * 6 * txt;
       int lh = 8 * txt + (a.altFt > 0 ? 8 : 0);
-      LblBox box = {(int16_t)(x + lblDX), (int16_t)(y - (txt == 1 ? 4 : 8)),
+      // Right of the marker by default; flip to its left when the label would
+      // run off the panel, and clamp as a last resort so it never clips.
+      int lx = x + lblDX;
+      if (lx + lw > TFT_WIDTH - 2) lx = x - lblDX - lw;
+      if (lx < 2) lx = 2;
+      if (lx + lw > TFT_WIDTH - 2) lx = TFT_WIDTH - 2 - lw;
+      LblBox box = {(int16_t)lx, (int16_t)(y - (txt == 1 ? 4 : 8)),
                     (int16_t)lw, (int16_t)lh};
       bool clash = false;
       for (uint8_t j = 0; j < nLbl; j++) if (boxHit(box, lbl[j])) { clash = true; break; }

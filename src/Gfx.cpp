@@ -75,6 +75,9 @@ void gfxBegin(const Settings& s) {
                                    TFT_WIDTH, TFT_HEIGHT, 0, 0, 0, 0);
   gfx->begin();
   gfx->setRotation(s.rotation & 3);
+  // Nothing in this UI ever wants wrapped text: overflowing labels used to
+  // wrap around to x=0 on the next line (stray characters at the left edge).
+  gfx->setTextWrap(false);
   gfx->fillScreen(C_BLACK);
 }
 
