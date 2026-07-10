@@ -75,7 +75,7 @@ The ESP32-C2 routes SPI through the GPIO matrix, so the display pins are arbitra
 
 The pins are set in `src/board_esp32c2.h`. Two panel quirks are worth knowing: the display needs SPI mode 3, and its colour order is RGB. Both are handled in `src/Gfx.cpp`. If red and blue look swapped on your unit, flip `TFT_BGR` in the board header and reflash.
 
-## NM-TV-154 (classic ESP32) — experimental
+## NM-TV-154 (classic ESP32), experimental
 
 | | |
 |---|---|
