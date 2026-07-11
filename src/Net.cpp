@@ -99,6 +99,15 @@ void netBegin(const Settings& s, void (*onProgress)(const char*)) {
       g_mode = NET_STA;
       if (MDNS.begin(g_hostname.c_str())) {
         MDNS.addService("http", "tcp", 80);
+#if WITH_USAGE
+        // Discoverable usage-push service so the clawdmeter daemon can find and
+        // push to every SmallTV on the LAN (no hardcoded host). TXT carries the
+        // device id, firmware version, and the push path.
+        MDNS.addService("clawdmeter", "tcp", 80);
+        MDNS.addServiceTxt("clawdmeter", "tcp", "id",   g_hostname.c_str());
+        MDNS.addServiceTxt("clawdmeter", "tcp", "ver",  FW_VERSION);
+        MDNS.addServiceTxt("clawdmeter", "tcp", "path", "/api/usage");
+#endif
       }
       if (onProgress) onProgress(WiFi.localIP().toString().c_str());
       return;
