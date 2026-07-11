@@ -28,23 +28,6 @@ OtaLatest otaCheckLatest(const Settings& s) {
   OtaLatest r;
   if (ESP.getFreeHeap() < 20000) { r.error = F("low heap"); return r; }
 
-  SecureClient client;
-  client.setInsecure();
-#if defined(SMALLTV_ESP8266)
-  client.setBufferSizes(probeMfln(GH_API_HOST), 512);
-#endif
-
-  HTTPClient http;
-  http.setTimeout(s.httpTimeout);
-  http.setReuse(false);
-  http.setUserAgent(F(FW_NAME));                 // GitHub rejects requests with no UA
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  // HTTP/1.0 forbids chunked responses. The body is parsed straight off
-  // getStream(), which neither core de-chunks — same fix as StockClient's
-  // fetchUrl (v2.4.1); without it GitHub's occasional chunked replies made
-  // this check fail with bogus "no matching asset" / "parse failed" errors.
-  http.useHTTP10(true);
-
   String url = F("https://");
   url += F(GH_API_HOST);
   url += F("/repos/");
@@ -53,39 +36,85 @@ OtaLatest otaCheckLatest(const Settings& s) {
   url += F(REPO_NAME);
   url += F("/releases/latest");
 
-  if (!http.begin(client, url)) { r.error = F("connect failed"); return r; }
-  http.addHeader("Accept", "application/vnd.github+json");
+  // GitHub over TLS on this chip occasionally stalls a stream read (truncated
+  // JSON -> "parse failed") or drops the connection; a couple of quick retries
+  // clear the transient. A 403 with the rate-limit budget exhausted is NOT
+  // retryable — surface a clear message so the user waits instead of hammering
+  // the API (which is what turns an occasional hiccup into a persistent failure).
+  const int kAttempts = 3;
+  for (int attempt = 1; attempt <= kAttempts; attempt++) {
+    r.tag = ""; r.url = ""; r.newer = false;   // clear partial state from any prior attempt
+    bool retryable = false;
 
-  int code = http.GET();
-  if (code != HTTP_CODE_OK) { r.error = "HTTP " + String(code); http.end(); return r; }
+    SecureClient client;
+    client.setInsecure();
+#if defined(SMALLTV_ESP8266)
+    client.setBufferSizes(probeMfln(GH_API_HOST), 512);
+#endif
 
-  // Keep only the fields we need; the releases payload is large.
-  JsonDocument filter;
-  filter["tag_name"] = true;
-  JsonObject fa = filter["assets"][0].to<JsonObject>();
-  fa["name"] = true;
-  fa["browser_download_url"] = true;
+    HTTPClient http;
+    // A stalled stream truncates into a "parse failed"; the retries below clear
+    // that, so keep the per-attempt timeout modest to stay responsive (this runs
+    // in the ESP32 web handler) rather than blocking long on each failing try.
+    http.setTimeout(s.httpTimeout);
+    http.setReuse(false);
+    http.setUserAgent(F(FW_NAME));                 // GitHub rejects requests with no UA
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    // HTTP/1.0 forbids chunked responses. The body is parsed straight off
+    // getStream(), which neither core de-chunks (same fix as StockClient v2.4.1).
+    http.useHTTP10(true);
+    const char* hdrKeys[] = { "x-ratelimit-remaining" };
+    http.collectHeaders(hdrKeys, 1);
 
-  JsonDocument doc;
-  DeserializationError err =
-      deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
-  http.end();
-  if (err) { r.error = F("parse failed"); return r; }
+    if (!http.begin(client, url)) {
+      r.error = F("connect failed"); retryable = true;
+    } else {
+      http.addHeader("Accept", "application/vnd.github+json");
+      int code = http.GET();
+      if (code == 403 && http.header("x-ratelimit-remaining") == "0") {
+        r.error = F("GitHub rate limit, try again later");   // not retryable
+      } else if (code != HTTP_CODE_OK) {
+        r.error = "HTTP " + String(code);
+        retryable = (code >= 500);                            // server-side -> transient
+      } else {
+        // Keep only the fields we need; the releases payload is large.
+        JsonDocument filter;
+        filter["tag_name"] = true;
+        JsonObject fa = filter["assets"][0].to<JsonObject>();
+        fa["name"] = true;
+        fa["browser_download_url"] = true;
 
-  r.tag = (const char*)(doc["tag_name"] | "");
-  for (JsonObjectConst a : doc["assets"].as<JsonArrayConst>()) {
-    if (strcmp(a["name"] | "", UPDATE_ASSET) == 0) {
-      r.url = (const char*)(a["browser_download_url"] | "");
-      break;
+        JsonDocument doc;
+        DeserializationError err =
+            deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
+        if (err) {
+          r.error = F("parse failed"); retryable = true;      // truncated/stalled stream
+        } else {
+          r.tag = (const char*)(doc["tag_name"] | "");
+          for (JsonObjectConst a : doc["assets"].as<JsonArrayConst>()) {
+            if (strcmp(a["name"] | "", UPDATE_ASSET) == 0) {
+              r.url = (const char*)(a["browser_download_url"] | "");
+              break;
+            }
+          }
+          if (r.tag.length() == 0 || r.url.length() == 0) {
+            r.error = F("no matching asset");                 // not retryable
+          } else {
+            String latest = r.tag;
+            if (latest.startsWith("v")) latest.remove(0, 1);
+            r.newer = verNum(latest.c_str()) > verNum(FW_VERSION);
+            r.error = "";
+            r.ok = true;
+          }
+        }
+      }
+      http.end();
     }
-  }
-  if (r.tag.length() == 0 || r.url.length() == 0) { r.error = F("no matching asset"); return r; }
 
-  String latest = r.tag;
-  if (latest.startsWith("v")) latest.remove(0, 1);
-  r.newer = verNum(latest.c_str()) > verNum(FW_VERSION);
-  r.ok = true;
-  return r;
+    if (r.ok || !retryable) return r;
+    if (attempt < kAttempts) delay(500);           // brief backoff before the next try
+  }
+  return r;   // r.error holds the last (retryable) error after all attempts
 }
 
 String otaUpdateFromGitHub(const Settings& s) {
@@ -96,24 +125,27 @@ String otaUpdateFromGitHub(const Settings& s) {
   if (ESP.getFreeHeap() < 22000) return F("not enough free heap for a TLS update");
 
   // mbedTLS manages its own buffers; each target pulls its own release asset
-  // (UPDATE_ASSET in config.h). The two-slot OTA layout makes this atomic.
-  SecureClient client;
-  client.setInsecure();
+  // (UPDATE_ASSET in config.h). The two-slot OTA layout makes this atomic, so a
+  // failed/interrupted download just leaves the running image untouched — retry
+  // once on a transient stream stall before giving up.
+  String lastErr;
+  for (int attempt = 1; attempt <= 2; attempt++) {
+    SecureClient client;
+    client.setInsecure();
 
-  HTTPUpdate up;
-  up.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
-  up.rebootOnUpdate(true);
+    HTTPUpdate up;
+    up.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+    up.rebootOnUpdate(true);
 
-  t_httpUpdate_return ret = up.update(client, r.url);
-  switch (ret) {
-    case HTTP_UPDATE_FAILED:
-      return "download failed: " + up.getLastErrorString();
-    case HTTP_UPDATE_NO_UPDATES:
-      return F("server reported no update");
-    case HTTP_UPDATE_OK:
-      return "";   // success — rebootOnUpdate restarts into the new image
+    t_httpUpdate_return ret = up.update(client, r.url);
+    switch (ret) {
+      case HTTP_UPDATE_OK:         return "";                     // reboots into the new image
+      case HTTP_UPDATE_NO_UPDATES: return F("server reported no update");
+      case HTTP_UPDATE_FAILED:     lastErr = up.getLastErrorString(); break;
+    }
+    if (attempt < 2) delay(1000);
   }
-  return F("unknown result");
+  return "download failed after retry: " + lastErr;
 #else
   (void)s;
   return F("internal error: the ESP8266 updates at boot");   // WebPortal never calls this here
@@ -177,7 +209,14 @@ void otaBootUpdate(const Settings& s) {
   ESPhttpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   ESPhttpUpdate.rebootOnUpdate(true);
 
-  t_httpUpdate_return ret = ESPhttpUpdate.update(client, r.url);
+  // Retry once on a transient stream stall — the buffers are still free at boot
+  // and the request was already consumed, so a retry can't boot-loop.
+  t_httpUpdate_return ret = HTTP_UPDATE_FAILED;
+  for (int attempt = 1; attempt <= 2; attempt++) {
+    ret = ESPhttpUpdate.update(client, r.url);
+    if (ret == HTTP_UPDATE_OK || ret == HTTP_UPDATE_NO_UPDATES) break;  // OK reboots; NO_UPDATES is final
+    if (attempt < 2) delay(1000);
+  }
   if (ret == HTTP_UPDATE_NO_UPDATES)
     otaBootResult(F("server reported no update"));
   else if (ret != HTTP_UPDATE_OK)
