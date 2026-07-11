@@ -114,6 +114,10 @@ The three targets share one codebase. Chip differences live in `src/Platform.h` 
 
 The PC-side usage daemon lives in its own repo: [clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon).
 
+## To do
+
+- Night mode: dim the screen on a schedule (needs an on-device clock over NTP)
+
 ## Credits and references
 
 - GeekMagic SmallTV and SmallTV-Pro, the original product and stock firmware ([GeekMagicClock/smalltv-pro](https://github.com/GeekMagicClock/smalltv-pro)).
