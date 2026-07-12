@@ -3,6 +3,7 @@
 #include "config.h"
 
 static String            s_armedTz;          // last tzPosix armed (clockReapply re-arms only on change)
+static bool              s_ntpStarted = false; // SNTP has been started (only when night mode needs it)
 static volatile uint32_t s_lastSyncMs = 0;   // millis() of the last successful SNTP sync
 static volatile bool     s_haveSync   = false;
 
@@ -34,10 +35,17 @@ void clockBegin(const Settings& s) {
   const char* tz = s.clock.tzPosix.length() ? s.clock.tzPosix.c_str() : "UTC0";
   platformTimeBegin(tz, NTP_SERVER1, NTP_SERVER2);
   s_armedTz = s.clock.tzPosix;
+  s_ntpStarted = true;
 }
 
 void clockReapply(const Settings& s) {
-  if (s.clock.tzPosix != s_armedTz) clockBegin(s);
+  // SNTP only runs when night mode needs it. Starting the lwIP SNTP client is a
+  // permanent mid-arena heap allocation, and on the memory-tight ESP8266 that can
+  // fragment the largest contiguous block below what the cash.ch TLS handshake
+  // needs (blanking those tickers). So arm on the first enable, re-arm on a
+  // timezone change, and never start it while night mode is off.
+  if (!s.clock.nightEnabled) return;
+  if (!s_ntpStarted || s.clock.tzPosix != s_armedTz) clockBegin(s);
 }
 
 void clockForceResync(const Settings& s) {
