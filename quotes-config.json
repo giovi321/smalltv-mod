@@ -1,5 +1,5 @@
 {
-  "_comment": "Symbols published as static JSON for devices that cannot reach cash.ch directly (the ESP8266). Edit this list to add/remove instruments; the scheduled workflow (.github/workflows/quotes.yml) writes one file per key to the 'data' branch, served at raw.githubusercontent.com/giovi321/smalltv-mod/data/quotes/<key>.json. On the device, set a ticker's source to 'GitHub' and its symbol to the listing key.",
+  "_comment": "Symbols published as static JSON for devices that cannot reach cash.ch directly (the ESP8266). Edit this list to add/remove instruments; the scheduled workflow (.github/workflows/quotes.yml) writes one file per key to the 'data' branch, served at raw.githubusercontent.com/mosvov/smalltv-mod/data/quotes/<key>.json. On the device, set a ticker's source to 'GitHub' and its symbol to the listing key.",
   "range": "6mo",
   "points": 48,
   "symbols": [

@@ -259,14 +259,14 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <button class="btn" style="margin-left:8px" onclick="selfUpdate()" id="ghUpBtn" disabled>Update now</button>
    </div>
    <div id="ghMsg" class="muted" style="margin-top:8px"></div>
-   <small class="hint">Pulls the newest release straight from <a id="repoLink" href="https://github.com/giovi321/smalltv-mod/releases" target="_blank">the GitHub repo</a>. HTTPS OTA is tight on the ESP8266; if it fails, use the manual upload below.</small>
+   <small class="hint">Pulls the newest release straight from <a id="repoLink" href="https://github.com/mosvov/smalltv-mod/releases" target="_blank">the GitHub repo</a>. HTTPS OTA is tight on the ESP8266; if it fails, use the manual upload below.</small>
   </div>
   <div class="card"><h2>Manual update (OTA)</h2>
    <input id="fw" type="file" accept=".bin">
    <div style="margin-top:12px"><button class="btn" onclick="upload()" id="upBtn">Upload &amp; flash</button></div>
    <div class="bar"><div id="upBar"></div></div>
    <div id="upMsg" class="muted" style="margin-top:8px"></div>
-   <small class="hint">Upload a firmware.bin from the <a href="https://github.com/giovi321/smalltv-mod/releases" target="_blank">releases page</a> or a local build. The device reboots when done.</small>
+   <small class="hint">Upload a firmware.bin from the <a href="https://github.com/mosvov/smalltv-mod/releases" target="_blank">releases page</a> or a local build. The device reboots when done.</small>
   </div>
   <div class="card"><h2>Settings backup</h2>
    <button class="btn sec" onclick="location.href='/api/export'">Export settings</button>
@@ -283,7 +283,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
 
 <div style="text-align:center;padding:0 0 16px"><button class="btn" onclick="saveAll()">Save settings</button></div>
 <div style="text-align:center;padding:0 0 24px;font-size:12px">
- <a id="footRepo" href="https://github.com/giovi321/smalltv-mod" target="_blank" style="color:var(--acc2);text-decoration:none">GitHub: giovi321/smalltv-mod</a>
+ <a id="footRepo" href="https://github.com/mosvov/smalltv-mod" target="_blank" style="color:var(--acc2);text-decoration:none">GitHub: mosvov/smalltv-mod</a>
  <span id="footVer" class="muted"></span>
 </div>
 <div id="toast" class="toast"></div>

@@ -1,7 +1,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-// Deployed to GitHub Pages at https://giovi321.github.io/smalltv-mod/
+// Deployed to GitHub Pages at https://mosvov.github.io/smalltv-mod/
 export default defineConfig({
   site: 'https://giovi321.github.io',
   base: '/smalltv-mod',
@@ -18,11 +18,11 @@ export default defineConfig({
         {
           icon: 'github',
           label: 'GitHub',
-          href: 'https://github.com/giovi321/smalltv-mod',
+          href: 'https://github.com/mosvov/smalltv-mod',
         },
       ],
       editLink: {
-        baseUrl: 'https://github.com/giovi321/smalltv-mod/edit/main/docs/',
+        baseUrl: 'https://github.com/mosvov/smalltv-mod/edit/main/docs/',
       },
       sidebar: [
         { label: 'Home', link: '/' },
