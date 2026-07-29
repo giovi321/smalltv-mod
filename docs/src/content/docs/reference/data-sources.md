@@ -64,7 +64,7 @@ and expects a small JSON object back:
 }
 ```
 
-Only `price` is required. The full field table and two ready-to-import n8n workflows (Yahoo-only, and Yahoo + cash.ch in one) are in the repo under [`n8n/`](https://github.com/giovi321/smalltv-mod/tree/main/n8n).
+Only `price` is required. The full field table and two ready-to-import n8n workflows (Yahoo-only, and Yahoo + cash.ch in one) are in the repo under [`n8n/`](https://github.com/mosvov/smalltv-mod/tree/main/n8n).
 
 The device pulls rather than receives a push, so your backend never needs to know the device's IP, and it keeps working if that IP changes. Since each ticker picks its own source, webhook tickers mix freely with Yahoo and cash.ch ones in the same rotation.
 
@@ -72,7 +72,7 @@ The device pulls rather than receives a push, so your backend never needs to kno
 
 The **GitHub** source is a serverless proxy for cash.ch that needs nothing of yours running. A scheduled GitHub Action in this repo fetches cash.ch and publishes one small JSON file per listing key to the `data` branch; the device reads it from `raw.githubusercontent.com`, which every board can reach over plain static-RSA HTTPS (the same handshake GitHub self-update and Yahoo use). No ECDHE on the device, so it cannot hit the memory limits the direct cash.ch path pushes against.
 
-Use it the same way as the cash.ch source: set a ticker's source to **GitHub** and its symbol to the cash.ch listing key. The one difference is that a key only works once it is published, so add it to [`quotes-config.json`](https://github.com/giovi321/smalltv-mod/blob/main/quotes-config.json) and let the workflow run (or trigger it once by hand). The workflow is free: GitHub Actions has no minute limit on public repositories.
+Use it the same way as the cash.ch source: set a ticker's source to **GitHub** and its symbol to the cash.ch listing key. The one difference is that a key only works once it is published, so add it to [`quotes-config.json`](https://github.com/mosvov/smalltv-mod/blob/main/quotes-config.json) and let the workflow run (or trigger it once by hand). The workflow is free: GitHub Actions has no minute limit on public repositories.
 
 This is the belt-and-suspenders option. On the ESP32 boards the direct cash.ch source is simpler and needs no published file. On the ESP8266 the direct source works too, but GitHub is there if you would rather the device never do the ECDHE handshake at all.
 

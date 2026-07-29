@@ -90,7 +90,7 @@ The pins are set in `src/board_esp32c2.h`. Two panel quirks are worth knowing: t
 | Sold as | NMMiner NM-TV-154 BTC lottery miner, PCB marked "NM-TV-Miner" |
 | Build env | `smalltv_esp32` |
 
-The pin map comes from [NMMiner's own custom-firmware guide](https://www.nmminer.com/2026/03/02/how-to-develop-nm-tv-custom-firmware/) for the device and is confirmed working on hardware by a community tester in [issue #1](https://github.com/giovi321/smalltv-mod/issues/1): display, colours, backlight PWM, and the 4 MB flash layout all check out.
+The pin map comes from [NMMiner's own custom-firmware guide](https://www.nmminer.com/2026/03/02/how-to-develop-nm-tv-custom-firmware/) for the device and is confirmed working on hardware by a community tester in [issue #1](https://github.com/mosvov/smalltv-mod/issues/1): display, colours, backlight PWM, and the 4 MB flash layout all check out.
 
 ### Pin map
 

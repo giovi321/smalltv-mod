@@ -1,7 +1,7 @@
 # n8n webhook contract
 
 > **Optional.** Since the firmware can fetch Yahoo Finance and cash.ch directly
-> (see [Data sources](https://giovi321.github.io/smalltv-mod/reference/data-sources/)), you only need this if you
+> (see [Data sources](https://mosvov.github.io/smalltv-mod/reference/data-sources/)), you only need this if you
 > want to own the data source: another provider, caching, auth, custom symbols,
 > etc. Set a ticker's source to *Webhook* in the **Ticker** tab to use it.
 
@@ -16,7 +16,7 @@ Flask app, a static file…). Two ready-to-import n8n workflows are included:
   GraphQL API and everything else to Yahoo. Since firmware 2.4.0 each ticker
   picks its own source directly on the device, so this workflow is only needed
   if you want webhook tickers to cover both, e.g. to add caching or massage
-  the data (see [Data sources](https://giovi321.github.io/smalltv-mod/reference/data-sources/)).
+  the data (see [Data sources](https://mosvov.github.io/smalltv-mod/reference/data-sources/)).
 
 Import one or the other: both use the webhook path `stock`, so n8n will refuse
 to activate them side by side.
