@@ -3,7 +3,7 @@ import starlight from '@astrojs/starlight';
 
 // Deployed to GitHub Pages at https://mosvov.github.io/smalltv-mod/
 export default defineConfig({
-  site: 'https://giovi321.github.io',
+  site: 'https://mosvov.github.io',
   base: '/smalltv-mod',
   integrations: [
     starlight({

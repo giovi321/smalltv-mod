@@ -52,8 +52,8 @@ The screens in the photos above are each unit's **stock firmware**, not this one
 
 You do not need a toolchain. GitHub Actions builds the images for all four boards.
 
-- Every push: the **Actions** tab, latest `build` run, download the firmware artifact.
-- Tagged releases (`vX.Y.Z`): attached to the [Releases](../../releases) page.
+- Every push to `main`: a [release](https://github.com/mosvov/smalltv-mod/releases) is created or updated automatically from `FW_VERSION` in `src/config.h`, with all firmware binaries attached.
+- Pull requests: the **Actions** tab, latest `build` run, download the firmware artifact.
 
 Or [build it yourself](#building-from-source).
 

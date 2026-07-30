@@ -3,14 +3,17 @@ name: build
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
 
-# The release-attach step needs write access to create/update the release asset.
+# Release publishing needs write access to create/update tags and assets.
 permissions:
   contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   firmware:
@@ -55,8 +58,33 @@ jobs:
           name: smalltv-mod-firmware
           path: dist/
 
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Read firmware version
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        id: fwver
+        run: |
+          version=$(grep '#define FW_VERSION' src/config.h | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Firmware version: $version (tag v$version)"
+
+      - name: Generate checksums
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      # Publish (or refresh) the GitHub release on every main push. The tag is
+      # derived from FW_VERSION in src/config.h so OTA self-update and the
+      # Releases page stay in sync without a separate manual tagging step.
+      - name: Publish release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.fwver.outputs.tag }}
+          name: smalltv-mod ${{ steps.fwver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: dist/*
+          generate_release_notes: true
+          make_latest: true
+          overwrite_files: true

@@ -11,6 +11,12 @@ name: quotes
 on:
   schedule:
     - cron: '2,17,32,47 * * * *'   # ~every 15 min, off the top of the hour (cron slips less)
+  push:
+    branches: [ main ]
+    paths:
+      - 'quotes-config.json'
+      - '.github/workflows/quotes.yml'
+      - '.github/scripts/fetch-quotes.mjs'
   workflow_dispatch:
 
 concurrency:
