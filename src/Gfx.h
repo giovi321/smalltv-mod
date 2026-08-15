@@ -37,6 +37,9 @@ void         gfxApplyColors(const Settings& s);
 Arduino_GFX* gfxDev();                 // shared draw target for feature renderers
 
 // ---- Text helpers (built-in 6x8 font, integer scaled) ---------------------
+#define GFX_FONT_W 6
+#define GFX_FONT_H 8
+
 int     gfxTextW(const char* s, uint8_t size);
 void    gfxDrawCentered(const char* s, int y, uint8_t size, uint16_t color);
 uint8_t gfxFitSize(const char* s, int maxW, uint8_t maxSize);

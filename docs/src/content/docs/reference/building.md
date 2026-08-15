@@ -67,6 +67,7 @@ src/                    shared core (device, net, web, settings)
     ticker/             TickerMode + StockClient
     usage/              UsageMode + UsageClient + Mascot
     radar/              RadarMode + RadarClient
+    notify/             NotifyMode + its overlay frames (armed over HTTP, never persisted)
 partitions/             ESP32 flash layouts (4 MB shared by C2 + NM-TV-154, 8 MB for the Pro)
 n8n/                    webhook contract and importable workflows
 ```

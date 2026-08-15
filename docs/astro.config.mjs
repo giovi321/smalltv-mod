@@ -50,6 +50,7 @@ export default defineConfig({
             { label: 'Claude usage meter', link: '/features/usage/' },
             { label: 'Plane radar', link: '/features/radar/' },
             { label: 'WireGuard VPN', link: '/features/wireguard/' },
+            { label: 'Notifications', link: '/features/notify/' },
           ],
         },
         {

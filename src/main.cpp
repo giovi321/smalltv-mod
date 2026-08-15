@@ -19,6 +19,7 @@
 #include "Mode.h"
 #include "Clock.h"
 #include "WgClient.h"
+#include "NotifyMode.h"
 
 #if WITH_TICKER
 #include "TickerMode.h"
@@ -250,8 +251,26 @@ void loop() {
   clockService(g_settings);
   appApplyBrightness();
 
+  // On expiry the carousel dwell is credited back the time it was hidden, so it
+  // resumes on the same feature with the same remaining slice.
+  static bool wasNotifying = false;
+  if (g_notifyMode.active()) {
+    wasNotifying = true;
+    g_notifyMode.service(g_settings);
+    delay(5);
+    return;
+  }
+  bool restore = wasNotifying;
+  if (wasNotifying) {
+    wasNotifying = false;
+    if (g_carSwitch) g_carSwitch += g_notifyMode.heldMs();
+  }
+
   DisplayMode* m = activeMode(g_settings);
-  if (m) m->service(g_settings);
+  if (m) {
+    if (restore) m->wake(g_settings);
+    m->service(g_settings);
+  }
 
   delay(5);
 }

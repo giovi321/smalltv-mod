@@ -93,8 +93,14 @@
 #define MODE_USAGE     1
 #define MODE_RADAR     2
 #define MODE_CAROUSEL  3
+#define MODE_NOTIFY    4             // transient overlay: armed over HTTP, never persisted
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
+
+// Full-screen attention overlay (POST /api/notify), in seconds.
+#define NOTIFY_TTL_DEFAULT_SEC  20
+#define NOTIFY_TTL_MIN_SEC       2
+#define NOTIFY_TTL_MAX_SEC     120
 
 // ---------------------------------------------------------------------------
 // Compile-time feature toggles. All shipping features are on by default; a lean

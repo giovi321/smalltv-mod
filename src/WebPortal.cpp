@@ -8,6 +8,7 @@
 #include "OtaUpdate.h"
 #include "StockClient.h"
 #include "UsageClient.h"
+#include "NotifyMode.h"
 #include "Clock.h"
 #include "WgClient.h"
 
@@ -305,6 +306,27 @@ static void handleUsagePush() {
               ok ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
+// Attention overlay: {"state":"done"|"waiting","ttl":<seconds>,"label":"<text>"}.
+// Never persisted. Behind the password like the rest of the API: unlike the
+// daemon's usage push, whatever fires these is a script of your own and can
+// send credentials, and taking over the whole screen is not something to leave
+// open on a device you deliberately locked.
+static void handleNotify() {
+  if (!requireAuth()) return;
+  if (!server.hasArg("plain")) { server.send(400, "text/plain", "no body"); return; }
+  JsonDocument doc;
+  if (deserializeJson(doc, server.arg("plain"))) {
+    server.send(400, "text/plain", "bad json");
+    return;
+  }
+  const char* state = doc["state"] | "";
+  const char* label = doc["label"] | "";
+  uint32_t    ttl   = doc["ttl"] | (uint32_t)NOTIFY_TTL_DEFAULT_SEC;
+  bool ok = g_notifyMode.request(state, ttl, label);
+  server.send(ok ? 200 : 400, "application/json",
+              ok ? "{\"ok\":true}" : "{\"ok\":false}");
+}
+
 // ---- OTA ------------------------------------------------------------------
 static void handleUpdateDone() {
   if (!requireAuth()) return;
@@ -373,6 +395,7 @@ void webPortalBegin(Settings& settings) {
   server.on("/api/checkupdate", HTTP_GET, handleCheckUpdate);
   server.on("/api/selfupdate", HTTP_POST, handleSelfUpdate);
   server.on("/api/usage", HTTP_POST, handleUsagePush);   // daemon pushes usage here
+  server.on("/api/notify", HTTP_POST, handleNotify);     // full-screen attention overlay
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
 
   // Common captive-portal probe endpoints
