@@ -7,7 +7,9 @@ struct UsageData {
   int      sessionResetMin;  // minutes until the 5-hour window resets
   float    weeklyPct;        // 7-day window utilization (0..100)
   int      weeklyResetMin;   // minutes until the 7-day window resets
-  char     status[16];       // e.g. "allowed", "allowed_warning", "rejected"
+  char     status[16];       // "normal"/"warning"/"rejected" from the usage
+                             // endpoint; "allowed"/"allowed_warning"/"rejected"
+                             // from older daemons. Both are accepted.
 
   bool     valid;            // populated at least once
   bool     error;            // most recent fetch failed

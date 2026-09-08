@@ -32,7 +32,9 @@ The PC-side daemon is a separate project, [clawdmeter-daemon](https://github.com
    python clawdmeter_daemon.py --serve          # http://0.0.0.0:8787/
    ```
 
-   On Windows it runs with a system-tray icon and can auto-start at login. See the [clawdmeter-daemon README](https://github.com/giovi321/clawdmeter-daemon) for tray setup and a durable login token.
+   On Windows, macOS and Linux it runs with a tray / menu-bar icon and can auto-start at login (`--install`). See the [clawdmeter-daemon README](https://github.com/giovi321/clawdmeter-daemon) for tray setup and a durable login token.
+
+   Use **clawdmeter-daemon v1.1.0 or newer**: from that release the daemon reads Claude's usage endpoint rather than spending an inference call per poll, and it reports the session limit as `normal` / `warning` / `rejected`. This firmware accepts that vocabulary and the older `allowed` / `allowed_warning` / `rejected` one.
 
 2. In the web UI open **Display → Mode → Clawdmeter**. Then open the **Clawdmeter** tab: for push, leave the **Usage daemon URL** blank; for serve and pull, set it to `http://<that-pc-ip>:8787/`. Save.
 

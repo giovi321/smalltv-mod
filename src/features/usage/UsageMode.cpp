@@ -122,9 +122,15 @@ static void drawUsage(const UsageData& u, bool fullRepaint) {
     return;
   }
 
-  // A non-"allowed" status gets a small accent flag; erasing with black is safe
-  // here since nothing else ever draws at x=228.
-  bool showFlag = u.status[0] && strncmp(u.status, "allowed", 7) != 0;
+  // A status that is not calm gets a small accent flag; erasing with black is
+  // safe here since nothing else ever draws at x=228. The daemon has shipped two
+  // status vocabularies: the old rate-limit headers said "allowed" /
+  // "allowed_warning" / "rejected", the usage endpoint says "normal" / "warning"
+  // / "rejected". Both calm values clear the flag. Compare exactly, because the
+  // old 7-char prefix match on "allowed" also swallowed "allowed_warning".
+  bool showFlag = u.status[0]
+               && strcmp(u.status, "allowed") != 0
+               && strcmp(u.status, "normal")  != 0;
   if (showFlag != s_flagShown || fullRepaint) {
     gfx->fillCircle(228, 18, 5, showFlag ? C_ACCENT : C_BLACK);
     s_flagShown = showFlag;
