@@ -30,15 +30,18 @@ jobs:
             ~/.cache/pip
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
-      # SCons 4.9 dropped SCons.Tool.FortranCommon, which the ESP-IDF builder
-      # still imports, so the two envs that carry a custom sdkconfig (smalltv_esp32,
+      # SCons 4.9 dropped SCons.Tool.FortranCommon, which the ESP-IDF builder still
+      # imports, so the two envs carrying a custom sdkconfig (smalltv_esp32,
       # smalltv_c2) die with ModuleNotFoundError. PlatformIO ships SCons as its own
-      # tool-scons package rather than a pip dependency, so pin that. This bit only
-      # when the ~/.platformio cache expired and a fresh toolchain was pulled.
+      # tool-scons package rather than a pip dependency, so pin that. It bit only
+      # once the ~/.platformio cache expired and a fresh toolchain was pulled:
+      # tool-scons 4.41101.0 (SCons 4.11.1) shipped 2026-08-27, one build too late
+      # to catch v2.13.0. The registry numbers these 4.4<minor><patch>.0, so the
+      # pin below is SCons 4.8.1, the last release that still has the module.
       - name: Install PlatformIO
         run: |
           pip install --upgrade platformio
-          pio pkg install -g -t "platformio/tool-scons@~4.8.1"
+          pio pkg install -g -t "platformio/tool-scons@4.40801.0"
 
       - name: Build firmware (all targets)
         run: pio run -e smalltv -e smalltv_lean -e smalltv_c2 -e smalltv_esp32 -e smalltv_esp32_8mb -e smalltv_loader
