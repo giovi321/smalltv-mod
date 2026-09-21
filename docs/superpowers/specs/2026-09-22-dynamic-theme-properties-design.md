@@ -30,6 +30,7 @@ future visual editor. It must not become a scripting or expression language.
 - Let a fetched number control supported positions and dimensions through a
   clamped linear mapping.
 - Let a fetched number select text, fill, or stroke colors from ordered stops.
+- Support rounded rectangles with a static or data-bound corner radius.
 - Recompute bindings when fetched values change without mutating the parsed
   theme definition.
 - Repaint only the union of the old and new visible regions.
@@ -158,6 +159,27 @@ Numeric example:
 }
 ```
 
+A rounded rectangle declares `cornerRadius` directly on the shape:
+
+```json
+{
+  "id": "temperature-bar",
+  "type": "shape",
+  "shape": "rectangle",
+  "x": 20,
+  "y": 120,
+  "width": 200,
+  "height": 18,
+  "cornerRadius": 6,
+  "fill": "#35c46a"
+}
+```
+
+`cornerRadius` is optional and defaults to zero, preserving square corners. Its
+static manifest range is 0–120 pixels. After all numeric bindings are resolved,
+the effective value is clamped to `floor(min(width, height) / 2)`. A rectangle
+whose dynamic width or height is zero remains invisible regardless of radius.
+
 Color example:
 
 ```json
@@ -202,6 +224,7 @@ Runtime numeric ranges are:
 | --- | --- |
 | `x`, `y`, `x2`, `y2` | −240 through 479 |
 | `width`, `height`, `radius` | 0–240 |
+| `cornerRadius` | 0–120, then limited to half the resolved rectangle size |
 | `size` | 8–96 |
 | `strokeWidth` | 1–32 |
 | `scroll.width` | 1–240 |
@@ -230,7 +253,7 @@ branch.
 | Layer | Numeric properties | Color properties |
 | --- | --- | --- |
 | text | `x`, `y`, `size`, `scroll.width`, `scroll.speed` | `color` |
-| rectangle | `x`, `y`, `width`, `height`, `strokeWidth` | `fill`, `stroke` |
+| rectangle | `x`, `y`, `width`, `height`, `cornerRadius`, `strokeWidth` | `fill`, `stroke` |
 | circle | `x`, `y`, `radius`, `strokeWidth` | `fill`, `stroke` |
 | line | `x`, `y`, `x2`, `y2`, `strokeWidth` | `stroke` |
 | image | `x`, `y` | none |
@@ -287,6 +310,11 @@ the old and new visible bounds. A pure color change invalidates the current
 bounds. Layers above the changed layer are recomposited through the existing
 back-to-front row renderer, preserving overlays.
 
+Rounded rectangle fills include pixels inside the four quarter-circle corners.
+Their stroke follows the inside edge of the same rounded outline, consistent
+with the existing rule that rectangle strokes do not grow the layer bounds.
+`cornerRadius: 0` uses the existing square-rectangle rendering path.
+
 For scrolling text, `LayerState::bounds` is the viewport rather than the complete
 string. Rendering maps each destination pixel through the scroll offset to the
 appropriate glyph cell. Loop mode may map into either of two repeated copies;
@@ -342,6 +370,8 @@ Automated coverage must include:
 - no reset on unrelated data changes or notification invalidation;
 - ascending, descending, clamped, and extrapolated numeric mappings;
 - rounding and final safe-range clamping;
+- square and rounded rectangle fill/stroke rendering, including a dynamically
+  resized rectangle whose effective corner radius must shrink;
 - invalid/missing numeric source fallback;
 - threshold selection below, at, between, and above stops;
 - dirty-region unions for moving/resizing layers and current-bounds invalidation
