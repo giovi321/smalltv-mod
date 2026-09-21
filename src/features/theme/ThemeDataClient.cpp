@@ -82,6 +82,7 @@ bool fetchThemeSource(smalltv::DataFetch& request) {
     if(ESP.getFreeHeap()<18000) return false;
     auto secure=new(std::nothrow) BoundedClient<SecureClient>(deadline);
     if(!secure) return false;
+    // HTTPS reaches this path only after the manifest explicitly opted in.
     secure->setInsecure();
     secure->setHandshakeTimeout(smalltv::DataTimeoutMs/1000);
     client.reset(secure);

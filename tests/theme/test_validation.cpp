@@ -39,7 +39,10 @@ int main() {
   json.clear();deserializeJson(d,base);d["layers"][0]["value"]="{UNKNOWN}";serializeJson(d,json);
   assert(!parseTheme(json,theme,error));assert(error.find("layers[0].value:")==0);
   const char* dataBase=R"({"spec":1,"theme":{"id":"test","name":"Test","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"weather","url":"https://example.test/weather.json","interval":60,"fields":[{"id":"temp","path":"main.temp"}]}],"layers":[{"id":"value","type":"text","x":0,"y":0,"value":"{weather.temp}","size":16,"color":"#ffffff"}]})";
-  deserializeJson(d,dataBase);serializeJson(d,json);assert(parseTheme(json,theme,error));
+  deserializeJson(d,dataBase);serializeJson(d,json);assert(!parseTheme(json,theme,error));
+  deserializeJson(d,dataBase);d["data"][0]["insecureTls"]=true;serializeJson(d,json);assert(parseTheme(json,theme,error));
+  deserializeJson(d,dataBase);d["data"][0]["insecureTls"]="yes";serializeJson(d,json);assert(!parseTheme(json,theme,error));
+  deserializeJson(d,dataBase);d["data"][0]["url"]="http://example.test/weather.json";serializeJson(d,json);assert(parseTheme(json,theme,error));
   deserializeJson(d,dataBase);d["layers"][0]["value"]="{unknown.temp}";serializeJson(d,json);assert(!parseTheme(json,theme,error));
   deserializeJson(d,dataBase);d["data"][0]["url"]="https://";serializeJson(d,json);assert(!parseTheme(json,theme,error));
   deserializeJson(d,dataBase);d["data"][0]["fields"][0]["path"]="main..temp";serializeJson(d,json);assert(!parseTheme(json,theme,error));

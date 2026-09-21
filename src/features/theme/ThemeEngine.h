@@ -34,7 +34,7 @@ struct Layer {
   uint16_t frames=1, fps=1;
 };
 struct ThemeDataField { std::string id, path; };
-struct ThemeDataSource { std::string id, url; uint32_t interval=300; std::vector<ThemeDataField> fields; };
+struct ThemeDataSource { std::string id, url; uint32_t interval=300; bool insecureTls=false; std::vector<ThemeDataField> fields; };
 struct ThemeValue { std::string key, value; };
 inline bool operator==(const ThemeValue& a,const ThemeValue& b) { return a.key==b.key&&a.value==b.value; }
 struct Theme {

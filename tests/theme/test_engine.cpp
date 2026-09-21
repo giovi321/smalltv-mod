@@ -18,7 +18,7 @@ int main() {
   assert(dirty.size()==1 && dirty[0].w==180 && dirty[0].h==48);
   engine.invalidate(); assert(engine.update(2001, &t)[0].w==240);
   assert(!parseTheme("{}", theme, error));
-  const char* dataJson = R"({"spec":1,"theme":{"id":"data","name":"Data","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"weather","url":"https://example.test/weather.json","interval":60,"fields":[{"id":"temp","path":"main.temp"}]}],"layers":[{"id":"value","type":"text","x":0,"y":0,"value":"{weather.temp}","size":16,"color":"#ffffff"}]})";
+  const char* dataJson = R"({"spec":1,"theme":{"id":"data","name":"Data","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"weather","url":"https://example.test/weather.json","interval":60,"insecureTls":true,"fields":[{"id":"temp","path":"main.temp"}]}],"layers":[{"id":"value","type":"text","x":0,"y":0,"value":"{weather.temp}","size":16,"color":"#ffffff"}]})";
   assert(parseTheme(dataJson,theme,error));assert(theme.data.size()==1&&theme.data[0].fields.size()==1);
   engine.setTheme(theme,0);engine.setValues({{"weather.temp","21.5"}});assert(expandText("{weather.temp}",&t,{{"weather.temp","21.5"}})=="21.5");
   engine.update(0,&t);

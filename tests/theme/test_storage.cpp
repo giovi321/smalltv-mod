@@ -1,4 +1,5 @@
 #include "AtomicJson.h"
+#include "SettingsTransaction.h"
 #include <cassert>
 #include <cstring>
 #include <map>
@@ -40,5 +41,12 @@ int main() {
   fs.renameFails=false;
   assert(saveJsonAtomically(fs,config,"/config.json","/config.json.tmp"));
   JsonDocument saved;assert(!deserializeJson(saved,fs.files["/config.json"]));assert(saved["themeId"]=="pixel-room");assert(!fs.files.count("/config.json.tmp"));
+  struct State { int value; } state{1};
+  bool savedState=false;
+  assert(!applyAndSaveSettings(state,[](State& s){s.value=2;},[&](const State&){return savedState;}));
+  assert(state.value==1);
+  savedState=true;
+  assert(applyAndSaveSettings(state,[](State& s){s.value=3;},[&](const State& s){return savedState&&s.value==3;}));
+  assert(state.value==3);
   std::cout<<"atomic settings storage tests passed\n";
 }

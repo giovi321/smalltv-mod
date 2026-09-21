@@ -145,6 +145,7 @@ including the area needed to erase its previous contents.
       "id": "weather",
       "url": "https://example.local/weather.json",
       "interval": 300,
+      "insecureTls": true,
       "fields": [
         {"id": "temp", "path": "main.temp"},
         {"id": "city", "path": "name"}
@@ -160,10 +161,11 @@ including the area needed to erase its previous contents.
 ```
 
 The `path` is a dotted path through JSON objects. Values are rendered as short
-strings; missing values show `--`. URLs must use `http://` or `https://`. Data
-fetching is owned by theme mode and does not affect notifications or other
-display modes. HTTPS uses the firmware's existing insecure TLS client, matching
-the other device-side JSON integrations.
+strings; missing values show `--`. URLs must use `http://` or `https://`. Because
+this path cannot validate server certificates, an HTTPS source must explicitly
+set `"insecureTls": true`; omitting it rejects the package instead of silently
+accepting unauthenticated TLS. Data fetching is owned by theme mode and does not
+affect notifications or other display modes.
 
 Every layer needs `id`, `type`, `x`, and `y`. The device clips geometry outside the
 canvas. Colors are exactly `#RRGGBB`, case insensitive; asset alpha is supported.
@@ -287,7 +289,8 @@ integers are unsigned little endian. No extracted paths become filesystem paths.
 Paths are relative ASCII letters/digits plus `/`, `.`, `_`, `-`, at most 120 bytes.
 Empty components, `.` and `..`, absolute paths, backslashes, and duplicates are
 rejected. There must be one `theme.json`. Other entries must be `.sti` images.
-No padding, trailing bytes, executable entries, or external URLs are accepted.
+No padding, trailing bytes, executable entries, or external asset references are
+accepted. JSON data-source URLs remain allowed through the manifest's `data` block.
 
 The asset resolver appends `.sti` to an image's logical `source`, or resolves
 `<animation source>/<zero-padded three-digit frame>.png.sti`. For example,

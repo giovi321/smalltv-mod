@@ -130,6 +130,11 @@ class Fields {
     for(unsigned char c:value)if(c<32||c==127)return fail(key,"control characters are not allowed");
     return true;
   }
+  bool boolean(const char* key,bool& value,bool required=true) const {
+    auto v=object_[key];if(v.isNull()&&!required)return true;
+    if(!v.is<bool>())return fail(key,"expected a boolean");
+    value=v.as<bool>();return true;
+  }
   bool color(const char* key,uint16_t& value) const {
     return parseColor(object_[key],value)||fail(key,"expected a color in #RRGGBB form");
   }
@@ -163,10 +168,11 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
     if(sources.size()>MaxDataSources)return r.fail("data","expected at most 4 sources");
     for(JsonObjectConst source:sources) {
       ThemeDataSource data;Fields sf(source,"data["+std::to_string(t.data.size())+"]",error);int interval=0;
-      if(!sf.keys("|id|url|interval|fields|")||!sf.text("id",data.id,32)||!sf.text("url",data.url,200)||!sf.number("interval",10,86400,interval))return false;
+      if(!sf.keys("|id|url|interval|insecureTls|fields|")||!sf.text("id",data.id,32)||!sf.text("url",data.url,200)||!sf.number("interval",10,86400,interval)||!sf.boolean("insecureTls",data.insecureTls,false))return false;
       if(!validId(data.id)||data.id.find('.')!=std::string::npos)return sf.fail("id","use ASCII letters, digits, '-' or '_'");
       size_t hostStart=data.url.rfind("https://",0)==0?8:data.url.rfind("http://",0)==0?7:std::string::npos;
       if(hostStart==std::string::npos)return sf.fail("url","only http:// and https:// URLs are supported");
+      if(hostStart==8&&!data.insecureTls)return sf.fail("insecureTls","set true to acknowledge that HTTPS certificate validation is unavailable");
       size_t hostEnd=data.url.find('/',hostStart);
       if(hostStart==data.url.size()||(hostEnd==hostStart)||(data.url[hostStart]=='?'||data.url[hostStart]=='#'))return sf.fail("url","URL must include a host");
       data.interval=static_cast<uint32_t>(interval);

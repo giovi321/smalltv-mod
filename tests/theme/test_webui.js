@@ -4,6 +4,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const html=fs.readFileSync('src/webui.html','utf8');
 const code=html.slice(html.indexOf('function themeRequest('),html.indexOf('function upload(){'));
+const jsonHelper=html.slice(html.indexOf('function j('),html.indexOf('// tabs'));
 const nodes={};
 for(const id of ['themeSelect','themeUseBtn','themeDetails','themeStatus','mode'])nodes[id]={value:'',textContent:'',disabled:false,children:[],appendChild(child){this.children.push(child)}};
 let response,requests=[],toast='';
@@ -15,6 +16,9 @@ const context={
 };
 vm.createContext(context);vm.runInContext(code,context);
 (async()=>{
+ const helperContext={fetch:async()=>({ok:false,status:500,json:async()=>({error:'could not save settings'})})};
+ vm.createContext(helperContext);vm.runInContext(jsonHelper,helperContext);
+ await assert.rejects(helperContext.j('/api/config'),/could not save settings/);
  response={selected:'broken',freeBytes:65536,themes:[
   {id:'healthy',name:'Clock',version:'1',bytes:100,valid:true},
   {id:'broken',name:'broken',bytes:1234,valid:false,error:'Invalid or truncated package'}]};
