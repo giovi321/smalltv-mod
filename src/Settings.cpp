@@ -1,4 +1,5 @@
 #include "Settings.h"
+#include "AtomicJson.h"
 #include "Platform.h"   // platformChipId() for the unique default hostname
 #include <LittleFS.h>
 
@@ -431,6 +432,7 @@ void Settings::setDefaults() {
   hostname = String(DEFAULT_HOSTNAME) + "-" + String(platformChipId() & 0xFFFF, HEX);
 
   mode = DEFAULT_MODE;
+  themeId = "";
   carouselSec = DEFAULT_CAROUSEL_SEC;
   carouselTicker = carouselUsage = carouselRadar = carouselHa = true;
   httpTimeout = DEFAULT_HTTP_TIMEOUT;
@@ -477,11 +479,9 @@ bool saveSettings(const Settings& s) {
   JsonObject root = doc.to<JsonObject>();
   settingsToJson(s, root, /*includeSecrets=*/true);
 
-  File f = LittleFS.open(CONFIG_PATH, "w");
-  if (!f) return false;
-  bool ok = serializeJson(doc, f) > 0;
-  f.close();
-  return ok;
+  // Theme assets share this filesystem. Never truncate the working settings
+  // when a full disk or interrupted save prevents writing the replacement.
+  return saveJsonAtomically(LittleFS, doc, CONFIG_PATH, "/config.json.tmp");
 }
 
 void factoryReset(Settings& s) {
@@ -513,7 +513,9 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   }
 
   // Mode + shared HTTP/display
-  root["mode"]              = (s.mode == MODE_RADAR)    ? "radar"
+  root["themeId"] = s.themeId;
+  root["mode"]              = (s.mode == MODE_THEME)    ? "theme"
+                            : (s.mode == MODE_RADAR)    ? "radar"
                             : (s.mode == MODE_USAGE)    ? "usage"
                             : (s.mode == MODE_HA)       ? "ha"
                             : (s.mode == MODE_CAROUSEL) ? "carousel" : "stocks";
@@ -585,10 +587,20 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
 
   if (root["mode"].is<const char*>()) {
     String m = root["mode"].as<String>();
-    s.mode = m.equalsIgnoreCase("radar")    ? MODE_RADAR
+    s.mode = m.equalsIgnoreCase("theme")    ? MODE_THEME
+           : m.equalsIgnoreCase("radar")    ? MODE_RADAR
            : m.equalsIgnoreCase("usage")    ? MODE_USAGE
            : m.equalsIgnoreCase("ha")       ? MODE_HA
            : m.equalsIgnoreCase("carousel") ? MODE_CAROUSEL : MODE_STOCKS;
+  }
+  if (root["themeId"].is<const char*>()) {
+    String id = root["themeId"].as<String>();
+    bool valid = id.length() <= 48;
+    for (size_t i = 0; i < id.length(); ++i) {
+      char c = id[i];
+      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_')) valid = false;
+    }
+    if (valid) s.themeId = id;
   }
   if (root["carouselSec"].is<int>())      s.carouselSec = constrain((int)root["carouselSec"], 5, 3600);
   if (root["carouselTicker"].is<bool>())  s.carouselTicker = root["carouselTicker"];

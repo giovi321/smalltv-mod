@@ -139,6 +139,7 @@
 #define MODE_RADAR     2
 #define MODE_CAROUSEL  3
 #define MODE_NOTIFY    4             // transient overlay: armed over HTTP, never persisted
+#define MODE_THEME     6             // declarative installed clock faces
 #define MODE_HA        5             // Home Assistant screens pushed over MQTT
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
@@ -391,3 +392,12 @@
 // (morning). Once night mode has switched on, it stays on until the window ends.
 #define NIGHT_NTP_TRUST_MS      300000UL  // 5 min: max age of the sync that unlocks night
 #define NIGHT_NTP_RESYNC_MS      30000UL  // re-sync attempt cadence while held off
+
+// Theme packages target the Pro filesystem and flash budget in V1.
+#ifndef WITH_THEME
+#ifdef SMALLTV_ESP32_PRO
+#define WITH_THEME 1
+#else
+#define WITH_THEME 0
+#endif
+#endif

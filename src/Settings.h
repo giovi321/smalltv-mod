@@ -189,6 +189,7 @@ struct Settings {
   String hostname;      // mDNS name => http://<hostname>.local
 
   // --- Active feature ---
+  String themeId;       // installed .stheme ID; empty until selected
   uint8_t mode;         // MODE_STOCKS / MODE_USAGE / MODE_RADAR / MODE_CAROUSEL / MODE_HA
 
   // --- Carousel (mode == MODE_CAROUSEL): dwell + which features rotate ---

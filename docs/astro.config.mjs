@@ -51,6 +51,7 @@ export default defineConfig({
             { label: 'Plane radar', link: '/features/radar/' },
             { label: 'WireGuard VPN', link: '/features/wireguard/' },
             { label: 'Notifications', link: '/features/notify/' },
+            { label: 'Theme clocks (Pro)', link: '/features/themes/' },
             { label: 'Home Assistant screens', link: '/features/ha/' },
           ],
         },

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__TITLE__ · SmallTV preview</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui,sans-serif;background:#111823;color:#e9edf4}
+*{box-sizing:border-box}body{margin:0;padding:32px 20px}main{max-width:780px;margin:auto}
+header p,.muted{color:#9bacc1;line-height:1.6}h1{font-size:28px;margin:8px 0}
+.tag{color:#86e2bf;font-size:12px;letter-spacing:.12em;font-weight:650;text-transform:uppercase}
+.screen{margin:32px auto 24px;padding:16px;width:fit-content;border:1px solid #354155;border-radius:20px;background:#080c12;box-shadow:0 16px 50px #0005}
+canvas{display:block;width:min(480px,calc(100vw - 80px));height:auto;image-rendering:pixelated;background:#000}
+.controls{max-width:516px;margin:auto;padding:20px;border:1px solid #354155;border-radius:14px;background:#192331}
+.row{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+button{font:inherit;background:#86e2bf;color:#102019;border:0;padding:9px 18px;border-radius:8px;cursor:pointer;min-width:100px}
+button:disabled{opacity:.5;cursor:wait}button:focus-visible,input:focus-visible{outline:3px solid #fff;outline-offset:4px}
+input[type=range]{width:100%;margin:22px 0 12px;accent-color:#86e2bf}output{font-variant-numeric:tabular-nums;font-size:14px}
+footer{max-width:516px;margin:20px auto;font-size:13px;line-height:1.6;color:#9bacc1}
+</style>
+<main>
+<header><div class="tag">SmallTV · Theme preview</div><h1>__TITLE__</h1><p>__BYLINE__</p></header>
+<div class="screen"><canvas id="screen" width="240" height="240" aria-label="Theme clock preview"></canvas></div>
+<section class="controls" aria-label="Playback controls">
+<div class="row"><button id="play" disabled>Loading…</button><output id="clock"></output></div>
+<input id="timeline" type="range" min="0" max="0" value="0" step="1" aria-label="Preview position">
+<div class="row muted"><output id="position"></output><span>240 × 240 · __FPS__ FPS</span></div>
+</section>
+<footer>Start: __START__. This preview plays a recorded __SECONDS__-second simulation.
+It uses the firmware renderer and font. Panel color correction, display latency and notifications are not simulated.
+The file works offline.</footer>
+</main>
+<script id="preview-data" type="application/json">__DATA__</script>
+<script>
+'use strict';
+const data=JSON.parse(document.getElementById('preview-data').textContent);
+const screen=document.getElementById('screen'),ctx=screen.getContext('2d');
+ctx.imageSmoothingEnabled=false;
+const play=document.getElementById('play'),timeline=document.getElementById('timeline');
+let index=0,playing=false,started=0,raf=0;
+const images=data.images.map(src=>{const image=new Image();image.src=src;return image});
+timeline.max=data.frames.length-1;
+function draw(value){
+ index=Math.max(0,Math.min(data.frames.length-1,value));
+ ctx.drawImage(images[data.frames[index]],0,0);timeline.value=index;
+ const elapsed=Math.floor(index*1000/data.fps);
+ document.getElementById('clock').textContent=new Date(data.epoch*1000+elapsed).toISOString().slice(0,19).replace('T',' ');
+ document.getElementById('position').textContent=(index/data.fps).toFixed(2)+' / '+(data.frames.length/data.fps).toFixed(2)+' s';
+}
+function pause(){playing=false;cancelAnimationFrame(raf);play.textContent=index===data.frames.length-1?'Replay':'Play'}
+function tick(now){
+ if(!playing)return;
+ const next=Math.floor((now-started)*data.fps/1000);
+ if(next>=data.frames.length){draw(data.frames.length-1);pause();return}
+ if(next!==index)draw(next);
+ raf=requestAnimationFrame(tick);
+}
+function resume(){
+ if(index===data.frames.length-1)draw(0);
+ playing=true;play.textContent='Pause';started=performance.now()-index*1000/data.fps;
+ raf=requestAnimationFrame(tick);
+}
+play.addEventListener('click',()=>playing?pause():resume());
+timeline.addEventListener('input',()=>{pause();draw(Number(timeline.value));play.textContent=index===data.frames.length-1?'Replay':'Play'});
+Promise.all(images.map(image=>image.decode())).then(()=>{draw(0);play.disabled=false;resume()}).catch(()=>{play.textContent='Image error';document.getElementById('position').textContent='Could not decode preview images'});
+</script>
+</html>
