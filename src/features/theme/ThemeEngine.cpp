@@ -5,6 +5,7 @@
 #if !defined(ARDUINO) || WITH_THEME
 #include <ArduinoJson.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <utility>
@@ -138,11 +139,156 @@ class Fields {
   bool color(const char* key,uint16_t& value) const {
     return parseColor(object_[key],value)||fail(key,"expected a color in #RRGGBB form");
   }
+  bool real(const char* key,double& value) const {
+    JsonVariantConst v=object_[key];
+    if(!v.is<double>()&&!v.is<long>()&&!v.is<int>())
+      return fail(key,"expected a finite number");
+    value=v.as<double>();
+    return std::isfinite(value)||fail(key,"expected a finite number");
+  }
+  bool has(const char* key) const {
+    for(JsonPairConst pair:object_) if(pair.key().size()==strlen(key)&&!memcmp(pair.key().c_str(),key,pair.key().size())) return true;
+    return false;
+  }
  private:
   JsonObjectConst object_;
   std::string path_;
   std::string& error_;
 };
+static bool numericProperty(const std::string& name,BoundProperty& property) {
+  struct Name { const char* name; BoundProperty property; };
+  static const Name names[]={
+    {"x",BoundProperty::X},{"y",BoundProperty::Y},{"width",BoundProperty::Width},
+    {"height",BoundProperty::Height},{"radius",BoundProperty::Radius},
+    {"cornerRadius",BoundProperty::CornerRadius},{"x2",BoundProperty::X2},
+    {"y2",BoundProperty::Y2},{"size",BoundProperty::Size},
+    {"strokeWidth",BoundProperty::StrokeWidth},{"scroll.width",BoundProperty::ScrollWidth},
+    {"scroll.speed",BoundProperty::ScrollSpeed}
+  };
+  for(const auto& item:names) if(name==item.name) {property=item.property;return true;}
+  return false;
+}
+static bool colorProperty(const std::string& name,BoundProperty& property) {
+  if(name=="color") {property=BoundProperty::Color;return true;}
+  if(name=="fill") {property=BoundProperty::Fill;return true;}
+  if(name=="stroke") {property=BoundProperty::Stroke;return true;}
+  return false;
+}
+static bool propertyRange(BoundProperty property,int& lo,int& hi) {
+  switch(property) {
+    case BoundProperty::X: case BoundProperty::Y: case BoundProperty::X2: case BoundProperty::Y2:
+      lo=-240;hi=479;return true;
+    case BoundProperty::Width: case BoundProperty::Height: case BoundProperty::Radius:
+      lo=0;hi=240;return true;
+    case BoundProperty::CornerRadius:
+      lo=0;hi=120;return true;
+    case BoundProperty::Size:
+      lo=8;hi=96;return true;
+    case BoundProperty::StrokeWidth:
+      lo=1;hi=32;return true;
+    case BoundProperty::ScrollWidth: case BoundProperty::ScrollSpeed:
+      lo=1;hi=240;return true;
+    default:
+      return false;
+  }
+}
+static bool applicable(const Layer& layer,BoundProperty property,bool color) {
+  if(color) {
+    if(property==BoundProperty::Color) return layer.type==LayerType::Text;
+    if(property==BoundProperty::Fill) return layer.type==LayerType::Shape&&layer.hasFill;
+    return property==BoundProperty::Stroke&&layer.type==LayerType::Shape&&layer.hasStroke;
+  }
+  if(property==BoundProperty::X||property==BoundProperty::Y) return true;
+  if(property==BoundProperty::ScrollWidth||property==BoundProperty::ScrollSpeed)
+    return layer.type==LayerType::Text&&layer.scroll.enabled;
+  if(layer.type==LayerType::Text) return property==BoundProperty::Size;
+  if(layer.type!=LayerType::Shape) return false;
+  if(property==BoundProperty::StrokeWidth) return true;
+  if(layer.shape==Shape::Rectangle)
+    return property==BoundProperty::Width||property==BoundProperty::Height||property==BoundProperty::CornerRadius;
+  if(layer.shape==Shape::Circle) return property==BoundProperty::Radius;
+  return property==BoundProperty::X2||property==BoundProperty::Y2;
+}
+static bool declaredSource(const Theme& theme,const std::string& source) {
+  return validFieldToken(source,theme);
+}
+static bool twoReals(JsonVariantConst value,const Fields& fields,const char* key,double& first,double& second) {
+  JsonArrayConst values=value.as<JsonArrayConst>();
+  if(values.isNull()||values.size()!=2) return fields.fail(key,"expected exactly two finite numbers");
+  JsonVariantConst a=values[0],b=values[1];
+  if((!a.is<double>()&&!a.is<long>()&&!a.is<int>())||(!b.is<double>()&&!b.is<long>()&&!b.is<int>()))
+    return fields.fail(key,"expected exactly two finite numbers");
+  first=a.as<double>();second=b.as<double>();
+  return (std::isfinite(first)&&std::isfinite(second))||fields.fail(key,"expected exactly two finite numbers");
+}
+static bool twoIntegers(JsonVariantConst value,const Fields& fields,const char* key,int lo,int hi,int& first,int& second) {
+  JsonArrayConst values=value.as<JsonArrayConst>();
+  if(values.isNull()||values.size()!=2||!values[0].is<int>()||!values[1].is<int>())
+    return fields.fail(key,"expected exactly two integers from "+std::to_string(lo)+" to "+std::to_string(hi));
+  first=values[0].as<int>();second=values[1].as<int>();
+  if(first<lo||first>hi||second<lo||second>hi)
+    return fields.fail(key,"expected exactly two integers from "+std::to_string(lo)+" to "+std::to_string(hi));
+  return true;
+}
+static bool parseScroll(JsonObjectConst object,const std::string& path,std::string& error,Layer& result) {
+  JsonObjectConst scroll=object["scroll"].as<JsonObjectConst>();
+  Fields fields(scroll,path+".scroll",error);
+  if(!fields.keys("|width|mode|speed|pause|gap|")) return false;
+  if(!fields.number("width",1,240,result.scroll.width)) return false;
+  std::string mode;
+  if(!fields.text("mode",mode,6)||!fields.number("speed",1,240,result.scroll.speed)) return false;
+  if(mode=="loop") result.scroll.mode=ScrollMode::Loop;
+  else if(mode=="bounce") result.scroll.mode=ScrollMode::Bounce;
+  else return fields.fail("mode","expected loop or bounce");
+  if(fields.has("pause")&&!fields.number("pause",0,10000,result.scroll.pauseMs)) return false;
+  if(fields.has("gap")&&!fields.number("gap",0,240,result.scroll.gap)) return false;
+  if(result.scroll.mode==ScrollMode::Bounce&&fields.has("gap")) return fields.fail("gap","not allowed in bounce mode");
+  result.scroll.enabled=true;
+  return true;
+}
+static bool parseBindings(JsonObjectConst object,const Theme& theme,const std::string& path,std::string& error,Layer& layer) {
+  JsonObjectConst objectBindings=object["bind"].as<JsonObjectConst>();
+  Fields bindings(objectBindings,path+".bind",error);
+  if(objectBindings.isNull()) return bindings.fail("","expected an object");
+  if(objectBindings.size()>8) return bindings.fail("","expected at most 8 bindings");
+  for(JsonPairConst pair:objectBindings) {
+    std::string name(pair.key().c_str(),pair.key().size());
+    Binding binding;
+    if(numericProperty(name,binding.property)) binding.color=false;
+    else if(colorProperty(name,binding.property)) binding.color=true;
+    else return bindings.fail(name.c_str(),"unknown binding target");
+    if(!applicable(layer,binding.property,binding.color)) return bindings.fail(name.c_str(),"binding is not applicable to this layer");
+    JsonObjectConst declaration=pair.value().as<JsonObjectConst>();
+    Fields fields(declaration,path+".bind."+name,error);
+    if(declaration.isNull()) return fields.fail("","expected an object");
+    if(binding.color) {
+      if(!fields.keys("|source|stops|")||!fields.text("source",binding.source,64)) return false;
+      if(!declaredSource(theme,binding.source)) return fields.fail("source","expected a declared data field");
+      JsonArrayConst stops=declaration["stops"].as<JsonArrayConst>();
+      if(stops.isNull()||stops.size()==0||stops.size()>8) return fields.fail("stops","expected 1 to 8 stops");
+      double previous=0;
+      for(size_t i=0;i<stops.size();++i) {
+        JsonObjectConst item=stops[i].as<JsonObjectConst>();
+        Fields stop(item,path+".bind."+name+".stops["+std::to_string(i)+"]",error);
+        ColorStop color;
+        if(!stop.keys("|at|value|")||!stop.real("at",color.at)||!stop.color("value",color.value)) return false;
+        if(i&&color.at<=previous) return stop.fail("at","stops must be strictly increasing");
+        previous=color.at;binding.colors.stops.push_back(color);
+      }
+    } else {
+      int lo=0,hi=0;
+      if(!propertyRange(binding.property,lo,hi)) return fields.fail("","expected a numeric binding target");
+      if(!fields.keys("|source|input|output|clamp|")||!fields.text("source",binding.source,64)) return false;
+      if(!declaredSource(theme,binding.source)) return fields.fail("source","expected a declared data field");
+      if(!twoReals(declaration["input"],fields,"input",binding.numeric.input0,binding.numeric.input1)) return false;
+      if(binding.numeric.input0==binding.numeric.input1) return fields.fail("input","endpoints must differ");
+      if(!twoIntegers(declaration["output"],fields,"output",lo,hi,binding.numeric.output0,binding.numeric.output1)) return false;
+      if(fields.has("clamp")&&!fields.boolean("clamp",binding.numeric.clamp)) return false;
+    }
+    layer.bindings.push_back(std::move(binding));
+  }
+  return true;
+}
 bool parseTheme(const std::string& json, Theme& out, std::string& error) {
   error.clear();
   if(json.empty()||json.size()>MaxManifest) {error="theme.json: expected 1 to 16384 bytes";return false;}
@@ -196,7 +342,7 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
   auto layers=root["layers"].as<JsonArrayConst>();
   if(layers.isNull()||layers.size()>MaxLayers)return r.fail("layers","expected an array of at most 32 layers");
   for(JsonObjectConst o:layers) {
-    Layer l;std::string type;Fields f(o,"layers["+std::to_string(t.layers.size())+"]",error);
+    Layer l;std::string type;std::string layerPath="layers["+std::to_string(t.layers.size())+"]";Fields f(o,layerPath,error);
     if(o.isNull())return f.fail("","expected an object");
     if(!f.text("id",l.id,48))return false;
     if(!validId(l.id))return f.fail("id","use ASCII letters, digits, '-' or '_'");
@@ -204,7 +350,7 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
     if(!f.text("type",type,16)||!f.number("x",-240,479,l.x)||!f.number("y",-240,479,l.y))return false;
     if(type=="text") {
       l.type=LayerType::Text;
-      if(!f.keys("|id|type|x|y|anchor|value|size|color|")||!f.text("value",l.value,128))return false;
+      if(!f.keys("|id|type|x|y|anchor|value|size|color|scroll|bind|")||!f.text("value",l.value,128))return false;
       if(!validText(l.value,t))return f.fail("value","use printable ASCII and declared clock/data variables only");
       if(!f.number("size",8,96,l.size)||!f.color("color",l.color))return false;
       std::string anchor="top-left";if(!f.text("anchor",anchor,20,false))return false;
@@ -214,7 +360,7 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
       l.anchorX=a%3;l.anchorY=a/3;
     } else if(type=="image"||type=="animation") {
       l.type=type=="image"?LayerType::Image:LayerType::Animation;
-      if(!f.keys(type=="image"?"|id|type|x|y|source|":"|id|type|x|y|width|height|source|frames|fps|loop|")||!f.text("source",l.source,110))return false;
+      if(!f.keys(type=="image"?"|id|type|x|y|source|scroll|bind|":"|id|type|x|y|width|height|source|frames|fps|loop|scroll|bind|")||!f.text("source",l.source,110))return false;
       if(!validPath(l.source))return f.fail("source","expected a safe relative asset path");
       if(type=="animation") {
         int frames=0,fps=0;
@@ -227,14 +373,15 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
       l.type=LayerType::Shape;std::string shape;
       if(!f.text("shape",shape,16))return false;
       if(shape!="rectangle"&&shape!="circle"&&shape!="line")return f.fail("shape","expected rectangle, circle or line");
-      const char* allowed=shape=="rectangle"?"|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|":
-        shape=="circle"?"|id|type|shape|x|y|radius|fill|stroke|strokeWidth|":"|id|type|shape|x|y|x2|y2|stroke|strokeWidth|";
+      const char* allowed=shape=="rectangle"?"|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|cornerRadius|scroll|bind|":
+        shape=="circle"?"|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|":"|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|";
       if(!f.keys(allowed))return false;
       l.hasFill=!o["fill"].isNull();l.hasStroke=!o["stroke"].isNull();
       if(!l.hasFill&&!l.hasStroke)return f.fail(shape=="line"?"stroke":"fill","provide a fill or stroke color");
       if((l.hasFill&&!f.color("fill",l.fill))||(l.hasStroke&&!f.color("stroke",l.stroke))||!f.number("strokeWidth",1,32,l.strokeWidth,false))return false;
       if(shape=="rectangle") {
         if(!f.number("width",1,240,l.width)||!f.number("height",1,240,l.height))return false;
+        if(f.has("cornerRadius")&&!f.number("cornerRadius",0,120,l.cornerRadius))return false;
       } else if(shape=="circle") {
         l.shape=Shape::Circle;if(!f.number("radius",1,240,l.radius))return false;
       } else {
@@ -243,6 +390,11 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
         if(!f.number("x2",-240,479,l.x2)||!f.number("y2",-240,479,l.y2))return false;
       }
     } else return f.fail("type","expected text, image, animation or shape");
+    if(f.has("scroll")) {
+      if(l.type!=LayerType::Text) return f.fail("scroll","only allowed on text layers");
+      if(!parseScroll(o,layerPath,error,l)) return false;
+    }
+    if(f.has("bind")&&!parseBindings(o,t,layerPath,error,l)) return false;
     t.layers.push_back(std::move(l));
   }
   out=std::move(t);error.clear();return true;

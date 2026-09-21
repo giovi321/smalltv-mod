@@ -23,15 +23,41 @@ bool validId(const std::string& id);
 bool validPath(const std::string& path);
 enum class LayerType { Text, Image, Animation, Shape };
 enum class Shape { Rectangle, Circle, Line };
+enum class ScrollMode { Loop, Bounce };
+struct Scroll {
+  bool enabled=false;
+  int width=0, speed=0, pauseMs=1000, gap=24;
+  ScrollMode mode=ScrollMode::Loop;
+};
+enum class BoundProperty {
+  X,Y,Width,Height,Radius,CornerRadius,X2,Y2,Size,StrokeWidth,
+  ScrollWidth,ScrollSpeed,Color,Fill,Stroke
+};
+struct NumericBinding {
+  double input0=0,input1=1;
+  int output0=0,output1=1;
+  bool clamp=true;
+};
+struct ColorStop { double at=0; uint16_t value=0; };
+struct ColorBinding { std::vector<ColorStop> stops; };
+struct Binding {
+  BoundProperty property=BoundProperty::X;
+  std::string source;
+  bool color=false;
+  NumericBinding numeric;
+  ColorBinding colors;
+};
 struct Layer {
   std::string id, value, source;
   LayerType type=LayerType::Text;
   Shape shape=Shape::Rectangle;
   int x=0, y=0, width=0, height=0, x2=0, y2=0, radius=0;
-  int size=16, anchorX=0, anchorY=0, strokeWidth=1;
+  int size=16, anchorX=0, anchorY=0, strokeWidth=1, cornerRadius=0;
   uint16_t color=0xffff, fill=0, stroke=0;
   bool hasFill=false, hasStroke=false, loop=true;
   uint16_t frames=1, fps=1;
+  Scroll scroll;
+  std::vector<Binding> bindings;
 };
 struct ThemeDataField { std::string id, path; };
 struct ThemeDataSource { std::string id, url; uint32_t interval=300; bool insecureTls=false; std::vector<ThemeDataField> fields; };
