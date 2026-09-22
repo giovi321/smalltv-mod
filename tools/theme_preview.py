@@ -56,11 +56,11 @@ def write_preview(package, output, seconds=10, fps=15, start=None, values=None):
     data = json.dumps({'images': images, 'frames': frames, 'fps': fps, 'epoch': epoch, 'values': values},
                        separators=(',', ':')).replace('<', '\\u003c')
     template = Path(__file__).with_name('theme_preview.html').read_text(encoding='utf-8')
-    values = {'TITLE': html.escape(metadata['name']),
-              'BYLINE': html.escape(metadata['author']+' · '+metadata['version']),
-              'FPS': str(fps), 'START': start.isoformat(), 'SECONDS': str(seconds), 'DATA': data}
+    placeholders = {'TITLE': html.escape(metadata['name']),
+                     'BYLINE': html.escape(metadata['author']+' · '+metadata['version']),
+                     'FPS': str(fps), 'START': start.isoformat(), 'SECONDS': str(seconds), 'DATA': data}
     # A single pass prevents theme metadata resembling another placeholder from being expanded.
     import re
-    result = re.sub(r'__(TITLE|BYLINE|FPS|START|SECONDS|DATA)__', lambda m: values[m[1]], template)
+    result = re.sub(r'__(TITLE|BYLINE|FPS|START|SECONDS|DATA)__', lambda m: placeholders[m[1]], template)
     Path(output).write_text(result, encoding='utf-8')
     return metadata
