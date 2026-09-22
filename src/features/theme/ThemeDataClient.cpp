@@ -2,8 +2,10 @@
 #if WITH_THEME
 #include "Platform.h"
 #include <ArduinoJson.h>
+#if !defined(SMALLTV_ESP8266)
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#endif
 #include <new>
 
 namespace {
@@ -24,11 +26,22 @@ class BoundedClient : public Transport {
  public:
   explicit BoundedClient(Deadline& deadline) : deadline_(deadline) {}
   using Transport::connect;
+  // ESP8266's Client has no connect(host,port,timeout) overload; allowed()
+  // already bounds every socket call regardless, so the missing explicit
+  // connect timeout costs nothing there.
+#if defined(SMALLTV_ESP8266)
+  int connect(const char* host,uint16_t port) override {
+    if(!allowed()) return 0;
+    int result=Transport::connect(host,port);
+    return allowed()?result:0;
+  }
+#else
   int connect(const char* host,uint16_t port,int32_t timeout) override {
     if(!allowed()) return 0;
     int result=Transport::connect(host,port,timeout);
     return allowed()?result:0;
   }
+#endif
   int available() override { return allowed()?Transport::available():0; }
   uint8_t connected() override { return allowed()?Transport::connected():0; }
   int read() override { return allowed()?Transport::read():-1; }
@@ -84,13 +97,23 @@ bool fetchThemeSource(smalltv::DataFetch& request) {
     if(!secure) return false;
     // HTTPS reaches this path only after the manifest explicitly opted in.
     secure->setInsecure();
+#if !defined(SMALLTV_ESP8266)
     secure->setHandshakeTimeout(smalltv::DataTimeoutMs/1000);
+#endif
     client.reset(secure);
   } else client.reset(new(std::nothrow) BoundedClient<WiFiClient>(deadline));
   if(!client) return false;
+  // ESP8266's WiFiClient/HTTPClient have no separate connect-phase timeout;
+  // Deadline (via BoundedClient::allowed()) already bounds every socket call
+  // on every platform, so these are ESP32-only belt-and-suspenders.
+#if !defined(SMALLTV_ESP8266)
   client->setConnectionTimeout(smalltv::DataTimeoutMs);
+#endif
   HTTPClient http;
-  http.setConnectTimeout(smalltv::DataTimeoutMs);http.setTimeout(smalltv::DataTimeoutMs);
+#if !defined(SMALLTV_ESP8266)
+  http.setConnectTimeout(smalltv::DataTimeoutMs);
+#endif
+  http.setTimeout(smalltv::DataTimeoutMs);
   http.setReuse(false);http.useHTTP10(true);
   if(!http.begin(*client,request.source.url.c_str())) return false;
   http.addHeader("Accept","application/json");
@@ -108,6 +131,7 @@ bool fetchThemeSource(smalltv::DataFetch& request) {
   }
   return !request.cancelled();
 }
+#if !defined(SMALLTV_ESP8266)
 void runFetch(void* parameter) {
   {
     std::unique_ptr<std::shared_ptr<smalltv::DataFetch>> context(
@@ -117,8 +141,21 @@ void runFetch(void* parameter) {
   } // release every C++ object before FreeRTOS deletes the task's stack
   vTaskDelete(nullptr);
 }
+#endif
 }
 
+#if defined(SMALLTV_ESP8266)
+// No FreeRTOS on this chip: run the bounded fetch synchronously on the
+// caller's own stack, the same "one blocking call per main-loop tick"
+// pattern the ticker and radar clients already use here. Deadline (inside
+// fetchThemeSource) already bounds this to DataTimeoutMs plus body-read
+// time, the same order of magnitude a TLS handshake already costs this
+// chip elsewhere.
+bool startThemeDataFetch(const std::shared_ptr<smalltv::DataFetch>& request) {
+  request->finish(fetchThemeSource(*request));
+  return true;
+}
+#else
 bool startThemeDataFetch(const std::shared_ptr<smalltv::DataFetch>& request) {
   constexpr uint32_t StackBytes=8192;
   if(ESP.getFreeHeap()<StackBytes+18000) return false;
@@ -129,4 +166,5 @@ bool startThemeDataFetch(const std::shared_ptr<smalltv::DataFetch>& request) {
   }
   return true;
 }
+#endif
 #endif

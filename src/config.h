@@ -393,12 +393,9 @@
 #define NIGHT_NTP_TRUST_MS      300000UL  // 5 min: max age of the sync that unlocks night
 #define NIGHT_NTP_RESYNC_MS      30000UL  // re-sync attempt cadence while held off
 
-// Theme packages run on every ESP32-family target; the ESP8266 needs its
-// fetcher ported off FreeRTOS first (see ThemeDataClient.cpp).
+// Theme packages are supported on every display target except the lean
+// ESP8266 image, which opts out explicitly (see [env:smalltv_lean] in
+// platformio.ini) to keep the heap headroom it exists to protect.
 #ifndef WITH_THEME
-#if defined(SMALLTV_ESP32)||defined(SMALLTV_ESP32C2)
 #define WITH_THEME 1
-#else
-#define WITH_THEME 0
-#endif
 #endif

@@ -21,8 +21,18 @@ void reply(int code,const String& message) {
   JsonDocument doc;doc[code<300?"id":"error"]=message;
   String json;serializeJson(doc,json);server->send(code,"application/json",json);
 }
+// ESP32's LittleFS exposes totalBytes()/usedBytes() directly; ESP8266's only
+// reports them through info(FSInfo&).
+size_t freeBytes() {
+#if defined(SMALLTV_ESP8266)
+  FSInfo info;
+  return LittleFS.info(info)?info.totalBytes-info.usedBytes:0;
+#else
+  return LittleFS.totalBytes()-LittleFS.usedBytes();
+#endif
+}
 unsigned installedCount() {
-  unsigned count=0;File dir=LittleFS.open("/themes");
+  unsigned count=0;File dir=LittleFS.open("/themes","r");
   for(File f=dir.openNextFile();f;f=dir.openNextFile()) if(!f.isDirectory()&&String(f.name()).endsWith(".stheme")) ++count;
   return count;
 }
@@ -44,7 +54,7 @@ void receiveUpload() {
     JsonDocument config;settingsToJson(*settings,config.to<JsonObject>(),true);
     size_t reserve=measureJson(config)+4096;
     if(reserve<16384) reserve=16384;
-    size_t free=LittleFS.totalBytes()-LittleFS.usedBytes();
+    size_t free=freeBytes();
     if(free<=reserve) {uploadError="Not enough storage; remove a theme first";return;}
     uploadBudget=std::min<size_t>(smalltv::MaxPackage,free-reserve);
     upload=LittleFS.open(staging,"w");
@@ -90,9 +100,9 @@ bool requestId(String& id) {
 void listThemes() {
   if(!auth()) return;
   JsonDocument doc;doc["selected"]=settings->themeId;doc["error"]=g_themeMode.error();
-  doc["freeBytes"]=LittleFS.totalBytes()-LittleFS.usedBytes();
+  doc["freeBytes"]=freeBytes();
   JsonArray list=doc["themes"].to<JsonArray>();
-  File dir=LittleFS.open("/themes");unsigned count=0;
+  File dir=LittleFS.open("/themes","r");unsigned count=0;
   for(File entry=dir.openNextFile();entry&&count<MaxThemes;entry=dir.openNextFile()) {
     String name=entry.name();
     if(entry.isDirectory()||!name.endsWith(".stheme")) continue;
