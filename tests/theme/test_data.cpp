@@ -71,5 +71,23 @@ int main() {
   assert(result->values[0].key=="new.value" && !requests.busy());
   job=requests.start(source,0);job->finish(false);result=requests.take();
   assert(result && !result->success && !requests.busy());
+  // An asynchronous fetched text change resets scrolling once, on consumption.
+  Theme scrolling;Layer text;text.value="{new.value}";text.size=8;
+  text.scroll.enabled=true;text.scroll.width=24;text.scroll.speed=20;
+  text.scroll.pauseMs=1000;text.scroll.gap=6;scrolling.layers.push_back(text);
+  engine.setValues({{"new.value","ABCDEFGHIJ"}});engine.setTheme(scrolling,0);
+  engine.update(0,nullptr);engine.update(1500,nullptr);
+  assert(engine.states()[0].scrollOffset==10);
+  job=requests.start(source,0);assert(job);
+  std::thread refresh([&] {
+    job->values.push_back({"new.value","ABCDEFGHIJKLMNO"});job->finish(true);
+  });
+  refresh.join();result=requests.take();assert(result&&result->success);
+  engine.setValues(result->values);engine.update(1501,nullptr);
+  assert(engine.states()[0].text=="ABCDEFGHIJKLMNO"&&engine.states()[0].scrollOffset==0);
+  assert(engine.states()[0].scrollPauseUntil==2501);
+  assert(!requests.take());engine.setValues(result->values);
+  assert(engine.update(2501,nullptr).empty());
+  engine.update(2551,nullptr);assert(engine.states()[0].scrollOffset==1);
   std::cout<<"theme data deadline and asynchronous result tests passed\n";
 }

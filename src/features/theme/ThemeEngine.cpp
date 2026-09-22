@@ -704,6 +704,55 @@ void Engine::resolveLayer(size_t index) {
       std::max(0,std::min(resolved.width,resolved.height)/2));
   states_[index].resolved=resolved;
 }
+// True once `now` is strictly past `deadline`; wrap-safe across millis() rollover.
+static bool scrollDeadlinePassed(uint32_t now,uint32_t deadline) {
+  return int32_t(now-deadline)>0;
+}
+static void resetScroll(LayerState& s,const Layer& l,uint32_t now) {
+  s.scrollOffset=0;s.scrollPhase=0;s.scrollDirection=-1;
+  s.scrollLastMs=now;s.scrollPauseUntil=now+l.scroll.pauseMs;
+}
+// Advances loop/bounce scroll state to `now`, resolving however many pause/leg
+// boundaries fall within the elapsed interval without iterating per pixel.
+static void advanceScroll(const Layer& l,LayerState& s,uint32_t now,int textWidth) {
+  const int viewportWidth=s.resolved.scrollWidth;
+  const int speed=s.resolved.scrollSpeed;
+  const bool loop=l.scroll.mode==ScrollMode::Loop;
+  const int target=loop?(textWidth+l.scroll.gap):(textWidth-viewportWidth);
+  if(textWidth<=viewportWidth||target<=0||speed<=0) return;
+  for(;;) {
+    if(!scrollDeadlinePassed(now,s.scrollPauseUntil)) return;
+    const uint32_t base=scrollDeadlinePassed(s.scrollLastMs,s.scrollPauseUntil)?s.scrollLastMs:s.scrollPauseUntil;
+    const uint32_t elapsed=now-base;
+    const uint64_t ticksAvailable=uint64_t(elapsed)*speed+s.scrollPhase;
+    const int legProgress=loop?s.scrollOffset:(s.scrollDirection<0?s.scrollOffset:target-s.scrollOffset);
+    const uint64_t neededTicks=uint64_t(target-legProgress)*1000;
+    if(ticksAvailable<neededTicks) {
+      const uint64_t newProgressTicks=uint64_t(legProgress)*1000+ticksAvailable;
+      const int newProgressPixels=int(newProgressTicks/1000);
+      s.scrollPhase=uint32_t(newProgressTicks%1000);
+      s.scrollOffset=loop?newProgressPixels:(s.scrollDirection<0?newProgressPixels:target-newProgressPixels);
+      s.scrollLastMs=now;
+      return;
+    }
+    // The leg completes before `now`; find the exact millisecond it did, so the
+    // leftover sub-pixel remainder and the next pause carry no rounding drift.
+    const uint64_t remainingTicks=neededTicks-s.scrollPhase;
+    const uint64_t msNeeded=(remainingTicks+uint64_t(speed)-1)/speed;
+    const uint32_t completion=base+uint32_t(msNeeded);
+    const uint64_t leftover=msNeeded*speed+s.scrollPhase-neededTicks;
+    s.scrollPhase=uint32_t(leftover);
+    s.scrollLastMs=completion;
+    s.scrollPauseUntil=completion+l.scroll.pauseMs;
+    if(loop) {
+      s.scrollOffset=0;
+    } else if(s.scrollDirection<0) {
+      s.scrollOffset=target;s.scrollDirection=1;
+    } else {
+      s.scrollOffset=0;s.scrollDirection=-1;
+    }
+  }
+}
 static bool sameGeometry(const ResolvedLayer& a,const ResolvedLayer& b) {
   return a.x==b.x&&a.y==b.y&&a.width==b.width&&a.height==b.height&&
     a.x2==b.x2&&a.y2==b.y2&&a.radius==b.radius&&
@@ -715,7 +764,7 @@ static bool sameColors(const ResolvedLayer& a,const ResolvedLayer& b) {
 }
 static Rect bounds(const Layer& l,const ResolvedLayer& resolved,const std::string& text) {
   if(l.type==LayerType::Text) {
-    int w=static_cast<int>(text.size())*((resolved.size*6+7)/8);
+    int w=l.scroll.enabled?resolved.scrollWidth:static_cast<int>(text.size())*((resolved.size*6+7)/8);
     return Rect(resolved.x-w*l.anchorX/2,resolved.y-resolved.size*l.anchorY/2,w,resolved.size);
   }
   if(l.type==LayerType::Shape && l.shape==Shape::Circle && resolved.radius==0)
@@ -755,20 +804,33 @@ std::vector<Rect> Engine::update(uint32_t now,const tm* time) {
   hadTime_=bool(time); if(time) lastTime_=*time;
   for(size_t i=0;i<states_.size();++i) {
     auto& s=states_[i]; const auto& l=theme_.layers[i]; bool changed=full_;
+    const ResolvedLayer previous=s.resolved;
     if(valuesChanged_) {
-      const ResolvedLayer previous=s.resolved;
       resolveLayer(i);
       changed=changed||!sameGeometry(previous,s.resolved)||!sameColors(previous,s.resolved);
     }
+    bool textChanged=false;
     if(l.type==LayerType::Text && (timeChanged || valuesChanged_)) {
       std::string text=expandText(l.value,time,values_);
-      if(text!=s.text) {s.text=std::move(text);changed=true;}
+      if(text!=s.text) {s.text=std::move(text);changed=true;textChanged=true;}
     } else if(l.type==LayerType::Animation && !s.finished) {
       uint64_t ticks=uint64_t(uint32_t(now-s.lastMs))*l.fps+s.phase;
       uint64_t step=ticks/1000; s.phase=ticks%1000; s.lastMs=now;
       uint16_t next=l.loop?(s.frame+step)%l.frames:std::min<uint64_t>(s.frame+step,l.frames-1);
       if(!l.loop && next==l.frames-1) s.finished=true;
       if(next!=s.frame) {s.frame=next;changed=true;}
+    }
+    if(l.type==LayerType::Text && l.scroll.enabled) {
+      const bool scrollResetNeeded=textChanged||previous.size!=s.resolved.size||
+        previous.scrollWidth!=s.resolved.scrollWidth||previous.scrollSpeed!=s.resolved.scrollSpeed;
+      if(scrollResetNeeded) {
+        resetScroll(s,l,now);changed=true;
+      } else {
+        const int textWidth=static_cast<int>(s.text.size())*((s.resolved.size*6+7)/8);
+        const int previousOffset=s.scrollOffset;
+        advanceScroll(l,s,now,textWidth);
+        if(s.scrollOffset!=previousOffset) changed=true;
+      }
     }
     Rect next=bounds(l,s.resolved,s.text);
     if(changed&&!full_) addDirty(dirty,unite(s.bounds,next));

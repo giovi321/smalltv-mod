@@ -3,7 +3,131 @@
 #include <iostream>
 #include <limits>
 using namespace smalltv;
+static Theme scrollingTheme(ScrollMode mode=ScrollMode::Loop) {
+  Theme theme;Layer text;text.value="ABCDEFGHIJ";text.size=8;
+  text.x=120;text.y=100;text.anchorX=text.anchorY=1;
+  text.scroll.enabled=true;text.scroll.width=24;text.scroll.speed=20;
+  text.scroll.pauseMs=1000;text.scroll.gap=6;text.scroll.mode=mode;
+  theme.layers.push_back(text);return theme;
+}
+static void testScrollViewportAndDirty() {
+  for(uint32_t start:{0u,0xffffffc0u}) {
+    Engine engine;engine.setTheme(scrollingTheme(),start);
+    engine.update(start,nullptr);
+    const Rect viewport=engine.states()[0].bounds;
+    assert(viewport.x==108&&viewport.y==96&&viewport.w==24&&viewport.h==8);
+    assert(engine.update(start+999,nullptr).empty());
+    assert(engine.update(start+1049,nullptr).empty());
+    auto dirty=engine.update(start+1050,nullptr);
+    assert(dirty.size()==1&&dirty[0].x==108&&dirty[0].y==96&&dirty[0].w==24&&dirty[0].h==8);
+    assert(engine.update(start+1051,nullptr).empty());
+  }
+}
+static void testScrollTiming() {
+  for(uint32_t start:{0u,0xffffffc0u}) {
+    Engine loop;loop.setTheme(scrollingTheme(),start);loop.update(start,nullptr);
+    assert(loop.states()[0].scrollOffset==0&&loop.states()[0].scrollDirection==-1);
+    loop.update(start+1050,nullptr);assert(loop.states()[0].scrollOffset==1);
+    loop.update(start+1500,nullptr);assert(loop.states()[0].scrollOffset==10);
+    loop.update(start+4299,nullptr);assert(loop.states()[0].scrollOffset==65);
+    loop.update(start+4300,nullptr);assert(loop.states()[0].scrollOffset==0);
+    assert(loop.update(start+5300,nullptr).empty());
+    loop.update(start+5350,nullptr);assert(loop.states()[0].scrollOffset==1);
+    loop.update(start+430001500u,nullptr);assert(loop.states()[0].scrollOffset==10);
+    loop.update(start+430005800u,nullptr);assert(loop.states()[0].scrollOffset==10);
+    // Whole cycles that return to the same integer offset cause no repaint.
+    assert(loop.update(start+430010100u,nullptr).empty());
+
+    Engine bounce;bounce.setTheme(scrollingTheme(ScrollMode::Bounce),start);bounce.update(start,nullptr);
+    bounce.update(start+1500,nullptr);assert(bounce.states()[0].scrollOffset==10);
+    bounce.update(start+2800,nullptr);
+    assert(bounce.states()[0].scrollOffset==36&&bounce.states()[0].scrollDirection==1);
+    assert(bounce.states()[0].scrollPauseUntil==uint32_t(start+3800));
+    assert(bounce.update(start+3800,nullptr).empty());
+    bounce.update(start+3850,nullptr);assert(bounce.states()[0].scrollOffset==35);
+    bounce.update(start+5600,nullptr);
+    assert(bounce.states()[0].scrollOffset==0&&bounce.states()[0].scrollDirection==-1);
+    assert(bounce.update(start+6600,nullptr).empty());
+    bounce.update(start+560004350u,nullptr);
+    assert(bounce.states()[0].scrollOffset==25&&bounce.states()[0].scrollDirection==1);
+    assert(bounce.update(start+560009950u,nullptr).empty());
+
+    // Non-integral travel duration must not acquire rounded-millisecond drift.
+    Theme fractional=scrollingTheme();fractional.layers[0].scroll.speed=7;
+    fractional.layers[0].scroll.pauseMs=333;
+    Engine exact;exact.setTheme(fractional,start);exact.update(start,nullptr);
+    exact.update(start+68331,nullptr);assert(exact.states()[0].scrollOffset==0);
+    assert(exact.update(start+68806,nullptr).empty());
+    exact.update(start+68807,nullptr);assert(exact.states()[0].scrollOffset==1);
+
+    Theme noPause=scrollingTheme(ScrollMode::Bounce);noPause.layers[0].scroll.pauseMs=0;
+    Engine continuous;continuous.setTheme(noPause,start);continuous.update(start,nullptr);
+    continuous.update(start+1800,nullptr);assert(continuous.states()[0].scrollOffset==36);
+    continuous.update(start+1850,nullptr);assert(continuous.states()[0].scrollOffset==35);
+    continuous.update(start+3600,nullptr);assert(continuous.states()[0].scrollOffset==0);
+
+    for(const char* value:{"","ABC","ABCD"}) {
+      Theme shortText=scrollingTheme();shortText.layers[0].value=value;
+      Engine fixed;fixed.setTheme(shortText,start);fixed.update(start,nullptr);
+      assert(fixed.states()[0].bounds.w==24);
+      assert(fixed.update(start+1000000,nullptr).empty());
+      assert(fixed.states()[0].scrollOffset==0);
+    }
+  }
+}
+static Binding scrollBinding(BoundProperty property,const char* source,int low,int high) {
+  Binding binding;binding.property=property;binding.source=source;
+  binding.numeric.output0=low;binding.numeric.output1=high;return binding;
+}
+static void testScrollReset() {
+  for(uint32_t start:{0u,0xffffffc0u}) {
+    Theme theme=scrollingTheme(ScrollMode::Bounce);auto& layer=theme.layers[0];
+    layer.value="{data.text}";
+    layer.bindings={scrollBinding(BoundProperty::Size,"data.size",8,16),
+      scrollBinding(BoundProperty::ScrollWidth,"data.width",24,30),
+      scrollBinding(BoundProperty::ScrollSpeed,"data.speed",20,40),
+      scrollBinding(BoundProperty::X,"data.x",120,130)};
+    Engine engine;engine.setValues({{"data.text","ABCDEFGHIJ"}});
+    engine.setTheme(theme,start);engine.update(start,nullptr);
+    engine.update(start+3875,nullptr);
+    assert(engine.states()[0].scrollOffset==35&&engine.states()[0].scrollPhase==500);
+    engine.setValues({{"data.text","ABCDEFGHIJ"},{"unused.value","changed"}});
+    assert(engine.update(start+3875,nullptr).empty());
+    assert(engine.states()[0].scrollOffset==35&&engine.states()[0].scrollPhase==500&&engine.states()[0].scrollDirection==1);
+    engine.invalidate();auto dirty=engine.update(start+3875,nullptr);
+    assert(dirty.size()==1&&dirty[0].w==240&&dirty[0].h==240);
+    assert(engine.states()[0].scrollOffset==35&&engine.states()[0].scrollPhase==500&&engine.states()[0].scrollDirection==1);
+    engine.setValues({{"data.text","ABCDEFGHIJ"},{"data.x","1"}});
+    engine.update(start+3875,nullptr);
+    assert(engine.states()[0].scrollOffset==35&&engine.states()[0].scrollPhase==500);
+
+    std::vector<ThemeValue> values={{"data.text","ABCDEFGHIJK"},{"data.x","1"}};
+    uint32_t now=start+4000;
+    for(const char* source:{"data.text","data.size","data.width","data.speed"}) {
+      if(std::string(source)!="data.text") values.push_back({source,"1"});
+      engine.setValues(values);assert(!engine.update(now,nullptr).empty());
+      const auto& state=engine.states()[0];
+      assert(state.scrollOffset==0&&state.scrollPhase==0&&state.scrollDirection==-1);
+      assert(state.scrollLastMs==now&&state.scrollPauseUntil==uint32_t(now+1000));
+      // Reinstalling the same values must not restart the pause.
+      engine.setValues(values);assert(engine.update(now+999,nullptr).empty());
+      engine.update(now+1050,nullptr);assert(engine.states()[0].scrollOffset>0);
+      now+=2000;
+    }
+    engine.setTheme(theme,now);engine.update(now,nullptr);
+    assert(engine.states()[0].scrollOffset==0&&engine.states()[0].scrollDirection==-1);
+  }
+  // Scroll dirt is clipped to the canvas, while bounds retain viewport placement.
+  Theme clipped=scrollingTheme();clipped.layers[0].x=0;
+  Engine engine;engine.setTheme(clipped,0);engine.update(0,nullptr);
+  auto dirty=engine.update(1050,nullptr);
+  assert(engine.states()[0].bounds.x==-12);
+  assert(dirty.size()==1&&dirty[0].x==0&&dirty[0].w==12);
+}
 int main() {
+  testScrollViewportAndDirty();
+  testScrollTiming();
+  testScrollReset();
   double number=0;
   assert(parseFiniteNumber(" 20.5 ",number)&&number==20.5);
   assert(parseFiniteNumber("+1.25e2",number)&&number==125.0);

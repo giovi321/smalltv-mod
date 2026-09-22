@@ -87,6 +87,8 @@ struct LayerState {
   Rect bounds;
   ResolvedLayer resolved;
   uint32_t lastMs=0, phase=0;
+  int scrollOffset=0, scrollDirection=-1;
+  uint32_t scrollPhase=0, scrollLastMs=0, scrollPauseUntil=0;
   bool finished=false;
 };
 class Engine {
