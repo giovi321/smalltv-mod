@@ -188,6 +188,12 @@ set `"insecureTls": true`; omitting it rejects the package instead of silently
 accepting unauthenticated TLS. Data fetching is owned by theme mode and does not
 affect notifications or other display modes.
 
+Installing a theme installs its data sources too: the device will periodically
+poll every URL the manifest declares, including addresses on your LAN. Only
+install themes from sources you trust — a manifest's `data` block is not
+sandboxed beyond the request limits above (2 KiB response, one in-flight
+request, three-second deadline).
+
 Fetched values are scalars used as-is: to interpolate into text (above), or to
 drive a layer's position, size, or color through the bindings below. There are
 no history buffers, line charts, arrays, aggregation, arithmetic expressions, or
