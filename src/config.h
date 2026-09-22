@@ -393,9 +393,10 @@
 #define NIGHT_NTP_TRUST_MS      300000UL  // 5 min: max age of the sync that unlocks night
 #define NIGHT_NTP_RESYNC_MS      30000UL  // re-sync attempt cadence while held off
 
-// Theme packages target the Pro filesystem and flash budget in V1.
+// Theme packages run on every ESP32-family target; the ESP8266 needs its
+// fetcher ported off FreeRTOS first (see ThemeDataClient.cpp).
 #ifndef WITH_THEME
-#ifdef SMALLTV_ESP32_PRO
+#if defined(SMALLTV_ESP32)||defined(SMALLTV_ESP32C2)
 #define WITH_THEME 1
 #else
 #define WITH_THEME 0
