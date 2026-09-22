@@ -92,13 +92,20 @@ int resolveNumericBinding(const NumericBinding& binding,double value,int lo,int 
     value=std::max(inputLow,std::min(value,inputHigh));
   }
   const long double input0=binding.input0,input1=binding.input1,source=value;
-  const long double scale=std::max(std::fabs(input0),std::fabs(input1));
-  if(scale==0) return clampInteger(binding.output0,lo,hi);
-  const long double denominator=input1/scale-input0/scale;
-  if(denominator==0) return clampInteger(binding.output0,lo,hi);
-  const long double position=(source/scale-input0/scale)/denominator;
-  const long double mapped=static_cast<long double>(binding.output0)+position*
-    (static_cast<long double>(binding.output1)-binding.output0);
+  const long double outputDelta=static_cast<long double>(binding.output1)-binding.output0;
+  const long double inputDelta=input1-input0,sourceDelta=source-input0;
+  const long double numerator=sourceDelta*outputDelta;
+  long double mapped=0;
+  if(std::isfinite(inputDelta)&&std::isfinite(numerator)) {
+    mapped=static_cast<long double>(binding.output0)+numerator/inputDelta;
+  } else {
+    const long double scale=std::max(std::fabs(input0),std::fabs(input1));
+    if(scale==0) return clampInteger(binding.output0,lo,hi);
+    const long double denominator=input1/scale-input0/scale;
+    if(denominator==0) return clampInteger(binding.output0,lo,hi);
+    const long double position=(source/scale-input0/scale)/denominator;
+    mapped=static_cast<long double>(binding.output0)+position*outputDelta;
+  }
   if(std::isnan(mapped)) return clampInteger(binding.output0,lo,hi);
   if(mapped<=lo) return lo;
   if(mapped>=hi) return hi;

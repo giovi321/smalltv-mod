@@ -31,6 +31,13 @@ int main() {
   negativeHalf.output1=-1;
   assert(resolveNumericBinding(negativeHalf,1,-10,10)==-1);
 
+  NumericBinding exactHalf;
+  exactHalf.input0=0;exactHalf.input1=12;
+  exactHalf.output0=0;exactHalf.output1=54;
+  assert(resolveNumericBinding(exactHalf,7,-100,100)==32);
+  exactHalf.output1=-54;
+  assert(resolveNumericBinding(exactHalf,7,-100,100)==-32);
+
   NumericBinding extreme;
   extreme.input0=-std::numeric_limits<double>::max();
   extreme.input1=std::numeric_limits<double>::max();
