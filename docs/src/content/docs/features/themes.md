@@ -17,7 +17,9 @@ creating another clock face requires only theme files.
 
 The repository includes `examples/themes/pixel-room.stheme`, a complete example
 with a background, animated cat, time, and date. Its source assets and manifest
-are in `examples/themes/pixel-room/`.
+are in `examples/themes/pixel-room/`. `examples/themes/live-status.stheme`
+demonstrates scrolling text and fetched-data bindings; see
+[Example: a dynamic dashboard](#example-a-dynamic-dashboard).
 
 Visual authoring is provided by the separate **SmallTV Studio** project. This
 firmware repository keeps the format, validator, packer, and offline preview
@@ -96,6 +98,25 @@ rate can skip intermediate animation frames. Panel correction, hardware latency
 and notifications are not simulated. The preview's playback controls are desktop
 HTML, never included in `.stheme` packages.
 
+A theme that declares `data` fields has nothing to fetch on a desktop, so preview
+generation accepts repeatable `--data source.field=value` arguments and holds
+those values for every sampled frame instead:
+
+```bash
+python3 tools/smalltv_theme.py preview examples/themes/live-status \
+  examples/themes/live-status-preview.html --seconds 8 --fps 15 \
+  --time 2026-09-22T12:00:00 \
+  --data status.label='SmallTV dynamic dashboard headline' \
+  --data status.level=82 --data status.state=Warning
+```
+
+Each key must reference a field declared in the theme's `data` block, exactly
+once; an unknown key, a missing `=`, an empty key, a duplicate key, or more than
+32 values fails the command before it writes any output. Injected values only
+affect the preview frames; they cannot change package validation or which
+assets are read. `examples/themes/live-status` is the reference fixture for this
+workflow — see [Example: a dynamic dashboard](#example-a-dynamic-dashboard).
+
 This utility converts image pixels on your computer. The device reads RGB565
 assets directly; it does not decode PNG/GIF/TTF. The package stores the same
 manifest values, including logical source paths. A future compiler can replace
@@ -167,6 +188,12 @@ set `"insecureTls": true`; omitting it rejects the package instead of silently
 accepting unauthenticated TLS. Data fetching is owned by theme mode and does not
 affect notifications or other display modes.
 
+Fetched values are scalars used as-is: to interpolate into text (above), or to
+drive a layer's position, size, or color through the bindings below. There are
+no history buffers, line charts, arrays, aggregation, arithmetic expressions, or
+conditions in V1 — a fetched number maps to a property through exactly one
+declared, bounded rule.
+
 Every layer needs `id`, `type`, `x`, and `y`. The device clips geometry outside the
 canvas. Colors are exactly `#RRGGBB`, case insensitive; asset alpha is supported.
 
@@ -197,6 +224,51 @@ Month and weekday names are English; the device's configured timezone applies.
 | `{WD}` / `{WEEKDAY}` | Abbreviated / full weekday |
 | `{YYYY}` | Year |
 
+#### Scrolling text
+
+A text layer whose rendered content is wider than a declared viewport can
+scroll horizontally, instead of being clipped:
+
+```json
+{"id": "headline", "type": "text", "x": 20, "y": 40, "value": "{status.label}",
+ "size": 12, "color": "#ffffff",
+ "scroll": {"width": 200, "mode": "loop", "speed": 30, "pause": 1200, "gap": 24}}
+```
+
+| `scroll` field | Type | Range | Required | Meaning |
+| --- | --- | --- | --- | --- |
+| `width` | integer | 1–240 px | yes | Width of the clipping viewport |
+| `mode` | string | `"mode": "loop"`, `"mode": "bounce"` | yes | Motion behavior |
+| `speed` | integer | 1–240 px/s | yes | Horizontal speed |
+| `pause` | integer | 0–10000 ms | no, default 1000 | Hold time at the initial position, and for bounce, at both ends |
+| `gap` | integer | 0–240 px | loop only, default 24 | Blank space between repeated copies |
+
+`gap` is rejected in bounce mode; it has no effect there. `x`, `y`, and `anchor`
+position the viewport, not the complete unscrolled string — `x: 120` with
+`anchor: center` centers the 200px viewport at x=120, not the full text. The
+viewport height is `size`; its width is `scroll.width`. It clips to the 240×240
+canvas like any other layer, and text is additionally clipped to the viewport
+even when a wider dirty region from another layer overlaps it.
+
+If the rendered text fits within the viewport, it stays fixed at its initial
+position and never schedules a repaint. Otherwise scrolling starts after
+`pause` milliseconds. In `loop` mode, the text moves continuously in one
+direction; once it has scrolled past its own width plus `gap`, it wraps back to
+the start and pauses again — the gap is where a second, repeated copy would
+begin. In `bounce` mode, the text moves to its far edge, pauses, reverses, moves
+back to the start, and pauses again, alternating direction on every cycle.
+Timing uses elapsed milliseconds and a subpixel accumulator, the same technique
+frame animation already uses; a late update jumps directly to the due integer
+pixel offset rather than replaying intermediate frames, and 32-bit millisecond
+wraparound is handled correctly. A display write is scheduled only when the
+visible integer pixel offset actually changes.
+
+Changing the expanded text, or a binding that affects `size`, `scroll.width`, or
+`scroll.speed`, resets scroll position, phase, and direction to their initial
+state and restarts the pause. Any other change — an unrelated data value, a
+binding affecting `x` or color, or calling the engine's notification-recovery
+`invalidate()` — does not reset scroll progress; switching themes does.
+
 ### Image
 
 ```json
@@ -209,7 +281,7 @@ PNG alpha is preserved and composited against the layers below it.
 ### Shape
 
 ```json
-{"id":"box","type":"shape","shape":"rectangle","x":20,"y":20,"width":200,"height":60,"fill":"#102030","stroke":"#ffffff","strokeWidth":2}
+{"id":"box","type":"shape","shape":"rectangle","x":20,"y":20,"width":200,"height":60,"cornerRadius":8,"fill":"#102030","stroke":"#ffffff","strokeWidth":2}
 ```
 
 ```json
@@ -225,6 +297,15 @@ circle strokes are inside their outer bounds. Lines use two endpoints, with a
 centered stroke and round ends. `strokeWidth` defaults to 1 and supports 1–32.
 Rectangles and circles need `fill`, `stroke`, or both; lines need `stroke`.
 
+A rectangle's `cornerRadius` is optional, defaults to 0 (square corners), and
+has a static manifest range of 0–120 px. After any bindings resolve, the
+effective radius is clamped to `floor(min(width, height) / 2)`, so a rectangle
+that shrinks (through a bound `width` or `height`) never draws rounding outside
+its own bounds. Fill occupies the rounded outer shape; stroke occupies the ring
+between that outer shape and an inner shape whose radius is
+`max(0, cornerRadius - strokeWidth)`. A dynamic width or height that resolves to
+zero makes the rectangle temporarily invisible, regardless of `cornerRadius`.
+
 ### Animation
 
 ```json
@@ -239,6 +320,117 @@ notification catches up when the theme becomes visible. Switching themes restart
 the animation. Only the required pixel rows are read, never a whole animation.
 The renderer resolves each visible image/frame once per render pass and reuses
 its asset handle across rows and dirty regions.
+
+## Dynamic bindings
+
+`bind` is an optional object on any layer, keyed by a supported property name.
+Each key holds exactly one numeric mapping or color-stop binding, driven by a
+fetched scalar. A binding's `source` is the same declared
+`<data-source-id>.<field-id>` token accepted by text interpolation. Bindings are
+recomputed from the parsed theme and the latest fetched values whenever those
+values change; the parsed manifest itself is never mutated. Only the changed
+region is repainted — the union of the layer's old and new visible bounds.
+
+### Numeric mapping
+
+```json
+{"bind": {"width": {"source": "status.level", "input": [0, 100], "output": [0, 200], "clamp": true}}}
+```
+
+| Field | Type | Required | Rule |
+| --- | --- | --- | --- |
+| `source` | string | yes | Must reference a declared data field |
+| `input` | two finite numbers | yes | Endpoints must differ; ascending or descending is allowed |
+| `output` | two integers | yes | Both must fit the target property's safe range below |
+| `clamp` | boolean | no, default true | Clamp to the output endpoints when true |
+
+The mapping is linear:
+
+```text
+output0 + (source - input0) * (output1 - output0) / (input1 - input0)
+```
+
+The result is rounded to the nearest integer, halves away from zero. When
+`clamp` is true, the source value is limited to the interval between the two
+`input` endpoints before interpolation. When `clamp` is false, extrapolation
+beyond that interval is permitted, but the final integer is still clamped to
+the property's safe range below — that clamp cannot be disabled. A missing,
+partial, or non-finite fetched value leaves the static manifest value in
+effect for that property, so a theme always has a valid fallback appearance.
+
+| Property | Safe range |
+| --- | --- |
+| `x`, `y`, `x2`, `y2` | −240 through 479 |
+| `width`, `height`, `radius` | 0–240 |
+| `cornerRadius` | 0–120, then limited to half the resolved rectangle size |
+| `size` | 8–96 |
+| `strokeWidth` | 1–32 |
+| `scroll.width` | 1–240 |
+| `scroll.speed` | 1–240 |
+
+### Color stops
+
+```json
+{"bind": {"fill": {"source": "status.level",
+  "stops": [{"at": 0, "value": "#35c46a"}, {"at": 60, "value": "#f0b429"}, {"at": 80, "value": "#e5484d"}]}}}
+```
+
+| Field | Type | Required | Rule |
+| --- | --- | --- | --- |
+| `source` | string | yes | Must reference a declared data field |
+| `stops` | array | yes | 1–8 entries |
+| `stops[].at` | finite number | yes | Strictly increasing |
+| `stops[].value` | `#RRGGBB` | yes | Existing color syntax |
+
+The selected color is the last stop whose `at` is less than or equal to the
+fetched value; a value below the first stop's `at` uses the first stop's color.
+Every finite fetched number therefore has a color, with no separate default
+branch. A missing or non-finite fetched value leaves the static manifest color
+in effect.
+
+### Property matrix
+
+Each property may be bound once; a layer may bind at most eight properties. A
+color property may be bound only when that property already exists statically
+on the layer — binding `stroke` does not implicitly enable a missing stroke,
+and `scroll.width`/`scroll.speed` require a static `scroll` object. Image and
+animation dimensions are not bindable, because runtime asset scaling is
+unsupported and their declared size must match packaged assets.
+
+| Layer | Numeric properties | Color properties |
+| --- | --- | --- |
+| text | `x`, `y`, `size`, `scroll.width`, `scroll.speed` | `color` |
+| rectangle | `x`, `y`, `width`, `height`, `cornerRadius`, `strokeWidth` | `fill`, `stroke` |
+| circle | `x`, `y`, `radius`, `strokeWidth` | `fill`, `stroke` |
+| line | `x`, `y`, `x2`, `y2`, `strokeWidth` | `stroke` |
+| image | `x`, `y` | none |
+| animation | `x`, `y` | none |
+
+An inapplicable property, a duplicate binding target, an unknown binding key,
+or a source that is not a declared data field rejects the package, for example
+`layers[0].bind.width: binding is not applicable to this layer` or
+`layers[0].bind.width.source: expected a declared data field`. Invalid `scroll`
+fields are diagnosed the same way, for example `layers[0].scroll.mode: expected
+loop or bounce` or `layers[0].scroll.gap: not allowed in bounce mode`.
+
+## Example: a dynamic dashboard
+
+`examples/themes/live-status` builds `examples/themes/live-status.stheme` from a
+theme declaring one data source (`status`, with `label`, `level`, and `state`
+fields) and every capability above:
+
+* `headline` — a `loop`-scrolling `{status.label}` text viewport;
+* `headline-bounce` — a second, `bounce`-scrolling label, so both scroll modes
+  are copyable side by side;
+* `level-track` and `level-bar` — a rounded track and a bar whose `width` maps
+  fetched level 0–100 to 0–200 px, with `fill` selected from green/amber/red
+  color stops at the same thresholds;
+* `level-caption` — status text whose `color` is bound from the same numeric
+  `status.level` field, through color stops rather than a numeric mapping.
+
+Every layer also has valid static fallback geometry and colors, so the theme
+produces a correct first frame even before any fetch completes. Rebuild and
+preview it with the `--data` workflow documented above.
 
 ## Limits and storage
 
@@ -266,9 +458,13 @@ check the complete byte count, then rename over the old config.
 The engine holds a bounded entry index and layer state in RAM. Compositing uses
 row buffers, not a 115,200-byte framebuffer. Static scenes produce no display
 writes after the first draw. Clock text is compared when wall time changes;
-animations invalidate only when their visible frame changes. Dirty areas are
-recomposited through all intersecting layers, restoring old glyphs, transparent
-sprite pixels, and foreground layers correctly.
+animations invalidate only when their visible frame changes. Scrolling text
+schedules a write only when its visible integer pixel offset changes, and
+bindings are recomputed, and repainted, only when their fetched values actually
+change. Dirty areas are recomposited through all intersecting layers, restoring
+old glyphs, transparent sprite pixels, and foreground layers correctly, and a
+scrolling layer's glyphs stay clipped to its own viewport even under a wider
+dirty region from another layer.
 
 10–15 FPS and clock updates under 100 ms remain hardware performance targets.
 The automated tests exercise composition and scheduling; they do not measure

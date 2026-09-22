@@ -165,6 +165,15 @@ class ThemeCliTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn('Traceback', result.stderr)
 
+    def test_documentation_covers_scrolling_and_dynamic_properties(self):
+        documentation = (ROOT/'docs/src/content/docs/features/themes.md').read_text()
+        for token in ('"mode": "loop"', '"mode": "bounce"', 'cornerRadius',
+                      'scroll.width', 'scroll.speed', 'color stops',
+                      '--data', 'live-status'):
+            self.assertIn(token, documentation)
+        for row in ('| text ', '| rectangle ', '| circle ', '| line ', '| image ', '| animation '):
+            self.assertIn(row, documentation)
+
     def test_corrupt_package_validation(self):
         with tempfile.TemporaryDirectory() as d:
             source = Path(d)/'broken.stheme'
