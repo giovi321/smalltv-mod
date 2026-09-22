@@ -1,5 +1,4 @@
 #include "Settings.h"
-#include "AtomicJson.h"
 #include "Platform.h"   // platformChipId() for the unique default hostname
 #include <LittleFS.h>
 
@@ -479,9 +478,11 @@ bool saveSettings(const Settings& s) {
   JsonObject root = doc.to<JsonObject>();
   settingsToJson(s, root, /*includeSecrets=*/true);
 
-  // Theme assets share this filesystem. Never truncate the working settings
-  // when a full disk or interrupted save prevents writing the replacement.
-  return saveJsonAtomically(LittleFS, doc, CONFIG_PATH, "/config.json.tmp");
+  File f = LittleFS.open(CONFIG_PATH, "w");
+  if (!f) return false;
+  bool ok = serializeJson(doc, f) > 0;
+  f.close();
+  return ok;
 }
 
 void factoryReset(Settings& s) {

@@ -16,7 +16,6 @@
 #endif
 #include "Clock.h"
 #include "WgClient.h"
-#include "SettingsTransaction.h"
 #if WITH_THEME
 #include "features/theme/ThemeWeb.h"
 #endif
@@ -215,12 +214,8 @@ static void handlePostConfig() {
   String oldNet = netFingerprint(*S);
   String oldWg = wgFingerprint(*S);
 
-  if (!applyAndSaveSettings(*S,
-        [&](Settings& settings) { settingsApplyJson(settings, doc.as<JsonObjectConst>()); },
-        [](const Settings& settings) { return saveSettings(settings); })) {
-    server.send(500, "application/json", "{\"ok\":false,\"error\":\"could not save settings\"}");
-    return;
-  }
+  settingsApplyJson(*S, doc.as<JsonObjectConst>());
+  saveSettings(*S);
 
   // Live apply (no reboot needed for these)
   clockReapply(*S);         // re-arm SNTP iff the timezone changed
@@ -295,12 +290,8 @@ static void handleImport() {
     server.send(400, "text/plain", "bad json");
     return;
   }
-  if (!applyAndSaveSettings(*S,
-        [&](Settings& settings) { settingsApplyJson(settings, doc.as<JsonObjectConst>()); },
-        [](const Settings& settings) { return saveSettings(settings); })) {
-    server.send(500, "application/json", "{\"ok\":false,\"error\":\"could not save settings\"}");
-    return;
-  }
+  settingsApplyJson(*S, doc.as<JsonObjectConst>());
+  saveSettings(*S);
   server.send(200, "application/json", "{\"ok\":true,\"reboot\":true}");
   scheduleReboot(800);
 }
