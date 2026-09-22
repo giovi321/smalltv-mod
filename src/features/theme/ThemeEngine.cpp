@@ -762,9 +762,12 @@ static bool sameGeometry(const ResolvedLayer& a,const ResolvedLayer& b) {
 static bool sameColors(const ResolvedLayer& a,const ResolvedLayer& b) {
   return a.color==b.color&&a.fill==b.fill&&a.stroke==b.stroke;
 }
+static int textPixelWidth(int size,size_t length) {
+  return static_cast<int>(length)*((size*6+7)/8);
+}
 static Rect bounds(const Layer& l,const ResolvedLayer& resolved,const std::string& text) {
   if(l.type==LayerType::Text) {
-    int w=l.scroll.enabled?resolved.scrollWidth:static_cast<int>(text.size())*((resolved.size*6+7)/8);
+    int w=l.scroll.enabled?resolved.scrollWidth:textPixelWidth(resolved.size,text.size());
     return Rect(resolved.x-w*l.anchorX/2,resolved.y-resolved.size*l.anchorY/2,w,resolved.size);
   }
   if(l.type==LayerType::Shape && l.shape==Shape::Circle && resolved.radius==0)
@@ -826,7 +829,7 @@ std::vector<Rect> Engine::update(uint32_t now,const tm* time) {
       if(scrollResetNeeded) {
         resetScroll(s,l,now);changed=true;
       } else {
-        const int textWidth=static_cast<int>(s.text.size())*((s.resolved.size*6+7)/8);
+        const int textWidth=textPixelWidth(s.resolved.size,s.text.size());
         const int previousOffset=s.scrollOffset;
         advanceScroll(l,s,now,textWidth);
         if(s.scrollOffset!=previousOffset) changed=true;
