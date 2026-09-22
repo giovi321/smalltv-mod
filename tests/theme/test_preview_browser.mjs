@@ -47,6 +47,7 @@ try {
   return result.result.value;
  }
  await cdp('Runtime.enable');await cdp('Network.enable');await cdp('Page.enable');
+ const usingDefault=!process.argv[2];
  const file=resolve(process.argv[2]||'examples/themes/pixel-room-preview.html');
  await cdp('Page.navigate',{url:pathToFileURL(file).href});
  let ready=false;
@@ -62,8 +63,13 @@ try {
  assert.equal(await evaluate("document.getElementById('timeline').value"),paused,'Pause must stop playback');
  await evaluate("document.getElementById('timeline').value=15;document.getElementById('timeline').dispatchEvent(new Event('input'))");
  assert.equal(await evaluate("document.getElementById('timeline').value"),'15');
- const before=await evaluate("document.getElementById('clock').textContent");
- assert.match(before,/10:24:56$/);
+ // The exact wall-clock text is only known for the checked-in pixel-room fixture;
+ // any other preview (e.g. one built from injected dynamic values) only needs
+ // to prove it plays, without asserting its theme-specific pixel content.
+ if(usingDefault){
+  const before=await evaluate("document.getElementById('clock').textContent");
+  assert.match(before,/10:24:56$/);
+ }
  await evaluate("document.getElementById('play').click()");await delay(250);
  assert.ok(Number(await evaluate("document.getElementById('timeline').value"))>15,'Play must advance animation');
  await evaluate("document.getElementById('timeline').value=document.getElementById('timeline').max;document.getElementById('timeline').dispatchEvent(new Event('input'))");

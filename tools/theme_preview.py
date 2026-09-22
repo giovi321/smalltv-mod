@@ -15,9 +15,10 @@ except ImportError:
     from theme_native import run, validate_package
 
 
-def write_preview(package, output, seconds=10, fps=15, start=None):
+def write_preview(package, output, seconds=10, fps=15, start=None, values=None):
     if not (1 <= seconds <= 60 and 1 <= fps <= 15):
         raise ValueError('Preview requires 1..60 seconds and 1..15 FPS')
+    values = values or {}
     if start is None:
         start = datetime.now().replace(microsecond=0)
     elif isinstance(start, str):
@@ -34,7 +35,7 @@ def write_preview(package, output, seconds=10, fps=15, start=None):
     images, frames, seen = [], [], {}
     with tempfile.TemporaryDirectory() as scratch:
         raw = Path(scratch)/'frames.rgb'
-        run('preview', package, raw, epoch, fps, seconds*fps)
+        run('preview', package, raw, epoch, fps, seconds*fps, *(f'{k}={v}' for k, v in values.items()))
         with raw.open('rb') as source:
             expected = b'STP1'+struct.pack('<HHHH', 240, 240, fps, seconds*fps)
             if source.read(12) != expected:
@@ -52,7 +53,8 @@ def write_preview(package, output, seconds=10, fps=15, start=None):
                 frames.append(seen[digest])
             if source.read(1):
                 raise ValueError('Unexpected trailing preview bytes')
-    data = json.dumps({'images': images, 'frames': frames, 'fps': fps, 'epoch': epoch}, separators=(',', ':')).replace('<', '\\u003c')
+    data = json.dumps({'images': images, 'frames': frames, 'fps': fps, 'epoch': epoch, 'values': values},
+                       separators=(',', ':')).replace('<', '\\u003c')
     template = Path(__file__).with_name('theme_preview.html').read_text(encoding='utf-8')
     values = {'TITLE': html.escape(metadata['name']),
               'BYLINE': html.escape(metadata['author']+' · '+metadata['version']),

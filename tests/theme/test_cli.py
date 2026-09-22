@@ -127,6 +127,44 @@ class ThemeCliTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn('Traceback', result.stderr)
 
+    def test_preview_injects_declared_data_values(self):
+        with tempfile.TemporaryDirectory() as d:
+            source = Path(d)
+            manifest = {
+                'spec': 1,
+                'theme': {'id': 'dynamictest', 'name': 'Dynamic Test', 'author': 'Test', 'version': '1'},
+                'display': {'width': 240, 'height': 240, 'background': '#000000'},
+                'data': [{'id': 'sensor', 'url': 'https://example.com/data', 'interval': 60,
+                          'insecureTls': True,
+                          'fields': [{'id': 'label', 'path': 'label'}, {'id': 'level', 'path': 'level'}]}],
+                'layers': [
+                    {'id': 'scroller', 'type': 'text', 'x': 0, 'y': 0, 'value': '{sensor.label}', 'size': 8,
+                     'color': '#ffffff', 'scroll': {'width': 100, 'speed': 40, 'mode': 'loop', 'gap': 10}},
+                    {'id': 'bar', 'type': 'shape', 'shape': 'rectangle', 'x': 0, 'y': 100, 'width': 10, 'height': 10,
+                     'fill': '#00ff00',
+                     'bind': {'width': {'source': 'sensor.level', 'input': [0, 100], 'output': [1, 200]}}}]}
+            (source/'theme.json').write_text(json.dumps(manifest))
+            result = self.run_cli(
+                'preview', source, source/'dynamic.html', '--seconds', 2, '--fps', 10,
+                '--time', '2026-09-18T10:00:00',
+                '--data', 'sensor.label=ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                '--data', 'sensor.level=75')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = self.preview_data(source/'dynamic.html')
+            self.assertGreater(len(set(data['frames'])), 1)  # scroll moves
+            self.assertEqual(data['values']['sensor.level'], '75')
+
+            for args in (
+                ['--data', 'unknown.field=1'],
+                ['--data', 'sensor.level'],
+                ['--data', '=1'],
+                ['--data', 'sensor.level=1', '--data', 'sensor.level=2'],
+                [a for i in range(33) for a in ('--data', f'sensor.level={i}')],
+            ):
+                result = self.run_cli('preview', source, source/'bad.html', '--seconds', 1, '--fps', 1, *args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('Traceback', result.stderr)
+
     def test_corrupt_package_validation(self):
         with tempfile.TemporaryDirectory() as d:
             source = Path(d)/'broken.stheme'
