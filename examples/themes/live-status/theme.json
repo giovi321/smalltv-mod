@@ -1,0 +1,62 @@
+{
+  "spec": 1,
+  "theme": {"id": "live-status", "name": "Live Status", "author": "SmallTV Studio", "version": "1.0.0"},
+  "display": {"width": 240, "height": 240, "background": "#0b1420"},
+  "data": [
+    {
+      "id": "status",
+      "url": "http://192.168.1.10/status.json",
+      "interval": 10,
+      "fields": [
+        {"id": "label", "path": "label"},
+        {"id": "level", "path": "level"},
+        {"id": "state", "path": "state"}
+      ]
+    }
+  ],
+  "layers": [
+    {"id": "title", "type": "text", "x": 20, "y": 10, "value": "LIVE STATUS", "size": 12, "color": "#7f93ab"},
+    {"id": "divider", "type": "shape", "shape": "line", "x": 20, "y": 26, "x2": 220, "y2": 26, "stroke": "#233145", "strokeWidth": 1},
+    {
+      "id": "headline", "type": "text", "x": 20, "y": 38, "value": "{status.label}", "size": 12, "color": "#e9edf4",
+      "scroll": {"width": 200, "mode": "loop", "speed": 30, "pause": 1200, "gap": 24}
+    },
+    {
+      "id": "headline-bounce", "type": "text", "x": 20, "y": 60, "value": "{status.state} - {status.label}", "size": 12, "color": "#86e2bf",
+      "scroll": {"width": 200, "mode": "bounce", "speed": 25, "pause": 800}
+    },
+    {
+      "id": "level-track", "type": "shape", "shape": "rectangle", "x": 20, "y": 100, "width": 200, "height": 20,
+      "cornerRadius": 10, "fill": "#16202c"
+    },
+    {
+      "id": "level-bar", "type": "shape", "shape": "rectangle", "x": 20, "y": 100, "width": 1, "height": 20,
+      "cornerRadius": 10, "fill": "#35c46a",
+      "bind": {
+        "width": {"source": "status.level", "input": [0, 100], "output": [0, 200]},
+        "fill": {
+          "source": "status.level",
+          "stops": [
+            {"at": 0, "value": "#35c46a"},
+            {"at": 60, "value": "#f0b429"},
+            {"at": 80, "value": "#e5484d"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "level-caption", "type": "text", "x": 20, "y": 128, "value": "{status.level}%", "size": 12, "color": "#35c46a",
+      "bind": {
+        "color": {
+          "source": "status.level",
+          "stops": [
+            {"at": 0, "value": "#35c46a"},
+            {"at": 60, "value": "#f0b429"},
+            {"at": 80, "value": "#e5484d"}
+          ]
+        }
+      }
+    },
+    {"id": "state", "type": "text", "x": 20, "y": 160, "value": "Status: {status.state}", "size": 12, "color": "#9bacc1"}
+  ]
+}

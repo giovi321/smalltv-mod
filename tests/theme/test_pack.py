@@ -43,5 +43,17 @@ class PackTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pack.encode_image(Image.new('RGB', (241, 240)))
 
+    def test_live_status_example_is_dynamic_and_reproducible(self):
+        root = ROOT/'examples/themes/live-status'
+        manifest = json.loads((root/'theme.json').read_text())
+        layers = {layer['id']: layer for layer in manifest['layers']}
+        self.assertEqual(layers['headline']['scroll']['mode'], 'loop')
+        self.assertEqual(layers['headline-bounce']['scroll']['mode'], 'bounce')
+        self.assertIn('width', layers['level-bar']['bind'])
+        self.assertIn('fill', layers['level-bar']['bind'])
+        self.assertGreater(layers['level-track']['cornerRadius'], 0)
+        built = pack.build(root)
+        self.assertEqual(built, (ROOT/'examples/themes/live-status.stheme').read_bytes())
+
 if __name__ == '__main__':
     unittest.main()

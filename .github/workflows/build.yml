@@ -96,6 +96,8 @@ jobs:
           cmp examples/themes/pixel-room.stheme /tmp/pixel-room.stheme
           python3 tools/theme_pack.py examples/themes/terminal-ops /tmp/terminal-ops.stheme
           cmp examples/themes/terminal-ops.stheme /tmp/terminal-ops.stheme
+          python3 tools/theme_pack.py examples/themes/live-status /tmp/live-status.stheme
+          cmp examples/themes/live-status.stheme /tmp/live-status.stheme
           sh tests/theme/run.sh
           node tests/theme/test_webui.js
 
