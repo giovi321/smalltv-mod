@@ -851,13 +851,51 @@ static uint16_t blend(uint16_t bg,uint16_t fg,uint8_t a) {
     (((((fg>>5)&63)*a+((bg>>5)&63)*b+127)/255)<<5) |
     (((fg&31)*a+(bg&31)*b+127)/255);
 }
-static bool linePixel(const Layer& l,int x,int y) {
-  int64_t dx=l.x2-l.x,dy=l.y2-l.y,px=x-l.x,py=y-l.y;
+static bool linePixel(int lx,int ly,int lx2,int ly2,int strokeWidth,int x,int y) {
+  int64_t dx=lx2-lx,dy=ly2-ly,px=x-lx,py=y-ly;
   int64_t len=dx*dx+dy*dy,dot=px*dx+py*dy;
-  int64_t sw=l.strokeWidth;
+  int64_t sw=strokeWidth;
   if(dot<=0||len==0) return 4*(px*px+py*py)<=sw*sw;
-  if(dot>=len) {px=x-l.x2;py=y-l.y2;return 4*(px*px+py*py)<=sw*sw;}
+  if(dot>=len) {px=x-lx2;py=y-ly2;return 4*(px*px+py*py)<=sw*sw;}
   int64_t cross=px*dy-py*dx;return 4*cross*cross<=sw*sw*len;
+}
+// Classifies a pixel against a rounded rectangle's outer outline (fill) and the
+// outer-minus-inner ring (stroke), where the inner radius is max(0,radius-strokeWidth).
+static void roundedRectHit(int x,int y,int rx,int ry,int rw,int rh,int radius,int strokeWidth,
+                            bool& inside,bool& edge) {
+  if(radius<=0) {
+    inside=true;
+    edge=x-rx<strokeWidth||rx+rw-x<=strokeWidth||y-ry<strokeWidth||ry+rh-y<=strokeWidth;
+    return;
+  }
+  const bool left=x<rx+radius, right=x>=rx+rw-radius;
+  const bool top=y<ry+radius, bottom=y>=ry+rh-radius;
+  if(!((left||right)&&(top||bottom))) {
+    inside=true;
+    edge=x-rx<strokeWidth||rx+rw-x<=strokeWidth||y-ry<strokeWidth||ry+rh-y<=strokeWidth;
+    return;
+  }
+  const int64_t cx=left?rx+radius:rx+rw-radius-1;
+  const int64_t cy=top?ry+radius:ry+rh-radius-1;
+  const int64_t ddx=x-cx, ddy=y-cy;
+  const int64_t dist=ddx*ddx+ddy*ddy;
+  inside=dist<=int64_t(radius)*radius;
+  const int inner=std::max(0,radius-strokeWidth);
+  edge=inside&&(inner==0||dist>int64_t(inner)*inner);
+}
+// Maps a scrolling text layer's viewport-local x to its position within the
+// full expanded text, or returns false when that position falls in the gap
+// (loop mode) between repeated copies.
+static bool scrollContentColumn(const Layer& l,const LayerState& s,int textWidth,int local,int& contentX) {
+  if(!l.scroll.enabled) {contentX=local;return true;}
+  if(l.scroll.mode==ScrollMode::Loop) {
+    const int cycle=textWidth+l.scroll.gap;
+    if(cycle<=0) return false;
+    contentX=(local+s.scrollOffset)%cycle;
+    return contentX<textWidth;
+  }
+  contentX=local+s.scrollOffset;
+  return contentX<textWidth;
 }
 bool render(const Engine& e,const std::vector<Rect>& dirty,Assets& assets,Display& display) {
   uint16_t pixels[240], colors[240]; uint8_t alpha[240];
@@ -873,26 +911,35 @@ bool render(const Engine& e,const std::vector<Rect>& dirty,Assets& assets,Displa
         Rect r=intersect(s.bounds,Rect(region.x,y,region.w,1));if(r.empty()) continue;
         if(l.type==LayerType::Image||l.type==LayerType::Animation) {
           if(handles[i]==InvalidAsset) handles[i]=assets.resolve(assetPath(l,s.frame));
-          if(handles[i]==InvalidAsset || !assets.row(handles[i],y-l.y,r.x-l.x,r.w,colors,alpha)) return false;
+          if(handles[i]==InvalidAsset || !assets.row(handles[i],y-s.resolved.y,r.x-s.resolved.x,r.w,colors,alpha)) return false;
           for(int x=0;x<r.w;++x) pixels[r.x-region.x+x]=blend(pixels[r.x-region.x+x],colors[x],alpha[x]);
           continue;
         }
         for(int x=r.x;x<r.x+r.w;++x) {
           uint16_t c=0; bool draw=false;
           if(l.type==LayerType::Text) {
-            int cell=(l.size*6+7)/8, local=x-s.bounds.x;
-            int col=(local%cell)*6/cell, row=(y-s.bounds.y)*8/l.size;
-            draw=col<5 && (display.glyphColumn(s.text[local/cell],col)&(1<<row));c=l.color;
+            const int cell=(s.resolved.size*6+7)/8, local=x-s.bounds.x;
+            int contentX=0;
+            if(scrollContentColumn(l,s,textPixelWidth(s.resolved.size,s.text.size()),local,contentX)) {
+              const int col=(contentX%cell)*6/cell, charIndex=contentX/cell;
+              const int row=(y-s.bounds.y)*8/s.resolved.size;
+              draw=col<5 && charIndex<static_cast<int>(s.text.size()) &&
+                (display.glyphColumn(s.text[charIndex],col)&(1<<row));
+              c=s.resolved.color;
+            }
           } else {
             bool inside=false,edge=false;
             if(l.shape==Shape::Rectangle) {
-              inside=true;edge=x-l.x<l.strokeWidth || l.x+l.width-x<=l.strokeWidth || y-l.y<l.strokeWidth || l.y+l.height-y<=l.strokeWidth;
+              roundedRectHit(x,y,s.resolved.x,s.resolved.y,s.resolved.width,s.resolved.height,
+                              s.resolved.cornerRadius,s.resolved.strokeWidth,inside,edge);
             } else if(l.shape==Shape::Circle) {
-              int dx=x-l.x,dy=y-l.y,dist=dx*dx+dy*dy,inner=std::max(0,l.radius-l.strokeWidth);
-              inside=dist<=l.radius*l.radius;edge=inside && (inner==0||dist>inner*inner);
-            } else {inside=edge=linePixel(l,x,y);}
-            if(inside&&l.hasFill) {draw=true;c=l.fill;}
-            if(edge&&l.hasStroke) {draw=true;c=l.stroke;}
+              int dx=x-s.resolved.x,dy=y-s.resolved.y,dist=dx*dx+dy*dy,inner=std::max(0,s.resolved.radius-s.resolved.strokeWidth);
+              inside=dist<=s.resolved.radius*s.resolved.radius;edge=inside && (inner==0||dist>inner*inner);
+            } else {
+              inside=edge=linePixel(s.resolved.x,s.resolved.y,s.resolved.x2,s.resolved.y2,s.resolved.strokeWidth,x,y);
+            }
+            if(inside&&l.hasFill) {draw=true;c=s.resolved.fill;}
+            if(edge&&l.hasStroke) {draw=true;c=s.resolved.stroke;}
           }
           if(draw) pixels[x-region.x]=c;
         }
