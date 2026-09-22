@@ -96,6 +96,7 @@ int main() {
   assert(theme.layers[0].bindings[0].property==BoundProperty::X);
   assert(theme.layers[0].bindings[0].source=="weather.temp");
   assert(theme.layers[0].bindings[0].numeric.input0==0&&theme.layers[0].bindings[0].numeric.input1==40);
+  assert(theme.layers[0].bindings[0].numeric.clamp);
   assert(theme.layers[0].bindings[1].property==BoundProperty::Color);
   assert(theme.layers[0].bindings[1].color&&theme.layers[0].bindings[1].colors.stops.size()==2);
   assert(theme.layers[0].bindings[1].colors.stops[0].value==0x07e0);
@@ -113,6 +114,7 @@ int main() {
   deserializeJson(d,base);text=d["layers"][0];validScroll(text);text["scroll"]["speed"]=241;rejected(d);
   deserializeJson(d,base);text=d["layers"][0];validScroll(text);text["scroll"]["pause"]=-1;rejected(d);
   deserializeJson(d,base);text=d["layers"][0];validScroll(text);text["scroll"]["gap"]=241;rejected(d);
+  deserializeJson(d,base);text=d["layers"][0];validScroll(text);text["scroll"]["unknown"]=1;rejected(d);
   deserializeJson(d,base);text=d["layers"][0];validScroll(text);text["scroll"]["mode"]="sideways";serializeJson(d,json);
   assert(!parseTheme(json,theme,error));assert(error.find("layers[0].scroll.mode:")==0);
   deserializeJson(d,base);text=d["layers"][0];validScroll(text);text["scroll"]["mode"]="bounce";text["scroll"]["gap"]=0;rejected(d);
@@ -122,6 +124,8 @@ int main() {
   dataDocument(d);text=d["layers"][0];for(int i=0;i<9;++i) numericBinding(text,("unknown"+std::to_string(i)).c_str());rejected(d);
   dataDocument(d);text=d["layers"][0];numericBinding(text,"unknown");rejected(d);
   dataDocument(d);text=d["layers"][0];numericBinding(text,"x","missing.temp");rejected(d);
+  dataDocument(d);text=d["layers"][0];numericBinding(text,"x");text["bind"]["x"].remove("source");rejected(d);
+  dataDocument(d);text=d["layers"][0];numericBinding(text,"x");text["bind"]["x"]["source"]=42;rejected(d);
 
   // Numeric bindings require exactly the declared mapping fields and endpoints.
   dataDocument(d);text=d["layers"][0];numericBinding(text,"x");text["bind"]["x"]["extra"]=1;rejected(d);
@@ -132,12 +136,18 @@ int main() {
   assert(!parseTheme(json,theme,error));assert(error.find("layers[0].bind.x.input:")==0);
   dataDocument(d);text=d["layers"][0];numericBinding(text,"x");text["bind"]["x"]["output"][0]=0.5;rejected(d);
   dataDocument(d);text=d["layers"][0];numericBinding(text,"x");text["bind"]["x"]["output"][1]=480;rejected(d);
+  dataDocument(d);text=d["layers"][0];numericBinding(text,"x");text["bind"]["x"]["clamp"]="yes";rejected(d);
 
   // Color bindings require ordered finite stops with no numeric-mapping fields.
   dataDocument(d);text=d["layers"][0];colorBinding(text,"color");text["bind"]["color"]["input"].add(0);rejected(d);
   dataDocument(d);text=d["layers"][0];colorBinding(text,"color");text["bind"]["color"]["stops"].clear();rejected(d);
   dataDocument(d);text=d["layers"][0];colorBinding(text,"color");for(int i=0;i<7;++i) {JsonObject stop=text["bind"]["color"]["stops"].add<JsonObject>();stop["at"]=31+i;stop["value"]="#ffffff";}rejected(d);
   dataDocument(d);text=d["layers"][0];colorBinding(text,"color");text["bind"]["color"]["stops"][0]["at"]="bad";rejected(d);
+  dataDocument(d);text=d["layers"][0];colorBinding(text,"color");text["bind"]["color"]["stops"][0]=42;rejected(d);
+  dataDocument(d);text=d["layers"][0];colorBinding(text,"color");text["bind"]["color"]["stops"][0]["unknown"]=1;rejected(d);
+  dataDocument(d);text=d["layers"][0];colorBinding(text,"color");text["bind"]["color"]["stops"][0].remove("at");rejected(d);
+  dataDocument(d);text=d["layers"][0];colorBinding(text,"color");text["bind"]["color"]["stops"][0].remove("value");rejected(d);
+  dataDocument(d);text=d["layers"][0];colorBinding(text,"color");text["bind"]["color"]["stops"]=42;rejected(d);
   dataDocument(d);text=d["layers"][0];colorBinding(text,"color");text["bind"]["color"]["stops"][1]["at"]=0;serializeJson(d,json);
   assert(!parseTheme(json,theme,error));assert(error.find("layers[0].bind.color.stops[1].at:")==0);
   dataDocument(d);text=d["layers"][0];colorBinding(text,"color");text["bind"]["color"]["stops"][0]["value"]="red";rejected(d);
@@ -145,7 +155,26 @@ int main() {
   // Bindings cannot enable properties that a layer did not declare or support.
   dataDocument(d);text=d["layers"][0];text.clear();text["id"]="image";text["type"]="image";text["x"]=0;text["y"]=0;text["source"]="image.sti";numericBinding(text,"width");rejected(d);
   dataDocument(d);rectangle(d["layers"][0]);text=d["layers"][0];colorBinding(text,"stroke");rejected(d);
+  dataDocument(d);rectangle(d["layers"][0]);text=d["layers"][0];text.remove("fill");text["stroke"]="#ffffff";colorBinding(text,"fill");rejected(d);
   dataDocument(d);text=d["layers"][0];numericBinding(text,"scroll.width");rejected(d);
+
+  // Object-member uniqueness must be enforced before ArduinoJson coalesces duplicate keys.
+  const char* duplicateBinding=R"({"spec":1,"theme":{"id":"test","name":"Test","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"weather","url":"https://example.test/weather.json","interval":60,"insecureTls":true,"fields":[{"id":"temp","path":"main.temp"}]}],"layers":[{"id":"value","type":"text","x":0,"y":0,"value":"{weather.temp}","size":16,"color":"#ffffff","bind":{"x":{"source":"weather.temp","input":[0,40],"output":[0,200]},"x":{"source":"weather.temp","input":[0,40],"output":[20,220]}}}]})";
+  assert(!parseTheme(duplicateBinding,theme,error));assert(error.find("layers[0].bind.x:")==0);
+  json=duplicateBinding;json.replace(json.rfind("\"x\""),3,"\"\\u0078\"");
+  assert(!parseTheme(json,theme,error));assert(error.find("layers[0].bind.x:")==0);
+  json.replace(json.find("\"bind\""),6,"\"b\\u0069nd\"");
+  json.replace(json.find("\"layers\""),8,"\"lay\\u0065rs\"");
+  assert(!parseTheme(json,theme,error));assert(error.find("layers[0].bind.x:")==0);
+  // ArduinoJson accepts single quotes; an unsupported scanner spelling must not bypass validation.
+  json=duplicateBinding;json.replace(json.find("\"name\""),6,"'name'");
+  assert(!parseTheme(json,theme,error));
+  json=std::string("{\"ignored\":")+std::string(4000,'[')+"0"+std::string(4000,']')+"}";
+  assert(!parseTheme(json,theme,error));
+  // A regular escaped key remains accepted when it is unique.
+  dataDocument(d);numericBinding(d["layers"][0],"x");serializeJson(d,json);
+  json.replace(json.rfind("\"x\""),3,"\"\\u0078\"");
+  assert(parseTheme(json,theme,error));assert(theme.layers[0].bindings.size()==1);
 
   // Rounded corners are rectangle-only, integral, and bounded.
   deserializeJson(d,base);d["layers"][0]["cornerRadius"]=8;rejected(d);

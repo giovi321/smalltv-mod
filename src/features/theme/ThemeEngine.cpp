@@ -155,6 +155,151 @@ class Fields {
   std::string path_;
   std::string& error_;
 };
+// ArduinoJson retains only the last duplicate object member. Scan binding keys
+// in the raw manifest so that a manifest cannot silently replace a target.
+// Run only after JSON validation (including its eight-level nesting limit).
+// The manifest byte limit bounds string storage; at most eight keys are kept.
+class DuplicateBindingScanner {
+ public:
+  DuplicateBindingScanner(const std::string& input,std::string& error) : input_(input),error_(error) {}
+  bool valid() {
+    const bool scanned=scanRoot();
+    space();
+    if(scanned&&position_==input_.size()) return true;
+    if(error_.empty()) error_="theme.json: expected standard JSON object syntax";
+    return false;
+  }
+ private:
+  void space() { while(position_<input_.size()&&(input_[position_]==' '||input_[position_]=='\n'||input_[position_]=='\r'||input_[position_]=='\t')) ++position_; }
+  bool take(char expected) {
+    space();if(position_>=input_.size()||input_[position_]!=expected) return false;
+    ++position_;return true;
+  }
+  bool string(std::string& output) {
+    space();if(position_>=input_.size()||input_[position_++]!='\"') return false;
+    output.clear();
+    while(position_<input_.size()) {
+      unsigned char c=input_[position_++];
+      if(c=='\"') return true;
+      if(c<32) return false;
+      if(c!='\\') {output+=char(c);continue;}
+      if(position_>=input_.size()) return false;
+      c=input_[position_++];
+      if(c=='\"'||c=='\\'||c=='/') output+=char(c);
+      else if(c=='b'||c=='f'||c=='n'||c=='r'||c=='t') output+='?';
+      else if(c=='u') {
+        unsigned value=0;
+        for(int i=0;i<4;++i) {
+          if(position_>=input_.size()) return false;
+          unsigned char hex=input_[position_++];
+          int digit=hex>='0'&&hex<='9'?hex-'0':hex>='a'&&hex<='f'?hex-'a'+10:hex>='A'&&hex<='F'?hex-'A'+10:-1;
+          if(digit<0) return false;
+          value=(value<<4)|unsigned(digit);
+        }
+        output+=value<=127?char(value):'?';
+      } else return false;
+    }
+    return false;
+  }
+  bool value() {
+    space();if(position_>=input_.size()) return false;
+    if(input_[position_]=='{'||input_[position_]=='[') {
+      if(depth_==8) return false;
+      ++depth_;
+      const bool valid=input_[position_]=='{'?object():array();
+      --depth_;
+      return valid;
+    }
+    if(input_[position_]=='\"') {std::string ignored;return string(ignored);}
+    const size_t start=position_;
+    while(position_<input_.size()&&input_[position_]!=','&&input_[position_]!=']'&&input_[position_]!='}'&&input_[position_]!=' '&&input_[position_]!='\n'&&input_[position_]!='\r'&&input_[position_]!='\t') ++position_;
+    return position_>start;
+  }
+  bool object() {
+    if(!take('{')) return false;
+    space();if(position_<input_.size()&&input_[position_]=='}') {++position_;return true;}
+    for(;;) {
+      std::string key;if(!string(key)||!take(':')||!value()) return false;
+      space();if(position_>=input_.size()) return false;
+      if(input_[position_]=='}') {++position_;return true;}
+      if(input_[position_++]!=',') return false;
+    }
+  }
+  bool array() {
+    if(!take('[')) return false;
+    space();if(position_<input_.size()&&input_[position_]==']') {++position_;return true;}
+    for(;;) {
+      if(!value()) return false;
+      space();if(position_>=input_.size()) return false;
+      if(input_[position_]==']') {++position_;return true;}
+      if(input_[position_++]!=',') return false;
+    }
+  }
+  bool bindings(size_t layer) {
+    if(!take('{')) return false;
+    std::vector<std::string> seen;
+    space();if(position_<input_.size()&&input_[position_]=='}') {++position_;return true;}
+    for(;;) {
+      std::string key;if(!string(key)||!take(':')) return false;
+      for(const auto& old:seen) if(old==key) {
+        error_="layers["+std::to_string(layer)+"].bind."+key+": duplicate binding target";
+        return false;
+      }
+      if(seen.size()==8) {
+        error_="layers["+std::to_string(layer)+"].bind: expected at most 8 bindings";
+        return false;
+      }
+      seen.push_back(key);
+      if(!value()) return false;
+      space();if(position_>=input_.size()) return false;
+      if(input_[position_]=='}') {++position_;return true;}
+      if(input_[position_++]!=',') return false;
+    }
+  }
+  bool layer(size_t index) {
+    if(!take('{')) return false;
+    space();if(position_<input_.size()&&input_[position_]=='}') {++position_;return true;}
+    for(;;) {
+      std::string key;if(!string(key)||!take(':')) return false;
+      if(key=="bind") {
+        space();if(position_<input_.size()&&input_[position_]=='{') {if(!bindings(index)) return false;}
+        else if(!value()) return false;
+      } else if(!value()) return false;
+      space();if(position_>=input_.size()) return false;
+      if(input_[position_]=='}') {++position_;return true;}
+      if(input_[position_++]!=',') return false;
+    }
+  }
+  bool layers() {
+    if(!take('[')) return false;
+    size_t index=0;space();if(position_<input_.size()&&input_[position_]==']') {++position_;return true;}
+    for(;;) {
+      space();if(position_<input_.size()&&input_[position_]=='{') {if(!layer(index)) return false;}
+      else if(!value()) return false;
+      ++index;space();if(position_>=input_.size()) return false;
+      if(input_[position_]==']') {++position_;return true;}
+      if(input_[position_++]!=',') return false;
+    }
+  }
+  bool scanRoot() {
+    if(!take('{')) return false;
+    space();if(position_<input_.size()&&input_[position_]=='}') {++position_;return true;}
+    for(;;) {
+      std::string key;if(!string(key)||!take(':')) return false;
+      if(key=="layers") {
+        space();if(position_<input_.size()&&input_[position_]=='[') {if(!layers()) return false;}
+        else if(!value()) return false;
+      } else if(!value()) return false;
+      space();if(position_>=input_.size()) return false;
+      if(input_[position_]=='}') {++position_;return true;}
+      if(input_[position_++]!=',') return false;
+    }
+  }
+  const std::string& input_;
+  std::string& error_;
+  size_t position_=0;
+  unsigned depth_=0;
+};
 static bool numericProperty(const std::string& name,BoundProperty& property) {
   struct Name { const char* name; BoundProperty property; };
   static const Name names[]={
@@ -298,6 +443,7 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
   for(size_t i=reader.position;i<json.size();++i) {
     if(json[i]!=' '&&json[i]!='\n'&&json[i]!='\r'&&json[i]!='\t') {error="theme.json: trailing content after manifest";return false;}
   }
+  if(!DuplicateBindingScanner(json,error).valid()) return false;
   auto root=doc.as<JsonObjectConst>();Fields r(root,"",error);int spec=0;
   if(!r.keys("|spec|theme|display|layers|data|")||!r.number("spec",1,1,spec))return false;
   Theme t;
