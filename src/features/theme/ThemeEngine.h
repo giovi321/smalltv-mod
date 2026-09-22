@@ -12,10 +12,10 @@ constexpr size_t MaxLayers = 32;
 constexpr size_t MaxDataSources = 4;
 constexpr size_t MaxDataFields = 8;
 struct Rect {
-  int x=0, y=0, w=0, h=0;
+  int x = 0, y = 0, w = 0, h = 0;
   Rect() = default;
   Rect(int x_, int y_, int w_, int h_) : x(x_), y(y_), w(w_), h(h_) {}
-  bool empty() const { return w<=0 || h<=0; }
+  bool empty() const { return w <= 0 || h <= 0; }
 };
 Rect intersect(Rect a, Rect b);
 Rect unite(Rect a, Rect b);
@@ -25,55 +25,69 @@ enum class LayerType { Text, Image, Animation, Shape };
 enum class Shape { Rectangle, Circle, Line };
 enum class ScrollMode { Loop, Bounce };
 struct Scroll {
-  bool enabled=false;
-  int width=0, speed=0, pauseMs=1000, gap=24;
-  ScrollMode mode=ScrollMode::Loop;
+  bool enabled = false;
+  int width = 0, speed = 0, pauseMs = 1000, gap = 24;
+  ScrollMode mode = ScrollMode::Loop;
 };
 enum class BoundProperty {
-  X,Y,Width,Height,Radius,CornerRadius,X2,Y2,Size,StrokeWidth,
-  ScrollWidth,ScrollSpeed,Color,Fill,Stroke
+  X, Y, Width, Height, Radius, CornerRadius, X2, Y2, Size, StrokeWidth,
+  ScrollWidth, ScrollSpeed, Color, Fill, Stroke
 };
 struct NumericBinding {
-  double input0=0,input1=1;
-  int output0=0,output1=1;
-  bool clamp=true;
+  double input0 = 0, input1 = 1;
+  int output0 = 0, output1 = 1;
+  bool clamp = true;
 };
-struct ColorStop { double at=0; uint16_t value=0; };
-struct ColorBinding { std::vector<ColorStop> stops; };
+struct ColorStop {
+  double at = 0;
+  uint16_t value = 0;
+};
+struct ColorBinding {
+  std::vector<ColorStop> stops;
+};
 struct Binding {
-  BoundProperty property=BoundProperty::X;
+  BoundProperty property = BoundProperty::X;
   std::string source;
-  bool color=false;
+  bool color = false;
   NumericBinding numeric;
   ColorBinding colors;
 };
 struct ResolvedLayer {
-  int x=0,y=0,width=0,height=0,x2=0,y2=0,radius=0,cornerRadius=0;
-  int size=16,strokeWidth=1,scrollWidth=0,scrollSpeed=0;
-  uint16_t color=0xffff,fill=0,stroke=0;
+  int x = 0, y = 0, width = 0, height = 0, x2 = 0, y2 = 0, radius = 0, cornerRadius = 0;
+  int size = 16, strokeWidth = 1, scrollWidth = 0, scrollSpeed = 0;
+  uint16_t color = 0xffff, fill = 0, stroke = 0;
 };
-bool parseFiniteNumber(const std::string& value,double& number);
-int resolveNumericBinding(const NumericBinding& binding,double value,int lo,int hi);
-uint16_t resolveColorBinding(const ColorBinding& binding,double value);
+bool parseFiniteNumber(const std::string& value, double& number);
+int resolveNumericBinding(const NumericBinding& binding, double value, int lo, int hi);
+uint16_t resolveColorBinding(const ColorBinding& binding, double value);
 struct Layer {
   std::string id, value, source;
-  LayerType type=LayerType::Text;
-  Shape shape=Shape::Rectangle;
-  int x=0, y=0, width=0, height=0, x2=0, y2=0, radius=0;
-  int size=16, anchorX=0, anchorY=0, strokeWidth=1, cornerRadius=0;
-  uint16_t color=0xffff, fill=0, stroke=0;
-  bool hasFill=false, hasStroke=false, loop=true;
-  uint16_t frames=1, fps=1;
+  LayerType type = LayerType::Text;
+  Shape shape = Shape::Rectangle;
+  int x = 0, y = 0, width = 0, height = 0, x2 = 0, y2 = 0, radius = 0;
+  int size = 16, anchorX = 0, anchorY = 0, strokeWidth = 1, cornerRadius = 0;
+  uint16_t color = 0xffff, fill = 0, stroke = 0;
+  bool hasFill = false, hasStroke = false, loop = true;
+  uint16_t frames = 1, fps = 1;
   Scroll scroll;
   std::vector<Binding> bindings;
 };
-struct ThemeDataField { std::string id, path; };
-struct ThemeDataSource { std::string id, url; uint32_t interval=300; bool insecureTls=false; std::vector<ThemeDataField> fields; };
-struct ThemeValue { std::string key, value; };
-inline bool operator==(const ThemeValue& a,const ThemeValue& b) { return a.key==b.key&&a.value==b.value; }
+struct ThemeDataField {
+  std::string id, path;
+};
+struct ThemeDataSource {
+  std::string id, url;
+  uint32_t interval = 300;
+  bool insecureTls = false;
+  std::vector<ThemeDataField> fields;
+};
+struct ThemeValue {
+  std::string key, value;
+};
+inline bool operator==(const ThemeValue& a, const ThemeValue& b) { return a.key == b.key && a.value == b.value; }
 struct Theme {
   std::string id, name, author, version;
-  uint16_t background=0;
+  uint16_t background = 0;
   std::vector<Layer> layers;
   std::vector<ThemeDataSource> data;
 };
@@ -83,19 +97,19 @@ std::string expandText(const std::string& value, const tm* time, const std::vect
 std::string assetPath(const Layer& layer, uint16_t frame);
 struct LayerState {
   std::string text;
-  uint16_t frame=0;
+  uint16_t frame = 0;
   Rect bounds;
   ResolvedLayer resolved;
-  uint32_t lastMs=0, phase=0;
-  int scrollOffset=0, scrollDirection=-1;
-  uint32_t scrollPhase=0, scrollLastMs=0, scrollPauseUntil=0;
-  bool finished=false;
+  uint32_t lastMs = 0, phase = 0;
+  int scrollOffset = 0, scrollDirection = -1;
+  uint32_t scrollPhase = 0, scrollLastMs = 0, scrollPauseUntil = 0;
+  bool finished = false;
 };
 class Engine {
  public:
   void setTheme(Theme theme, uint32_t now);
   void setValues(std::vector<ThemeValue> values);
-  void invalidate() { full_=true; }
+  void invalidate() { full_ = true; }
   std::vector<Rect> update(uint32_t now, const tm* time);
   const Theme& theme() const { return theme_; }
   const std::vector<LayerState>& states() const { return states_; }
@@ -104,7 +118,7 @@ class Engine {
   Theme theme_;
   std::vector<LayerState> states_;
   std::vector<ThemeValue> values_;
-  bool full_=true, hadTime_=false, valuesChanged_=false;
+  bool full_ = true, hadTime_ = false, valuesChanged_ = false;
   tm lastTime_{};
 };
 // Assets deliver RGB565 and 8-bit opacity; a row never exceeds 240 pixels.
