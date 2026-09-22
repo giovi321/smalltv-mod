@@ -47,6 +47,14 @@ struct Binding {
   NumericBinding numeric;
   ColorBinding colors;
 };
+struct ResolvedLayer {
+  int x=0,y=0,width=0,height=0,x2=0,y2=0,radius=0,cornerRadius=0;
+  int size=16,strokeWidth=1,scrollWidth=0,scrollSpeed=0;
+  uint16_t color=0xffff,fill=0,stroke=0;
+};
+bool parseFiniteNumber(const std::string& value,double& number);
+int resolveNumericBinding(const NumericBinding& binding,double value,int lo,int hi);
+uint16_t resolveColorBinding(const ColorBinding& binding,double value);
 struct Layer {
   std::string id, value, source;
   LayerType type=LayerType::Text;
@@ -77,6 +85,7 @@ struct LayerState {
   std::string text;
   uint16_t frame=0;
   Rect bounds;
+  ResolvedLayer resolved;
   uint32_t lastMs=0, phase=0;
   bool finished=false;
 };
@@ -89,6 +98,7 @@ class Engine {
   const Theme& theme() const { return theme_; }
   const std::vector<LayerState>& states() const { return states_; }
  private:
+  void resolveLayer(size_t index);
   Theme theme_;
   std::vector<LayerState> states_;
   std::vector<ThemeValue> values_;

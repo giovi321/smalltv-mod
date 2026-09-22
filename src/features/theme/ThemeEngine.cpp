@@ -5,8 +5,10 @@
 #if !defined(ARDUINO) || WITH_THEME
 #include <ArduinoJson.h>
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 
@@ -40,6 +42,76 @@ bool validPath(const std::string& s) {
     }
   }
   return true;
+}
+static bool asciiSpace(char c) {
+  return c==' '||c=='\t'||c=='\n'||c=='\r'||c=='\f'||c=='\v';
+}
+static bool decimalSyntax(const char* begin,const char* end) {
+  const char* p=begin;
+  if(p!=end&&(*p=='+'||*p=='-')) ++p;
+  bool digits=false;
+  while(p!=end&&*p>='0'&&*p<='9') {digits=true;++p;}
+  if(p!=end&&*p=='.') {
+    ++p;
+    while(p!=end&&*p>='0'&&*p<='9') {digits=true;++p;}
+  }
+  if(!digits) return false;
+  if(p!=end&&(*p=='e'||*p=='E')) {
+    ++p;
+    if(p!=end&&(*p=='+'||*p=='-')) ++p;
+    const char* exponent=p;
+    while(p!=end&&*p>='0'&&*p<='9') ++p;
+    if(p==exponent) return false;
+  }
+  return p==end;
+}
+bool parseFiniteNumber(const std::string& value,double& number) {
+  const char* begin=value.c_str();
+  const char* end=begin+value.size();
+  while(begin!=end&&asciiSpace(*begin)) ++begin;
+  while(begin!=end&&asciiSpace(end[-1])) --end;
+  if(begin==end||!decimalSyntax(begin,end)) return false;
+  errno=0;
+  char* parsed=nullptr;
+  const double result=std::strtod(begin,&parsed);
+  if(parsed!=end||errno==ERANGE||!std::isfinite(result)) return false;
+  number=result;
+  return true;
+}
+static int clampInteger(int value,int lo,int hi) {
+  return std::max(lo,std::min(value,hi));
+}
+int resolveNumericBinding(const NumericBinding& binding,double value,int lo,int hi) {
+  if(lo>hi) std::swap(lo,hi);
+  if(!std::isfinite(value)||!std::isfinite(binding.input0)||
+     !std::isfinite(binding.input1)||binding.input0==binding.input1)
+    return clampInteger(binding.output0,lo,hi);
+  if(binding.clamp) {
+    const double inputLow=std::min(binding.input0,binding.input1);
+    const double inputHigh=std::max(binding.input0,binding.input1);
+    value=std::max(inputLow,std::min(value,inputHigh));
+  }
+  const long double input0=binding.input0,input1=binding.input1,source=value;
+  const long double scale=std::max(std::fabs(input0),std::fabs(input1));
+  if(scale==0) return clampInteger(binding.output0,lo,hi);
+  const long double denominator=input1/scale-input0/scale;
+  if(denominator==0) return clampInteger(binding.output0,lo,hi);
+  const long double position=(source/scale-input0/scale)/denominator;
+  const long double mapped=static_cast<long double>(binding.output0)+position*
+    (static_cast<long double>(binding.output1)-binding.output0);
+  if(std::isnan(mapped)) return clampInteger(binding.output0,lo,hi);
+  if(mapped<=lo) return lo;
+  if(mapped>=hi) return hi;
+  return static_cast<int>(std::round(mapped));
+}
+uint16_t resolveColorBinding(const ColorBinding& binding,double value) {
+  if(binding.stops.empty()) return 0;
+  uint16_t result=binding.stops.front().value;
+  for(const auto& stop:binding.stops) {
+    if(stop.at>value) break;
+    result=stop.value;
+  }
+  return result;
 }
 static const char* const tokens[]={"HH","hh","MM","SS","DD","MON","MONTH","WD","WEEKDAY","YYYY"};
 static bool validFieldToken(const std::string& token,const Theme& theme) {
@@ -580,21 +652,79 @@ std::string assetPath(const Layer& l,uint16_t frame) {
   char b[24]; snprintf(b,sizeof(b),"/%03u.png.sti",frame);
   return l.source+b;
 }
-static Rect bounds(const Layer& l,const std::string& text) {
+void Engine::resolveLayer(size_t index) {
+  const Layer& layer=theme_.layers[index];
+  ResolvedLayer resolved;
+  resolved.x=layer.x;resolved.y=layer.y;resolved.width=layer.width;resolved.height=layer.height;
+  resolved.x2=layer.x2;resolved.y2=layer.y2;resolved.radius=layer.radius;
+  resolved.cornerRadius=layer.cornerRadius;resolved.size=layer.size;
+  resolved.strokeWidth=layer.strokeWidth;resolved.scrollWidth=layer.scroll.width;
+  resolved.scrollSpeed=layer.scroll.speed;resolved.color=layer.color;
+  resolved.fill=layer.fill;resolved.stroke=layer.stroke;
+  for(const auto& binding:layer.bindings) {
+    const std::string* source=nullptr;
+    for(const auto& item:values_) if(item.key==binding.source) {source=&item.value;break;}
+    double value=0;
+    if(!source||!parseFiniteNumber(*source,value)) continue;
+    if(binding.color) {
+      const uint16_t color=resolveColorBinding(binding.colors,value);
+      if(binding.property==BoundProperty::Color) resolved.color=color;
+      else if(binding.property==BoundProperty::Fill) resolved.fill=color;
+      else if(binding.property==BoundProperty::Stroke) resolved.stroke=color;
+      continue;
+    }
+    int lo=0,hi=0;
+    if(!propertyRange(binding.property,lo,hi)) continue;
+    const int number=resolveNumericBinding(binding.numeric,value,lo,hi);
+    switch(binding.property) {
+      case BoundProperty::X: resolved.x=number;break;
+      case BoundProperty::Y: resolved.y=number;break;
+      case BoundProperty::Width: resolved.width=number;break;
+      case BoundProperty::Height: resolved.height=number;break;
+      case BoundProperty::Radius: resolved.radius=number;break;
+      case BoundProperty::CornerRadius: resolved.cornerRadius=number;break;
+      case BoundProperty::X2: resolved.x2=number;break;
+      case BoundProperty::Y2: resolved.y2=number;break;
+      case BoundProperty::Size: resolved.size=number;break;
+      case BoundProperty::StrokeWidth: resolved.strokeWidth=number;break;
+      case BoundProperty::ScrollWidth: resolved.scrollWidth=number;break;
+      case BoundProperty::ScrollSpeed: resolved.scrollSpeed=number;break;
+      default: break;
+    }
+  }
+  if(layer.type==LayerType::Shape&&layer.shape==Shape::Rectangle)
+    resolved.cornerRadius=std::min(resolved.cornerRadius,
+      std::max(0,std::min(resolved.width,resolved.height)/2));
+  states_[index].resolved=resolved;
+}
+static bool sameGeometry(const ResolvedLayer& a,const ResolvedLayer& b) {
+  return a.x==b.x&&a.y==b.y&&a.width==b.width&&a.height==b.height&&
+    a.x2==b.x2&&a.y2==b.y2&&a.radius==b.radius&&
+    a.cornerRadius==b.cornerRadius&&a.size==b.size&&
+    a.strokeWidth==b.strokeWidth&&a.scrollWidth==b.scrollWidth;
+}
+static bool sameColors(const ResolvedLayer& a,const ResolvedLayer& b) {
+  return a.color==b.color&&a.fill==b.fill&&a.stroke==b.stroke;
+}
+static Rect bounds(const Layer& l,const ResolvedLayer& resolved,const std::string& text) {
   if(l.type==LayerType::Text) {
-    int w=static_cast<int>(text.size())*((l.size*6+7)/8);
-    return Rect(l.x-w*l.anchorX/2,l.y-l.size*l.anchorY/2,w,l.size);
+    int w=static_cast<int>(text.size())*((resolved.size*6+7)/8);
+    return Rect(resolved.x-w*l.anchorX/2,resolved.y-resolved.size*l.anchorY/2,w,resolved.size);
   }
-  if(l.type==LayerType::Shape && l.shape==Shape::Circle) return Rect(l.x-l.radius,l.y-l.radius,2*l.radius+1,2*l.radius+1);
+  if(l.type==LayerType::Shape && l.shape==Shape::Circle && resolved.radius==0)
+    return Rect(resolved.x,resolved.y,0,0);
+  if(l.type==LayerType::Shape && l.shape==Shape::Circle)
+    return Rect(resolved.x-resolved.radius,resolved.y-resolved.radius,2*resolved.radius+1,2*resolved.radius+1);
   if(l.type==LayerType::Shape && l.shape==Shape::Line) {
-    int pad=(l.strokeWidth+1)/2;
-    return Rect(std::min(l.x,l.x2)-pad,std::min(l.y,l.y2)-pad,abs(l.x-l.x2)+2*pad+1,abs(l.y-l.y2)+2*pad+1);
+    int pad=(resolved.strokeWidth+1)/2;
+    return Rect(std::min(resolved.x,resolved.x2)-pad,std::min(resolved.y,resolved.y2)-pad,
+      abs(resolved.x-resolved.x2)+2*pad+1,abs(resolved.y-resolved.y2)+2*pad+1);
   }
-  return Rect(l.x,l.y,l.width,l.height);
+  return Rect(resolved.x,resolved.y,resolved.width,resolved.height);
 }
 void Engine::setTheme(Theme theme,uint32_t now) {
   theme_=std::move(theme); states_.assign(theme_.layers.size(),LayerState{});
-  for(auto& s:states_) s.lastMs=now;
+  for(size_t i=0;i<states_.size();++i) {states_[i].lastMs=now;resolveLayer(i);}
   full_=true;
 }
 void Engine::setValues(std::vector<ThemeValue> values) {
@@ -618,6 +748,11 @@ std::vector<Rect> Engine::update(uint32_t now,const tm* time) {
   hadTime_=bool(time); if(time) lastTime_=*time;
   for(size_t i=0;i<states_.size();++i) {
     auto& s=states_[i]; const auto& l=theme_.layers[i]; bool changed=full_;
+    if(valuesChanged_) {
+      const ResolvedLayer previous=s.resolved;
+      resolveLayer(i);
+      changed=changed||!sameGeometry(previous,s.resolved)||!sameColors(previous,s.resolved);
+    }
     if(l.type==LayerType::Text && (timeChanged || valuesChanged_)) {
       std::string text=expandText(l.value,time,values_);
       if(text!=s.text) {s.text=std::move(text);changed=true;}
@@ -628,7 +763,7 @@ std::vector<Rect> Engine::update(uint32_t now,const tm* time) {
       if(!l.loop && next==l.frames-1) s.finished=true;
       if(next!=s.frame) {s.frame=next;changed=true;}
     }
-    Rect next=bounds(l,s.text);
+    Rect next=bounds(l,s.resolved,s.text);
     if(changed&&!full_) addDirty(dirty,unite(s.bounds,next));
     s.bounds=next;
   }
