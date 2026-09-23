@@ -10,6 +10,10 @@ constexpr uint32_t DataTimeoutMs = 3000;
 
 // Stream supplies a monotonic clock and nonblocking socket reads. Limit total
 // elapsed time, including slow trickles; a socket's idle timeout is insufficient.
+// `length` is the declared Content-Length, or -1 for chunked/unknown length
+// (HTTPClient already de-chunks the stream; here that just means "read until
+// the connection closes" instead of "read until N bytes"), capped either way
+// at MaxDataBody so a source cannot force an unbounded allocation.
 template <class Stream>
 bool readDataBody(Stream& stream, int length, std::string& body) {
   body.clear();
@@ -37,6 +41,15 @@ bool readDataBody(Stream& stream, int length, std::string& body) {
   }
 }
 
+// One in-flight (or just-completed) fetch, shared between the display loop
+// and whatever actually performs the request -- a FreeRTOS task on ESP32, or
+// a direct synchronous call on ESP8266 (see startThemeDataFetch in
+// ThemeDataClient.cpp for both). `cancelled_`/`finished_` are the only fields
+// either side may touch after construction, so they are atomic; `source`,
+// `index`, and `values` are written once by their respective owner and never
+// contended. `finish()`'s release / `finished()`'s acquire pairing is what
+// makes `values` (written just before finish()) visible to the reader once
+// finished() observes true.
 struct DataFetch {
   ThemeDataSource source;
   size_t index;
@@ -60,12 +73,17 @@ class DataRequests {
  public:
   ~DataRequests() { cancel(); }
   bool busy() const { return bool(pending_); }
+  // Refuses a second request while one is already pending -- callers must
+  // check busy() first; this only guards against a caller that does not.
   std::shared_ptr<DataFetch> start(const ThemeDataSource& source, size_t index) {
     if (pending_) return {};
     pending_ = std::make_shared<DataFetch>(source, index);
     return pending_;
   }
   void cancel() { if (pending_) pending_->cancel(); }
+  // Returns the finished result once, or nothing if still pending or if it
+  // was cancelled (a cancelled fetch's values are stale by definition, e.g.
+  // from a theme that has since been switched away from).
   std::shared_ptr<DataFetch> take() {
     if (!pending_ || !pending_->finished()) return {};
     auto result = std::move(pending_);

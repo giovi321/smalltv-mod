@@ -17,6 +17,9 @@ unsigned uploadParts = 0;
 uint32_t uploaded = 0, uploadBudget = 0;
 constexpr unsigned MaxThemes = 16;
 const char* staging = "/themes/.upload";
+// Every theme API route replies with the same small JSON shape: `{"id":...}`
+// on success, `{"error":...}` otherwise, keyed by whether `code` is a success
+// status.
 void reply(int code, const String& message) {
   JsonDocument doc;
   doc[code < 300 ? "id" : "error"] = message;
@@ -48,6 +51,13 @@ void resetUpload() {
   uploadEnded = false;
   uploaded = 0;
 }
+// The web server framework streams a multipart upload through repeated calls
+// to this handler (START, then one or more WRITE, then END or ABORTED), with
+// the request body itself validated and stored in finishUpload() only after
+// it is complete. Every check here is about the *stream*, not the package
+// format: exactly one file, auth, a plausible filename, the theme count
+// limit, and available storage, all determined before a single byte is
+// written to the staging file so a doomed upload fails fast.
 void receiveUpload() {
   HTTPUpload& up = server->upload();
   if (up.status == UPLOAD_FILE_START) {
@@ -71,7 +81,9 @@ void receiveUpload() {
       return;
     }
     LittleFS.remove(staging);
-    // Preserve room for an atomic settings replacement and filesystem metadata.
+    // Preserve room for a settings rewrite plus filesystem metadata overhead,
+    // so a large upload cannot leave too little space for the device to save
+    // its own configuration afterward.
     JsonDocument config;
     settingsToJson(*settings, config.to<JsonObject>(), true);
     size_t reserve = measureJson(config) + 4096;
@@ -106,6 +118,10 @@ void receiveUpload() {
     uploadError = "Upload aborted";
   }
 }
+// Runs once the multipart body is fully received: validates the staged file
+// with the same Package::load() the device uses at runtime (so an accepted
+// upload is guaranteed installable), then publishes it under a filename
+// derived from the theme's own declared ID.
 void finishUpload() {
   if (!auth()) {
     resetUpload();
@@ -138,6 +154,8 @@ void finishUpload() {
     resetUpload();
     return;
   }
+  // Rename, not copy: the staging file becomes the installed one atomically,
+  // so a partially-installed package is never visible to listThemes().
   if (!LittleFS.rename(staging, target)) {
     reply(500, "Cannot publish package");
     resetUpload();
@@ -146,6 +164,10 @@ void finishUpload() {
   reply(201, theme.id.c_str());
   resetUpload();
 }
+// Shared by select/delete: reads a JSON body's `id` and validates it as a
+// well-formed theme ID before either route touches the filesystem.
+// `id.length() != strlen(id.c_str())` catches an embedded NUL byte ArduinoJson
+// would otherwise pass through silently.
 bool requestId(String& id) {
   if (!server->hasArg("plain") || server->arg("plain").length() > 128) {
     reply(400, "Expected JSON with id");
@@ -163,6 +185,10 @@ bool requestId(String& id) {
   }
   return true;
 }
+// GET /api/themes: every installed package's metadata and validity, without
+// requiring any of them to be the currently active theme -- inspectInstalledTheme()
+// runs the same validator a selection would use, so an invalid or corrupt
+// package still gets listed (with its error), just not selectable.
 void listThemes() {
   if (!auth()) return;
   JsonDocument doc;
@@ -197,6 +223,11 @@ void listThemes() {
   serializeJson(doc, json);
   server->send(200, "application/json", json);
 }
+// POST /api/themes/select: re-validates the package before committing to it,
+// so a corrupt or invalid installed theme can never become the active
+// selection (it can still be listed and removed, just not selected). Settings
+// are rolled back in memory if the save itself fails, so a failed selection
+// never leaves `settings` disagreeing with what was actually persisted.
 void selectTheme() {
   if (!auth()) return;
   String id;
@@ -229,6 +260,10 @@ void selectTheme() {
   appInvalidate();
   reply(200, id);
 }
+// POST /api/themes/delete: refuses to remove a package that is both selected
+// and currently valid (it would silently blank the active display); removing
+// a selected-but-invalid one is allowed, since keeping it installed serves no
+// purpose once it can never render.
 void deleteTheme() {
   if (!auth()) return;
   String id;
@@ -263,6 +298,9 @@ void deleteTheme() {
   reply(200, id);
 }
 }
+// Registers the theme API routes on the shared web server; `requireAuth`
+// is the same digest-auth check every other route in the device uses, so
+// theme install/select/delete get identical protection without duplicating it.
 void themeWebBegin(WebServerClass& web, Settings& s, bool (*requireAuth)()) {
   server = &web;
   settings = &s;

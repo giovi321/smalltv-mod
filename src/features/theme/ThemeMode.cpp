@@ -10,6 +10,11 @@
 
 ThemeMode g_themeMode;
 namespace {
+// Adapts the portable engine's Display interface to this device's actual
+// panel: glyphColumn() reads the built-in font from flash (PROGMEM), and
+// row() applies the usual panel color tint before handing the row to the
+// GFX driver. yield() every 16 rows keeps a large dirty region from starving
+// WiFi/other tasks during a long render.
 class Panel : public smalltv::Display {
  public:
   uint8_t glyphColumn(uint8_t c, uint8_t col) const override {
@@ -25,8 +30,13 @@ class Panel : public smalltv::Display {
 }
 void ThemeMode::begin(const Settings&) {
   LittleFS.mkdir("/themes");
+  // An interrupted install leaves its staging file behind; boot is the one
+  // point it is safe to remove without racing a request in progress.
   LittleFS.remove("/themes/.upload");
 }
+// Drops every bit of state for the currently loaded theme -- the open
+// package/file, any in-flight or fetched data, and the engine itself -- so
+// the next service() call starts a clean load from scratch.
 void ThemeMode::unload() {
   dataRequests_.cancel();
   dataRequests_.take();
@@ -42,10 +52,16 @@ void ThemeMode::unload() {
   attempted_ = messageDrawn_ = false;
   error_ = "";
 }
+// Collects a finished fetch (if any) and, with at most one request in flight
+// at a time, starts the next source whose interval has elapsed, round-robin
+// over sources so no single slow/failing one starves the others.
 void ThemeMode::refreshData() {
   const auto& sources = engine_.theme().data;
   if (auto result = dataRequests_.take()) {
     if (result->success) {
+      // Merge into the running set by key rather than replace it wholesale:
+      // a source's fields persist across refreshes of the *other* sources, so
+      // a slow source does not blank fields a fast one already delivered.
       for (auto& value : result->values) {
         auto existing = std::find_if(dataValues_.begin(), dataValues_.end(), [&](const smalltv::ThemeValue& old) { return old.key == value.key; });
         if (existing == dataValues_.end()) dataValues_.push_back(std::move(value));
@@ -57,6 +73,9 @@ void ThemeMode::refreshData() {
     dataNextMs_[result->index] = millis() + sources[result->index].interval * 1000UL;
   }
   if (sources.empty() || dataRequests_.busy() || WiFi.status() != WL_CONNECTED) return;
+  // Scan forward from `dataCursor_` for the first source that is due (an
+  // unscheduled one always is), start it, and advance the cursor past it --
+  // so a source that just fired goes to the back of the round-robin queue.
   for (size_t offset = 0; offset < sources.size(); ++offset) {
     size_t i = (dataCursor_ + offset) % sources.size();
     if (dataScheduled_[i] && static_cast<int32_t>(millis() - dataNextMs_[i]) < 0) continue;
@@ -67,6 +86,10 @@ void ThemeMode::refreshData() {
     break;
   }
 }
+// Called when the theme should be redrawn from scratch, e.g. when a
+// notification overlay just finished. Switches to a different theme by
+// unloading first; otherwise leaves the loaded package alone and only marks
+// the engine's next update() as a full repaint.
 void ThemeMode::invalidate(const Settings& s) {
   if (loadedId_ != s.themeId || s.mode != MODE_THEME) unload();
   // A failed load may be retried after installation or settings changes.
@@ -74,6 +97,11 @@ void ThemeMode::invalidate(const Settings& s) {
   engine_.invalidate();
   messageDrawn_ = false;
 }
+// Per-frame entry point: loads the selected theme at most once per selection
+// (via `attempted_`, so a failed load is not retried every call -- only on
+// the next invalidate()/selection change), then renders it. `attempted_` and
+// `loadedId_` together are the load state machine; everything past the load
+// block runs every call once a package is open.
 void ThemeMode::service(const Settings& s) {
   if (loadedId_ != s.themeId) unload();
   if (!attempted_) {
@@ -120,6 +148,9 @@ void ThemeMode::service(const Settings& s) {
   bool valid = clockNow(t);
   Panel panel;
   auto dirty = engine_.update(millis(), valid ? &t : nullptr);
+  // A render failure (a corrupt or truncated asset read mid-frame) is treated
+  // like a load failure: drop the package and show an error rather than
+  // risk repeatedly failing on every subsequent frame.
   if (!smalltv::render(engine_, dirty, *package_, panel)) {
     dataRequests_.cancel();
     dataRequests_.take();

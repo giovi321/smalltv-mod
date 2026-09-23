@@ -13,6 +13,9 @@
 #include <utility>
 
 namespace smalltv {
+// Dirty-rectangle primitives: intersect() clips a region to the canvas or to
+// another layer's row; unite() merges overlapping repaint regions so update()
+// never reports more rectangles than necessary.
 Rect intersect(Rect a, Rect b) {
   int x = std::max(a.x, b.x), y = std::max(a.y, b.y);
   return Rect(x, y, std::max(0, std::min(a.x + a.w, b.x + b.w) - x), std::max(0, std::min(a.y + a.h, b.y + b.h) - y));
@@ -23,11 +26,17 @@ Rect unite(Rect a, Rect b) {
   int x = std::min(a.x, b.x), y = std::min(a.y, b.y);
   return Rect(x, y, std::max(a.x + a.w, b.x + b.w) - x, std::max(a.y + a.h, b.y + b.h) - y);
 }
+// Theme/layer/data-source/field IDs: 1-48 ASCII letters, digits, '-' or '_'.
+// No '.' -- the dotted "<source>.<field>" token syntax relies on that.
 bool validId(const std::string& s) {
   if (s.empty() || s.size() > 48) return false;
   for (char c : s) if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
   return true;
 }
+// A safe relative asset path: '/'-separated components of ASCII letters,
+// digits, '-', '_', '.', with no empty, '.', or '..' component and no leading
+// or trailing '/'. This is what keeps a package's `source` from escaping the
+// package or reaching an absolute filesystem path.
 bool validPath(const std::string& s) {
   if (s.empty() || s.size() > 120 || s.front() == '/' || s.back() == '/') return false;
   size_t start = 0;
@@ -46,6 +55,12 @@ bool validPath(const std::string& s) {
 static bool asciiSpace(char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
+// strtod() alone is too permissive for a fetched-value parser: it accepts hex
+// floats (0x1p0) and locale-dependent forms, and it silently stops at the
+// first non-numeric character rather than rejecting trailing garbage. This
+// walks a strict decimal grammar first and only then hands the pre-validated
+// span to strtod(), so a value like "12abc" or "0x10" is rejected outright
+// instead of read as a truncated or unintended number.
 static bool decimalSyntax(const char* begin, const char* end) {
   const char* p = begin;
   if (p != end && (*p == '+' || *p == '-')) ++p;
@@ -71,6 +86,11 @@ static bool decimalSyntax(const char* begin, const char* end) {
   }
   return p == end;
 }
+// Parses a fetched field's text as a finite number for a binding, trimming
+// ASCII whitespace but rejecting anything strtod() would otherwise accept
+// loosely (infinities, NaN spellings, trailing junk). A binding's source
+// falling back to the layer's static value (see Engine::resolveLayer) starts
+// here: any false return leaves that fallback in place.
 bool parseFiniteNumber(const std::string& value, double& number) {
   const char* begin = value.c_str();
   const char* end = begin + value.size();
@@ -87,6 +107,20 @@ bool parseFiniteNumber(const std::string& value, double& number) {
 static int clampInteger(int value, int lo, int hi) {
   return std::max(lo, std::min(value, hi));
 }
+// Linear-maps a fetched value through a NumericBinding to an integer property,
+// per the "Numeric mapping" contract in docs/features/themes.md: clamp (or
+// extrapolate) between input0/input1, scale to output0/output1, round half
+// away from zero, then clamp to the property's own safe [lo, hi] range
+// regardless of `clamp` -- that final clamp is mandatory and not something a
+// theme can opt out of.
+//
+// The direct formula `output0 + (value-input0)*(output1-output0)/(input1-input0)`
+// is used whenever it stays finite. Declared endpoints are unconstrained by
+// the parser beyond "finite and different", so a theme can legally set them
+// to something like 1e300 and -1e300; at that scale the direct numerator or
+// denominator can overflow even `long double`. The fallback branch instead
+// divides every term by the larger endpoint's magnitude first, trading a
+// little precision for staying finite at the extremes.
 int resolveNumericBinding(const NumericBinding& binding, double value, int lo, int hi) {
   if (lo > hi) std::swap(lo, hi);
   if (!std::isfinite(value) || !std::isfinite(binding.input0) ||
@@ -105,6 +139,9 @@ int resolveNumericBinding(const NumericBinding& binding, double value, int lo, i
   if (std::isfinite(inputDelta) && std::isfinite(numerator)) {
     mapped = static_cast<long double>(binding.output0) + numerator / inputDelta;
   } else {
+    // Scaled fallback: normalize both endpoints by their larger magnitude
+    // before subtracting, so the intermediate values used for the ratio stay
+    // within a representable range even when the raw endpoints do not.
     const long double scale = std::max(std::fabs(input0), std::fabs(input1));
     if (scale == 0) return clampInteger(binding.output0, lo, hi);
     const long double denominator = input1 / scale - input0 / scale;
@@ -117,6 +154,11 @@ int resolveNumericBinding(const NumericBinding& binding, double value, int lo, i
   if (mapped >= hi) return hi;
   return static_cast<int>(std::round(mapped));
 }
+// Picks the last stop whose `at` is <= value; a value below the first stop
+// uses the first stop's color. Stops are parsed in strictly increasing `at`
+// order (DuplicateBindingScanner/parseBindings below enforce that), so a
+// simple linear scan that keeps overwriting `result` is enough -- no need to
+// search for the tightest bracketing pair.
 uint16_t resolveColorBinding(const ColorBinding& binding, double value) {
   if (binding.stops.empty()) return 0;
   uint16_t result = binding.stops.front().value;
@@ -126,7 +168,13 @@ uint16_t resolveColorBinding(const ColorBinding& binding, double value) {
   }
   return result;
 }
+// Clock/date tokens recognized inside {...} regardless of what data sources a
+// theme declares; anything else must resolve to a declared "<source>.<field>".
 static const char* const tokens[] = {"HH", "hh", "MM", "SS", "DD", "MON", "MONTH", "WD", "WEEKDAY", "YYYY"};
+// True if `token` is a declared "<source-id>.<field-id>" reference: both
+// halves must be valid IDs, and the source and field must actually appear in
+// this theme's `data` block. Shared between text-template validation
+// (validText) and binding source validation (declaredSource).
 static bool validFieldToken(const std::string& token, const Theme& theme) {
   size_t dot = token.find('.');
   if (dot == std::string::npos || dot == 0 || dot + 1 >= token.size()) return false;
@@ -138,6 +186,9 @@ static bool validFieldToken(const std::string& token, const Theme& theme) {
   }
   return false;
 }
+// A text `value` template: printable ASCII only, with every {...} span either
+// a clock token or a declared data-field reference. A bare '}' outside a
+// {...} span is rejected so authors cannot accidentally leave one unmatched.
 static bool validText(const std::string& s, const Theme& theme) {
   if (s.size() > 128) return false;
   for (size_t i = 0; i < s.size(); ++i) {
@@ -153,6 +204,9 @@ static bool validText(const std::string& s, const Theme& theme) {
   }
   return true;
 }
+// Adapts a std::string to ArduinoJson's Reader interface so deserializeJson()
+// streams directly from the manifest buffer already held by the caller,
+// instead of ArduinoJson copying it into its own buffer first.
 struct JsonReader {
   const std::string& input;
   size_t position = 0;
@@ -165,6 +219,8 @@ struct JsonReader {
     return count;
   }
 };
+// Parses a "#RRGGBB" string into RGB565 (5/6/5 bits), the format the
+// renderer and the .sti asset container both use directly.
 static bool parseColor(JsonVariantConst v, uint16_t& out) {
   if (!v.is<const char*>()) return false;
   JsonString s = v.as<JsonString>();
@@ -193,6 +249,11 @@ class Fields {
     error_ = (path.empty() ? "theme.json" : path) + ": " + reason;
     return false;
   }
+  // Rejects any object key not present in `allowed`, a '|'-delimited list
+  // like "|id|type|x|y|" (leading/trailing '|' so every entry, including the
+  // first and last, matches the same "|name|" scan). This is what makes an
+  // unknown field a manifest error instead of a silently ignored one, and
+  // what makes the allowed-key set differ per layer type/shape.
   bool keys(const char* allowed) const {
     if (object_.isNull()) return fail("", "expected an object");
     for (JsonPairConst p : object_) {
@@ -257,6 +318,9 @@ class Fields {
     value = v.as<double>();
     return std::isfinite(value) || fail(key, "expected a finite number");
   }
+  // Used to distinguish "field omitted" from "field present with its default
+  // value" for the handful of optional fields (pause, gap, clamp, ...) whose
+  // absence should keep a struct default rather than overwrite it with 0.
   bool has(const char* key) const {
     for (JsonPairConst pair : object_) if (pair.key().size() == strlen(key) && !memcmp(pair.key().c_str(), key, pair.key().size())) return true;
     return false;
@@ -281,6 +345,9 @@ class DuplicateBindingScanner {
     return false;
   }
  private:
+  // This is a minimal, purpose-built JSON walker: it only needs to reach
+  // every `bind` object's keys in source order, so it does not build any
+  // value representation, just skips over whatever it is not looking at.
   void space() { while (position_ < input_.size() && (input_[position_] == ' ' || input_[position_] == '\n' || input_[position_] == '\r' || input_[position_] == '\t')) ++position_; }
   bool take(char expected) {
     space();
@@ -318,6 +385,8 @@ class DuplicateBindingScanner {
     }
     return false;
   }
+  // Skips one JSON value without interpreting it -- used for every value this
+  // scanner does not otherwise care about (anything outside `layers[].bind`).
   bool value() {
     space();
     if (position_ >= input_.size()) return false;
@@ -373,6 +442,10 @@ class DuplicateBindingScanner {
       if (input_[position_++] != ',') return false;
     }
   }
+  // The one object this whole scanner exists for: walks a layer's `bind`
+  // object key by key, in source order, so a repeated key is caught before
+  // ArduinoJson's parsed representation has already silently kept only the
+  // last occurrence.
   bool bindings(size_t layer) {
     if (!take('{')) return false;
     std::vector<std::string> seen;
@@ -403,6 +476,8 @@ class DuplicateBindingScanner {
       if (input_[position_++] != ',') return false;
     }
   }
+  // Walks one layer object, descending into `bind` specifically and skipping
+  // every other key via value().
   bool layer(size_t index) {
     if (!take('{')) return false;
     space();
@@ -451,6 +526,8 @@ class DuplicateBindingScanner {
       if (input_[position_++] != ',') return false;
     }
   }
+  // Entry point: descends into the root object's `layers` array specifically
+  // and skips everything else, since only layers can declare `bind`.
   bool scanRoot() {
     if (!take('{')) return false;
     space();
@@ -481,6 +558,9 @@ class DuplicateBindingScanner {
   size_t position_ = 0;
   unsigned depth_ = 0;
 };
+// Maps a `bind` object's key to the numeric BoundProperty it names, or false
+// if the name is not a numeric property at all (it might still be a color
+// one -- see colorProperty below).
 static bool numericProperty(const std::string& name, BoundProperty& property) {
   struct Name {
     const char* name;
@@ -501,6 +581,8 @@ static bool numericProperty(const std::string& name, BoundProperty& property) {
   return false;
 }
 static bool colorProperty(const std::string& name, BoundProperty& property) {
+  // Only the three properties every color-capable layer type already has
+  // statically are bindable -- see applicable() for the per-layer-type gate.
   if (name == "color") {
     property = BoundProperty::Color;
     return true;
@@ -515,6 +597,10 @@ static bool colorProperty(const std::string& name, BoundProperty& property) {
   }
   return false;
 }
+// The mandatory safe [lo, hi] clamp for each bindable numeric property (see
+// resolveNumericBinding). These match the manifest's own static ranges for
+// the same field, so a binding can never produce a value the static field
+// itself could not have declared.
 static bool propertyRange(BoundProperty property, int& lo, int& hi) {
   switch (property) {
     case BoundProperty::X: case BoundProperty::Y: case BoundProperty::X2: case BoundProperty::Y2:
@@ -545,6 +631,11 @@ static bool propertyRange(BoundProperty property, int& lo, int& hi) {
       return false;
   }
 }
+// The full layer/property matrix from docs/features/themes.md, enforced here
+// rather than only documented: a color property needs the matching static
+// field already set (binding `stroke` cannot conjure a stroke into existence
+// on a shape declared without one), and scroll.width/scroll.speed need a
+// static `scroll` object already present.
 static bool applicable(const Layer& layer, BoundProperty property, bool color) {
   if (color) {
     if (property == BoundProperty::Color) return layer.type == LayerType::Text;
@@ -565,6 +656,8 @@ static bool applicable(const Layer& layer, BoundProperty property, bool color) {
 static bool declaredSource(const Theme& theme, const std::string& source) {
   return validFieldToken(source, theme);
 }
+// Shared by `input` (two finite doubles) and, via twoIntegers below, `output`
+// (two ranged ints) -- both binding schemas need exactly a two-element array.
 static bool twoReals(JsonVariantConst value, const Fields& fields, const char* key, double& first, double& second) {
   JsonArrayConst values = value.as<JsonArrayConst>();
   if (values.isNull() || values.size() != 2) return fields.fail(key, "expected exactly two finite numbers");
@@ -585,6 +678,10 @@ static bool twoIntegers(JsonVariantConst value, const Fields& fields, const char
     return fields.fail(key, "expected exactly two integers from " + std::to_string(lo) + " to " + std::to_string(hi));
   return true;
 }
+// Parses a text layer's `scroll` object. `mode` and `speed` are required;
+// `pause` and `gap` keep their Scroll struct defaults when omitted. `gap` is
+// rejected outright in bounce mode, where it has no effect (bounce only ever
+// shows one copy of the text).
 static bool parseScroll(JsonObjectConst object, const std::string& path, std::string& error, Layer& result) {
   JsonObjectConst scroll = object["scroll"].as<JsonObjectConst>();
   Fields fields(scroll, path + ".scroll", error);
@@ -601,6 +698,10 @@ static bool parseScroll(JsonObjectConst object, const std::string& path, std::st
   result.scroll.enabled = true;
   return true;
 }
+// Parses a layer's `bind` object: at most 8 entries (already enforced key-by-
+// key by DuplicateBindingScanner, but re-checked here on the parsed count),
+// each either a numeric mapping or a color-stop table depending on which
+// property it names.
 static bool parseBindings(JsonObjectConst object, const Theme& theme, const std::string& path, std::string& error, Layer& layer) {
   JsonObjectConst objectBindings = object["bind"].as<JsonObjectConst>();
   Fields bindings(objectBindings, path + ".bind", error);
@@ -645,6 +746,13 @@ static bool parseBindings(JsonObjectConst object, const Theme& theme, const std:
   }
   return true;
 }
+// Strictly parses a manifest into an immutable Theme, or fails closed with a
+// diagnostic naming the offending field (`layers[2].bind.width: ...`). This
+// is the single source of truth for the format: the device and the desktop
+// tools (theme_native.cpp) both call this exact function, so validation can
+// never drift between them. Every unknown field, wrong type, out-of-range
+// value, or structural inconsistency (duplicate ID, undeclared binding
+// source, ...) is rejected rather than coerced or ignored.
 bool parseTheme(const std::string& json, Theme& out, std::string& error) {
   error.clear();
   if (json.empty() || json.size() > MaxManifest) {
@@ -664,21 +772,28 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
       return false;
     }
   }
+  // ArduinoJson has already validated syntax and nesting depth at this point;
+  // only now is it safe to re-walk the raw text for the one thing ArduinoJson
+  // itself cannot catch (see DuplicateBindingScanner's own comment).
   if (!DuplicateBindingScanner(json, error).valid()) return false;
   auto root = doc.as<JsonObjectConst>();
   Fields r(root, "", error);
   int spec = 0;
   if (!r.keys("|spec|theme|display|layers|data|") || !r.number("spec", 1, 1, spec)) return false;
   Theme t;
+  // ---- theme metadata ----
   auto meta = root["theme"].as<JsonObjectConst>();
   Fields m(meta, "theme", error);
   if (!m.keys("|id|name|author|version|") || !m.text("id", t.id, 48)) return false;
   if (!validId(t.id)) return m.fail("id", "use ASCII letters, digits, '-' or '_'");
   if (!m.text("name", t.name, 96) || !m.text("author", t.author, 96) || !m.text("version", t.version, 32)) return false;
+  // ---- display: width/height are fixed at 240x240 but still required, so a
+  // manifest is explicit about the canvas it was authored for ----
   auto display = root["display"].as<JsonObjectConst>();
   Fields d(display, "display", error);
   int w = 0, h = 0;
   if (!d.keys("|width|height|background|") || !d.number("width", 240, 240, w) || !d.number("height", 240, 240, h) || !d.color("background", t.background)) return false;
+  // ---- data sources: optional, at most 4, each with 1-8 fields ----
   bool hasData = false;
   for (JsonPairConst pair : root) if (pair.key() == "data") hasData = true;
   if (hasData) {
@@ -691,6 +806,9 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
       int interval = 0;
       if (!sf.keys("|id|url|interval|insecureTls|fields|") || !sf.text("id", data.id, 32) || !sf.text("url", data.url, 200) || !sf.number("interval", 10, 86400, interval) || !sf.boolean("insecureTls", data.insecureTls, false)) return false;
       if (!validId(data.id) || data.id.find('.') != std::string::npos) return sf.fail("id", "use ASCII letters, digits, '-' or '_'");
+      // The embedded TLS client cannot validate a server certificate, so an
+      // https:// source must explicitly acknowledge that with `insecureTls`
+      // rather than the firmware silently accepting unauthenticated TLS.
       size_t hostStart = data.url.rfind("https://", 0) == 0 ? 8 : data.url.rfind("http://", 0) == 0 ? 7 : std::string::npos;
       if (hostStart == std::string::npos) return sf.fail("url", "only http:// and https:// URLs are supported");
       if (hostStart == 8 && !data.insecureTls) return sf.fail("insecureTls", "set true to acknowledge that HTTPS certificate validation is unavailable");
@@ -721,6 +839,7 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
       t.data.push_back(std::move(data));
     }
   }
+  // ---- layers: 0-32, drawn back to front in array order ----
   auto layers = root["layers"].as<JsonArrayConst>();
   if (layers.isNull() || layers.size() > MaxLayers) return r.fail("layers", "expected an array of at most 32 layers");
   for (JsonObjectConst o : layers) {
@@ -740,6 +859,10 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
       if (!f.number("size", 8, 96, l.size) || !f.color("color", l.color)) return false;
       std::string anchor = "top-left";
       if (!f.text("anchor", anchor, 20, false)) return false;
+      // The 9 anchor names are a 3x3 grid in row-major order (left/center/right
+      // columns, top/center/bottom rows), so its index decomposes directly
+      // into the 0/1/2 column and row bounds() later uses to offset the text
+      // cell by half its width/height per axis.
       const char* anchors[] = {"top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"};
       int a = 0;
       for (; a < 9; ++a) if (anchor == anchors[a]) break;
@@ -758,6 +881,9 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
         l.fps = fps;
         l.loop = o["loop"].as<bool>();
       }
+      // assetPath() appends a per-frame suffix; the *compiled* path (what
+      // ends up inside the .stheme container) must itself fit the package
+      // format's 120-byte path limit, not just the declared `source`.
       if (assetPath(l, l.frames - 1).size() > 120) return f.fail("source", "compiled asset path exceeds 120 bytes");
     } else if (type == "shape") {
       l.type = LayerType::Shape;
@@ -783,6 +909,8 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
         if (!f.number("x2", -240, 479, l.x2) || !f.number("y2", -240, 479, l.y2)) return false;
       }
     } else return f.fail("type", "expected text, image, animation or shape");
+    // `scroll` and `bind` are common to every layer type's own `keys()` list
+    // above, so they are parsed once here rather than duplicated per branch.
     if (f.has("scroll")) {
       if (l.type != LayerType::Text) return f.fail("scroll", "only allowed on text layers");
       if (!parseScroll(o, layerPath, error, l)) return false;
@@ -798,6 +926,10 @@ std::string expandText(const std::string& value, const tm* t) {
   static const std::vector<ThemeValue> empty;
   return expandText(value, t, empty);
 }
+// Substitutes every {token} in a validated text template: clock/date tokens
+// first (only when `t` is non-null and the field is in range), then a
+// matching fetched value, and "--" if neither resolves -- the same fallback
+// an unsynchronized clock or a field that has never been fetched produces.
 std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values) {
   static const char* months[] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
   static const char* days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
@@ -842,12 +974,21 @@ std::string expandText(const std::string& value, const tm* t, const std::vector<
   }
   return out;
 }
+// Maps a layer's logical `source` to the compiled .sti path inside the
+// package: an image is exactly "<source>.sti", an animation frame is
+// "<source>/<3-digit frame>.png.sti" -- the same convention theme_pack.py
+// uses when building the container, so the two never drift apart.
 std::string assetPath(const Layer& l, uint16_t frame) {
   if (l.type == LayerType::Image) return l.source + ".sti";
   char b[24];
   snprintf(b, sizeof(b), "/%03u.png.sti", frame);
   return l.source + b;
 }
+// Recomputes one layer's ResolvedLayer from scratch: start from the static
+// manifest values, then let each binding whose source currently has a valid
+// finite value override its one property. A binding whose source is missing
+// or non-finite is simply skipped (`continue`), which is exactly what leaves
+// the static fallback in effect -- there is no separate "use default" branch.
 void Engine::resolveLayer(size_t index) {
   const Layer& layer = theme_.layers[index];
   ResolvedLayer resolved;
@@ -900,6 +1041,9 @@ void Engine::resolveLayer(size_t index) {
       default: break;
     }
   }
+  // The mandatory cornerRadius clamp: applied after bindings resolve width,
+  // height, and cornerRadius, so a rectangle that shrinks (via a bound
+  // dimension) never draws rounding outside its own resolved bounds.
   if (layer.type == LayerType::Shape && layer.shape == Shape::Rectangle)
     resolved.cornerRadius = std::min(resolved.cornerRadius,
       std::max(0, std::min(resolved.width, resolved.height) / 2));
@@ -909,6 +1053,10 @@ void Engine::resolveLayer(size_t index) {
 static bool scrollDeadlinePassed(uint32_t now, uint32_t deadline) {
   return int32_t(now - deadline) > 0;
 }
+// Restarts a text layer's scroll at its initial position and pause, per the
+// spec's "changing the expanded text, or a binding that affects size/
+// scroll geometry, resets the scroll" rule (Engine::update decides when to
+// call this; this function only applies the reset itself).
 static void resetScroll(LayerState& s, const Layer& l, uint32_t now) {
   s.scrollOffset = 0;
   s.scrollPhase = 0;
@@ -918,6 +1066,22 @@ static void resetScroll(LayerState& s, const Layer& l, uint32_t now) {
 }
 // Advances loop/bounce scroll state to `now`, resolving however many pause/leg
 // boundaries fall within the elapsed interval without iterating per pixel.
+//
+// One "leg" is a single pass across `target` pixels: the full loop cycle
+// (text width + gap) in loop mode, or one direction of travel (text width -
+// viewport width) in bounce mode. Position within a leg is tracked in
+// "ticks", milli-pixels (1000 ticks = 1 px), so that elapsed_ms * speed_px_per_s
+// accumulates exact whole-pixel steps with the leftover fractional part kept
+// in `scrollPhase` -- the same accumulator technique frame animation already
+// uses in Engine::update. Carrying that leftover across leg boundaries (rather
+// than resetting it to 0 each leg) is what keeps a non-integer travel
+// duration (e.g. speed=7 px/s) from drifting: see the "fractional" scroll
+// timing test in test_engine.cpp for a case that would otherwise mis-round.
+//
+// The loop below resolves one leg boundary per iteration instead of one pixel
+// per iteration, so a single call can jump forward by many laps (e.g. after a
+// long gap between update() calls, or a millis() wraparound) in O(laps), not
+// O(pixels).
 static void advanceScroll(const Layer& l, LayerState& s, uint32_t now, int textWidth) {
   const int viewportWidth = s.resolved.scrollWidth;
   const int speed = s.resolved.scrollSpeed;
@@ -926,12 +1090,21 @@ static void advanceScroll(const Layer& l, LayerState& s, uint32_t now, int textW
   if (textWidth <= viewportWidth || target <= 0 || speed <= 0) return;
   for (;;) {
     if (!scrollDeadlinePassed(now, s.scrollPauseUntil)) return;
+    // While still within the pause that follows a completed leg, `scrollLastMs`
+    // has not advanced past `scrollPauseUntil` yet; once the pause has ended,
+    // elapsed time is measured from the later of the two.
     const uint32_t base = scrollDeadlinePassed(s.scrollLastMs, s.scrollPauseUntil) ? s.scrollLastMs : s.scrollPauseUntil;
     const uint32_t elapsed = now - base;
     const uint64_t ticksAvailable = uint64_t(elapsed) * speed + s.scrollPhase;
+    // In bounce mode, `scrollOffset` itself measures distance from the near
+    // edge on the way out (direction -1) but distance *remaining* to the near
+    // edge on the way back (direction +1), so progress into the current leg
+    // is `target - scrollOffset` on the return trip.
     const int legProgress = loop ? s.scrollOffset : (s.scrollDirection < 0 ? s.scrollOffset : target - s.scrollOffset);
     const uint64_t neededTicks = uint64_t(target - legProgress) * 1000;
     if (ticksAvailable < neededTicks) {
+      // This call's elapsed time does not finish the current leg: apply a
+      // partial step and stop.
       const uint64_t newProgressTicks = uint64_t(legProgress) * 1000 + ticksAvailable;
       const int newProgressPixels = int(newProgressTicks / 1000);
       s.scrollPhase = uint32_t(newProgressTicks % 1000);
@@ -948,6 +1121,10 @@ static void advanceScroll(const Layer& l, LayerState& s, uint32_t now, int textW
     s.scrollPhase = uint32_t(leftover);
     s.scrollLastMs = completion;
     s.scrollPauseUntil = completion + l.scroll.pauseMs;
+    // Loop always wraps back to 0 (the same conveyor repeats); bounce clamps
+    // at whichever edge it just reached and reverses for the next leg. The
+    // loop then re-checks the new scrollPauseUntil against `now`, so a jump
+    // spanning several legs keeps resolving one leg at a time above.
     if (loop) {
       s.scrollOffset = 0;
     } else if (s.scrollDirection < 0) {
@@ -959,6 +1136,10 @@ static void advanceScroll(const Layer& l, LayerState& s, uint32_t now, int textW
     }
   }
 }
+// Used by Engine::update to decide whether a binding change actually needs a
+// repaint. Deliberately excludes scrollSpeed: a speed-only change alone does
+// not move any pixel by itself (see the scroll reset trigger below, which
+// checks it separately for the unrelated "restart scrolling" decision).
 static bool sameGeometry(const ResolvedLayer& a, const ResolvedLayer& b) {
   return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height &&
     a.x2 == b.x2 && a.y2 == b.y2 && a.radius == b.radius &&
@@ -968,9 +1149,16 @@ static bool sameGeometry(const ResolvedLayer& a, const ResolvedLayer& b) {
 static bool sameColors(const ResolvedLayer& a, const ResolvedLayer& b) {
   return a.color == b.color && a.fill == b.fill && a.stroke == b.stroke;
 }
+// The built-in bitmap font's cell width scales with `size`: each glyph is
+// drawn in a 5-of-6-pixel-wide cell (the 6th pixel is inter-character
+// spacing), sized in eighths of `size` so the whole font scales uniformly.
 static int textPixelWidth(int size, size_t length) {
   return static_cast<int>(length) * ((size * 6 + 7) / 8);
 }
+// The rectangle render() (and Engine::update's dirty-region union) treats as
+// this layer's footprint. For scrolling text this is the fixed viewport, not
+// the full (possibly much wider) expanded text -- render() maps viewport-
+// local pixels back to a position in the text itself via scrollContentColumn.
 static Rect bounds(const Layer& l, const ResolvedLayer& resolved, const std::string& text) {
   if (l.type == LayerType::Text) {
     int w = l.scroll.enabled ? resolved.scrollWidth : textPixelWidth(resolved.size, text.size());
@@ -987,6 +1175,9 @@ static Rect bounds(const Layer& l, const ResolvedLayer& resolved, const std::str
   }
   return Rect(resolved.x, resolved.y, resolved.width, resolved.height);
 }
+// Installs a new theme and resets all runtime state (scroll, animation,
+// resolved geometry) from scratch. The next update() reports a full-canvas
+// dirty rectangle, since every layer's previous on-screen footprint is gone.
 void Engine::setTheme(Theme theme, uint32_t now) {
   theme_ = std::move(theme);
   states_.assign(theme_.layers.size(), LayerState{});
@@ -996,11 +1187,18 @@ void Engine::setTheme(Theme theme, uint32_t now) {
   }
   full_ = true;
 }
+// Records the latest fetched values for the next update() to resolve
+// bindings against. Reinstalling an identical set is a deliberate no-op
+// (including for scroll's "reinstalling the same values must not restart the
+// pause" rule) rather than a wasted resolve pass every call.
 void Engine::setValues(std::vector<ThemeValue> values) {
   if (values_ == values) return;
   values_ = std::move(values);
   valuesChanged_ = true;
 }
+// Merges a newly dirty region into the accumulated list, absorbing any
+// existing rectangle it overlaps so update() never reports two overlapping
+// regions (which would otherwise make render() redraw the overlap twice).
 static void addDirty(std::vector<Rect>& dirty, Rect r) {
   r = intersect(r, Rect(0, 0, 240, 240));
   if (r.empty()) return;
@@ -1013,8 +1211,15 @@ static void addDirty(std::vector<Rect>& dirty, Rect r) {
   }
   dirty.push_back(r);
 }
+// Advances every layer to `now`/`time` and returns the regions that actually
+// need repainting. This is the engine's one time-stepping entry point:
+// resolving bindings, expanding text, advancing animation frames, and
+// scheduling scroll all happen here, each only when its own trigger fired, so
+// a static theme with unchanged data produces zero display writes.
 std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
   std::vector<Rect> dirty;
+  // A full second-granularity clock comparison, not just tm_sec, because a
+  // caller can hand in noon-to-midnight or DST-boundary jumps between calls.
   const bool timeChanged = full_ || bool(time) != hadTime_ || (time &&
     (time->tm_sec != lastTime_.tm_sec || time->tm_min != lastTime_.tm_min ||
      time->tm_hour != lastTime_.tm_hour || time->tm_mday != lastTime_.tm_mday ||
@@ -1026,6 +1231,9 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     const auto& l = theme_.layers[i];
     bool changed = full_;
     const ResolvedLayer previous = s.resolved;
+    // Re-resolve bindings only when fetched values actually changed; a
+    // geometry or color change (but not a scrollSpeed-only change, see
+    // sameGeometry's own comment) marks this layer dirty.
     if (valuesChanged_) {
       resolveLayer(i);
       changed = changed || !sameGeometry(previous, s.resolved) || !sameColors(previous, s.resolved);
@@ -1039,6 +1247,10 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
         textChanged = true;
       }
     } else if (l.type == LayerType::Animation && !s.finished) {
+      // Same milli-frame accumulator technique as scroll's ticks: elapsed_ms *
+      // fps accumulates exact whole frames, with the remainder kept in
+      // `phase` so a late update() jumps straight to the due frame instead of
+      // replaying skipped ones.
       uint64_t ticks = uint64_t(uint32_t(now - s.lastMs)) * l.fps + s.phase;
       uint64_t step = ticks / 1000;
       s.phase = ticks % 1000;
@@ -1051,6 +1263,10 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
       }
     }
     if (l.type == LayerType::Text && l.scroll.enabled) {
+      // Reset triggers on changed text or a binding affecting size/scroll
+      // geometry (per docs/features/themes.md); anything else -- an unrelated
+      // data value, a position/color binding, invalidate() -- must not
+      // disturb an in-progress scroll.
       const bool scrollResetNeeded = textChanged || previous.size != s.resolved.size ||
         previous.scrollWidth != s.resolved.scrollWidth || previous.scrollSpeed != s.resolved.scrollSpeed;
       if (scrollResetNeeded) {
@@ -1063,6 +1279,8 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
         if (s.scrollOffset != previousOffset) changed = true;
       }
     }
+    // The dirty region is the union of this layer's old and new footprint, so
+    // moving/shrinking/hiding a layer also erases wherever it used to be.
     Rect next = bounds(l, s.resolved, s.text);
     if (changed && !full_) addDirty(dirty, unite(s.bounds, next));
     s.bounds = next;
@@ -1074,6 +1292,10 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
   valuesChanged_ = false;
   return dirty;
 }
+// Alpha-composites an RGB565 foreground pixel over a background one, blending
+// each of the 5/6/5 channels independently with rounding (+127 before the
+// /255 integer division). Used for image/animation alpha only -- shapes and
+// text are always fully opaque where drawn.
 static uint16_t blend(uint16_t bg, uint16_t fg, uint8_t a) {
   if (a == 255) return fg;
   if (a == 0) return bg;
@@ -1082,6 +1304,13 @@ static uint16_t blend(uint16_t bg, uint16_t fg, uint8_t a) {
     (((((fg >> 5) & 63) * a + ((bg >> 5) & 63) * b + 127) / 255) << 5) |
     (((fg & 31) * a + (bg & 31) * b + 127) / 255);
 }
+// True if (x, y) falls within strokeWidth/2 of the segment (lx,ly)-(lx2,ly2),
+// giving it round ends (a "capsule" shape): project the pixel onto the
+// segment via the dot product, and if that projection falls before the start
+// or past the end, test distance to the nearest endpoint instead of to the
+// infinite line. All distances are compared squared (and doubled, `4 *`, to
+// compare against strokeWidth rather than strokeWidth/2) to avoid a sqrt, and
+// widened to int64_t since squaring a 240-range coordinate can exceed 32 bits.
 static bool linePixel(int lx, int ly, int lx2, int ly2, int strokeWidth, int x, int y) {
   int64_t dx = lx2 - lx, dy = ly2 - ly, px = x - lx, py = y - ly;
   int64_t len = dx * dx + dy * dy, dot = px * dx + py * dy;
@@ -1092,11 +1321,22 @@ static bool linePixel(int lx, int ly, int lx2, int ly2, int strokeWidth, int x, 
     py = y - ly2;
     return 4 * (px * px + py * py) <= sw * sw;
   }
+  // Perpendicular distance from the line, via the cross product magnitude
+  // divided by the segment length -- kept as cross^2 vs sw^2*len to stay in
+  // integer arithmetic (no division, no sqrt).
   int64_t cross = px * dy - py * dx;
   return 4 * cross * cross <= sw * sw * len;
 }
 // Classifies a pixel against a rounded rectangle's outer outline (fill) and the
 // outer-minus-inner ring (stroke), where the inner radius is max(0,radius-strokeWidth).
+//
+// A pixel outside all four corner quadrants (i.e. in the straight top/bottom/
+// left/right bands) uses the same fast distance-to-edge test as the
+// radius==0 case, since rounding only ever affects the corners. Only a pixel
+// inside a corner quadrant needs the squared-distance circle test, against a
+// center placed `radius` pixels in from that corner -- the outer and inner
+// arcs share that same center, just at radius and radius-strokeWidth, so one
+// distance computation classifies both.
 static void roundedRectHit(int x, int y, int rx, int ry, int rw, int rh, int radius, int strokeWidth,
                             bool& inside, bool& edge) {
   if (radius <= 0) {
@@ -1136,6 +1376,12 @@ static bool scrollContentColumn(const Layer& l, const LayerState& s, int textWid
   contentX = local + s.scrollOffset;
   return contentX < textWidth;
 }
+// Rebuilds every dirty row from scratch, in layer order back to front, and
+// streams each finished row straight to `display` -- there is no persistent
+// 240x240 framebuffer anywhere in this path. `handles` caches one resolved
+// AssetHandle per layer for the whole call, so a layer touched by several
+// disjoint dirty regions (or several rows of the same region) still resolves
+// its asset exactly once.
 bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Display& display) {
   uint16_t pixels[240], colors[240];
   uint8_t alpha[240];
@@ -1152,6 +1398,8 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
         Rect r = intersect(s.bounds, Rect(region.x, y, region.w, 1));
         if (r.empty()) continue;
         if (l.type == LayerType::Image || l.type == LayerType::Animation) {
+          // Assets stream by row too: only the `r.w` pixels this dirty region
+          // actually needs are ever read, never a whole image or frame.
           if (handles[i] == InvalidAsset) handles[i] = assets.resolve(assetPath(l, s.frame));
           if (handles[i] == InvalidAsset || !assets.row(handles[i], y - s.resolved.y, r.x - s.resolved.x, r.w, colors, alpha)) return false;
           for (int x = 0; x < r.w; ++x) pixels[r.x - region.x + x] = blend(pixels[r.x - region.x + x], colors[x], alpha[x]);
@@ -1161,6 +1409,14 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
           uint16_t c = 0;
           bool draw = false;
           if (l.type == LayerType::Text) {
+            // `local` is the pixel's position within the viewport (s.bounds);
+            // scrollContentColumn maps it to `contentX`, its position within
+            // the full expanded text, or reports "no ink here" for a loop
+            // mode's inter-copy gap. From there it is an ordinary glyph-cell
+            // lookup: which character (charIndex), which column within its
+            // 6-wide cell (col, with column 5 always blank as spacing), and
+            // which row within the glyph (scaled from pixel row to the font's
+            // fixed 8-row bitmap by `resolved.size`).
             const int cell = (s.resolved.size * 6 + 7) / 8, local = x - s.bounds.x;
             int contentX = 0;
             if (scrollContentColumn(l, s, textPixelWidth(s.resolved.size, s.text.size()), local, contentX)) {
@@ -1182,6 +1438,10 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
             } else {
               inside = edge = linePixel(s.resolved.x, s.resolved.y, s.resolved.x2, s.resolved.y2, s.resolved.strokeWidth, x, y);
             }
+            // Fill first, stroke second and unconditionally overwriting: a
+            // pixel that is both `inside` and `edge` (the stroke band) ends
+            // up stroke-colored, exactly as if fill were painted first and
+            // the stroke ring painted on top of it.
             if (inside && l.hasFill) {
               draw = true;
               c = s.resolved.fill;
