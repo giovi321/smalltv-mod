@@ -1,11 +1,13 @@
 ---
 title: Theme clocks
-description: Create, install, and run declarative animated clock faces on SmallTV Pro.
+description: Create, install, and run declarative animated clock faces.
 ---
 
-Theme Engine V1 is enabled on **SmallTV Pro (8 MB ESP32)**. A theme is data and
-assets; it never contains executable code. Once the firmware supports themes,
-creating another clock face requires only theme files.
+Theme Engine V1 is available on every display target except the lean ESP8266
+image (`smalltv_lean`), which drops it to keep the heap headroom it exists to
+protect. A theme is data and assets; it never contains executable code. Once
+the firmware supports themes, creating another clock face requires only theme
+files.
 
 ## Install and select
 
@@ -530,13 +532,13 @@ remains available for recovery.
 
 ## Development checks
 
-After resolving PlatformIO's Pro dependencies:
+After resolving PlatformIO's dependencies:
 
 ```bash
 sh tests/theme/run.sh
 python3 -m unittest discover -s tests/theme -p 'test_*.py'
 node tests/theme/test_webui.js
-pio run -e smalltv_esp32_8mb -e smalltv_lean
+pio run -e smalltv -e smalltv_c2 -e smalltv_esp32 -e smalltv_esp32_wg -e smalltv_esp32_8mb -e smalltv_lean
 ```
 
 The native suite uses the same C++ parser, scheduler, package reader, and compositor
