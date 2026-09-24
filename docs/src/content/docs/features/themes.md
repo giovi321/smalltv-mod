@@ -23,7 +23,8 @@ are in `examples/themes/pixel-room/`. `examples/themes/live-status.stheme`
 demonstrates scrolling text and fetched-data bindings; see
 [Example: a dynamic dashboard](#example-a-dynamic-dashboard).
 
-Visual authoring is provided by the separate **SmallTV Studio** project. This
+Visual authoring is provided by the separate
+[SmallTV Studio](https://github.com/giovi321/smalltv-studio) editor. This
 firmware repository keeps the format, validator, packer, and offline preview
 tools so themes remain reproducible in CI without the editor application.
 
