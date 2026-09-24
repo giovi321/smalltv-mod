@@ -1,0 +1,12 @@
+{
+  "spec": 1,
+  "theme": {"id": "pixel-room", "name": "Pixel Room", "author": "SmallTV-Mod", "version": "1.0.0"},
+  "display": {"width": 240, "height": 240, "background": "#152238"},
+  "layers": [
+    {"id": "room", "type": "image", "x": 0, "y": 0, "source": "images/background.png"},
+    {"id": "clock", "type": "text", "x": 120, "y": 55, "anchor": "center", "value": "{HH}:{MM}", "size": 40, "color": "#fff0c2"},
+    {"id": "date", "type": "text", "x": 120, "y": 92, "anchor": "center", "value": "{WD} {DD} {MON}", "size": 16, "color": "#a8c5de"},
+    {"id": "desk", "type": "shape", "shape": "rectangle", "x": 24, "y": 195, "width": 192, "height": 5, "fill": "#b78355"},
+    {"id": "cat", "type": "animation", "x": 148, "y": 147, "width": 48, "height": 48, "source": "animations/cat", "frames": 4, "fps": 8, "loop": true}
+  ]
+}

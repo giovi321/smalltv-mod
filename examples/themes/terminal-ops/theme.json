@@ -1,0 +1,152 @@
+{
+  "spec": 1,
+  "theme": {
+    "id": "terminal-ops",
+    "name": "Terminal Ops",
+    "author": "SmallTV Studio",
+    "version": "1.0.0"
+  },
+  "display": {
+    "width": 240,
+    "height": 240,
+    "background": "#071117"
+  },
+  "layers": [
+    {
+      "id": "topbar",
+      "type": "shape",
+      "shape": "rectangle",
+      "x": 10,
+      "y": 10,
+      "width": 220,
+      "height": 25,
+      "fill": "#132f2e",
+      "stroke": "#39e6a5",
+      "strokeWidth": 1
+    },
+    {
+      "id": "panel",
+      "type": "shape",
+      "shape": "rectangle",
+      "x": 10,
+      "y": 43,
+      "width": 220,
+      "height": 174,
+      "fill": "#0b1b22",
+      "stroke": "#22535a",
+      "strokeWidth": 1
+    },
+    {
+      "id": "divider-a",
+      "type": "shape",
+      "shape": "line",
+      "x": 20,
+      "y": 91,
+      "x2": 220,
+      "y2": 91,
+      "stroke": "#22535a",
+      "strokeWidth": 1
+    },
+    {
+      "id": "divider-b",
+      "type": "shape",
+      "shape": "line",
+      "x": 20,
+      "y": 139,
+      "x2": 220,
+      "y2": 139,
+      "stroke": "#22535a",
+      "strokeWidth": 1
+    },
+    {
+      "id": "status",
+      "type": "text",
+      "x": 18,
+      "y": 15,
+      "anchor": "top-left",
+      "value": "SYS // ONLINE",
+      "size": 10,
+      "color": "#39e6a5"
+    },
+    {
+      "id": "clock",
+      "type": "text",
+      "x": 221,
+      "y": 15,
+      "anchor": "top-right",
+      "value": "{HH}:{MM}:{SS}",
+      "size": 10,
+      "color": "#f4d06f"
+    },
+    {
+      "id": "header",
+      "type": "text",
+      "x": 20,
+      "y": 51,
+      "anchor": "top-left",
+      "value": "NIGHT WATCH / NODE 07",
+      "size": 11,
+      "color": "#f4d06f"
+    },
+    {
+      "id": "line-1",
+      "type": "text",
+      "x": 20,
+      "y": 70,
+      "anchor": "top-left",
+      "value": "TEMP     22 C     STABLE",
+      "size": 9,
+      "color": "#8ed1c4"
+    },
+    {
+      "id": "line-2",
+      "type": "text",
+      "x": 20,
+      "y": 100,
+      "anchor": "top-left",
+      "value": "DATE     {YYYY}-{MON}-{DD}",
+      "size": 9,
+      "color": "#8ed1c4"
+    },
+    {
+      "id": "line-3",
+      "type": "text",
+      "x": 20,
+      "y": 118,
+      "anchor": "top-left",
+      "value": "CYCLE    {WEEKDAY}",
+      "size": 9,
+      "color": "#8ed1c4"
+    },
+    {
+      "id": "line-4",
+      "type": "text",
+      "x": 20,
+      "y": 148,
+      "anchor": "top-left",
+      "value": "UPLINK   99.8%   OK",
+      "size": 9,
+      "color": "#8ed1c4"
+    },
+    {
+      "id": "line-5",
+      "type": "text",
+      "x": 20,
+      "y": 166,
+      "anchor": "top-left",
+      "value": "NEXT     {HH}:{MM}  SYNC",
+      "size": 9,
+      "color": "#8ed1c4"
+    },
+    {
+      "id": "footer",
+      "type": "text",
+      "x": 20,
+      "y": 195,
+      "anchor": "top-left",
+      "value": "// NO EXTERNAL SIGNAL",
+      "size": 9,
+      "color": "#d96b6b"
+    }
+  ]
+}

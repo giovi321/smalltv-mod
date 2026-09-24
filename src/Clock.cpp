@@ -4,7 +4,7 @@
 #include "WgClient.h"
 
 static String            s_armedTz;          // last tzPosix armed (clockReapply re-arms only on change)
-static bool              s_ntpStarted = false; // SNTP has been started (only when night mode needs it)
+static bool              s_ntpStarted = false; // SNTP has been started for a clock consumer
 static volatile uint32_t s_lastSyncMs = 0;   // millis() of the last successful SNTP sync
 static volatile bool     s_haveSync   = false;
 
@@ -45,9 +45,9 @@ void clockReapply(const Settings& s) {
   // fragment the largest contiguous block below what the cash.ch TLS handshake
   // needs (blanking those tickers). So arm on the first enable, re-arm on a
   // timezone change, and otherwise leave it alone. Night mode is one caller; a
-  // WireGuard tunnel is the other, because the peer rejects a handshake stamped
+  // WireGuard tunnel and theme clocks also need it. The peer rejects a handshake stamped
   // with a wrong clock (and that build is an ESP32, where the heap cost is moot).
-  if (!s.clock.nightEnabled && !wgNeedsClock(s)) return;
+  if (!s.clock.nightEnabled && !wgNeedsClock(s) && !(WITH_THEME && s.mode == MODE_THEME)) return;
   if (!s_ntpStarted || s.clock.tzPosix != s_armedTz) clockBegin(s);
 }
 

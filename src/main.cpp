@@ -19,6 +19,9 @@
 #include "Mode.h"
 #include "Clock.h"
 #include "WgClient.h"
+#if WITH_THEME
+#include "features/theme/ThemeMode.h"
+#endif
 #if WITH_NOTIFY
 #include "NotifyMode.h"
 #endif
@@ -53,6 +56,9 @@ static DisplayMode* kModes[] = {
 #if WITH_HA
   &g_haMode,
 #endif
+#if WITH_THEME
+  &g_themeMode,
+#endif
 };
 static const size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);
 
@@ -70,6 +76,7 @@ static bool carouselHas(const Settings& s, const DisplayMode* m) {
 #if WITH_HA
     case MODE_HA:     return s.carouselHa;
 #endif
+    case MODE_THEME:  return false; // explicitly selected, not in the existing carousel
     default:          return true;
   }
 }

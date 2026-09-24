@@ -139,6 +139,7 @@
 #define MODE_RADAR     2
 #define MODE_CAROUSEL  3
 #define MODE_NOTIFY    4             // transient overlay: armed over HTTP, never persisted
+#define MODE_THEME     6             // declarative installed clock faces
 #define MODE_HA        5             // Home Assistant screens pushed over MQTT
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
@@ -391,3 +392,10 @@
 // (morning). Once night mode has switched on, it stays on until the window ends.
 #define NIGHT_NTP_TRUST_MS      300000UL  // 5 min: max age of the sync that unlocks night
 #define NIGHT_NTP_RESYNC_MS      30000UL  // re-sync attempt cadence while held off
+
+// Theme packages are supported on every display target except the lean
+// ESP8266 image, which opts out explicitly (see [env:smalltv_lean] in
+// platformio.ini) to keep the heap headroom it exists to protect.
+#ifndef WITH_THEME
+#define WITH_THEME 1
+#endif

@@ -88,6 +88,19 @@ jobs:
       - name: Build firmware (all targets)
         run: pio run -e smalltv -e smalltv_lean -e smalltv_c2 -e smalltv_esp32 -e smalltv_esp32_wg -e smalltv_esp32_8mb -e smalltv_loader
 
+      - name: Test theme engine and packer
+        run: |
+          pip install -r tools/requirements-theme.txt
+          python3 -m unittest discover -s tests/theme -p 'test_*.py'
+          python3 tools/theme_pack.py examples/themes/pixel-room /tmp/pixel-room.stheme
+          cmp examples/themes/pixel-room.stheme /tmp/pixel-room.stheme
+          python3 tools/theme_pack.py examples/themes/terminal-ops /tmp/terminal-ops.stheme
+          cmp examples/themes/terminal-ops.stheme /tmp/terminal-ops.stheme
+          python3 tools/theme_pack.py examples/themes/live-status /tmp/live-status.stheme
+          cmp examples/themes/live-status.stheme /tmp/live-status.stheme
+          sh tests/theme/run.sh
+          node tests/theme/test_webui.js
+
       # Host-native, not board-specific: only needs ArduinoJson, which the
       # firmware build above already fetched into .pio/libdeps.
       - name: Test atomic settings storage

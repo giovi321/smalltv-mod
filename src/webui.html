@@ -119,6 +119,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="usage">Clawdmeter</option>
     <option value="radar">Radar</option>
     <option value="ha">Home Assistant</option>
+    <option value="theme">Theme clock</option>
     <option value="carousel">Carousel (rotate modes)</option>
    </select>
    <div id="carouselRow">
@@ -129,6 +130,16 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <div class="chk"><input id="carouselHa" type="checkbox"><label>Home Assistant</label></div>
    </div>
    <small class="hint">Each name here is the tab that configures it. Pick the active feature, then set it up in its own tab. Carousel rotates through the ticked features.</small>
+  </div>
+  <div class="card" id="themeCard"><h2>Theme clocks</h2>
+   <label>Installed theme</label><select id="themeSelect" onchange="themeChoiceChanged()"></select>
+   <div style="margin-top:12px"><button class="btn" id="themeUseBtn" onclick="selectTheme()">Use theme</button>
+    <button class="btn" onclick="deleteTheme()">Remove</button></div>
+   <small class="hint" id="themeDetails"></small>
+   <label>Install a theme</label><input id="themeFile" type="file" accept=".stheme">
+   <button class="btn" id="themeUploadBtn" onclick="installTheme()">Install .stheme</button>
+   <small class="hint" id="themeStatus">Loading themes…</small>
+   <small class="hint">Theme clocks use the timezone below. Install a package, then choose Use theme. Notifications continue to appear above it.</small>
   </div>
   <div class="card"><h2>Screen</h2>
    <label>Brightness: <span id="brVal"></span>%</label>
@@ -167,7 +178,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    </div>
    <label>Night brightness: <span id="nlVal"></span>% <span class="muted">(0 = screen off)</span></label>
    <input id="nightLevel" type="range" min="0" max="100" oninput="nlVal.textContent=this.value">
-   <small class="hint">Needs internet once to set the clock over NTP (no on-screen clock, this just drives the schedule). While the window is active it overrides the brightness and auto-brightness above. Times are local to the selected timezone; DST is handled automatically. After a reboot the schedule resumes once the clock re-syncs, so the screen may show normal brightness for a few seconds.</small>
+   <small class="hint">Needs internet once to set the clock over NTP. The timezone also applies to theme clocks. While the window is active it overrides the brightness and auto-brightness above. Times are local to the selected timezone; DST is handled automatically. After a reboot the schedule resumes once the clock re-syncs, so the screen may show normal brightness for a few seconds.</small>
   </div>
  </section>
 
@@ -361,7 +372,7 @@ function sc(id,v){var e=$(id);if(e)e.checked=!!v}
 function gv(id){var e=$(id);return e?e.value:''}
 function gc(id){var e=$(id);return e?e.checked:false}
 function toast(m){var t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2200)}
-function j(url,opt){return fetch(url,opt).then(function(r){return r.json()})}
+function j(url,opt){return fetch(url,opt).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'Request failed');return d})})}
 
 // tabs
 document.querySelectorAll('nav button').forEach(function(b){b.onclick=function(){
@@ -406,7 +417,7 @@ var TZMAP={
 function fillTz(){var s=$('tz');if(!s)return;var keys=Object.keys(TZMAP).filter(function(k){return k!==''});
  keys.sort();s.innerHTML='<option value="">UTC</option>'+keys.map(function(k){return '<option value="'+k+'">'+k+'</option>'}).join('');}
 
-var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',ha:'ha'};
+var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',ha:'ha',theme:'theme'};
 var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',ha:'carouselHa'};
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();
@@ -432,6 +443,7 @@ function resetColors(){setGain('rGain','rgVal',100);setGain('gGain','ggVal',100)
 function loadConfig(){return j('/api/config').then(function(c){C=c;
  var f=c.features||{}; ['ticker','usage','radar','ha'].forEach(function(k){if(f[k]===false)hideFeat(k)});
  // WireGuard is only built for the chips with room for it; drop the card otherwise
+ if(f.theme!==true){hideFeat('theme');var tc=$('themeCard');if(tc)tc.remove()}else{loadThemes()}
  if(f.wireguard===false){var wc=$('wgCard'); if(wc)wc.remove()}
  var w=c.wg||{};
  sc('wgEnabled',!!w.enabled); sv('wgPeerPublicKey',w.peerPublicKey);
@@ -684,7 +696,7 @@ function scan(){$('scanList').innerHTML='<div class="muted">Scanning...</div>';
 function loadStatus(){j('/api/status').then(function(s){
  $('dot').className='dot'+(s.connected?' ok':'');
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
- var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&C.clock.nightEnabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: NTP runs only when night mode is on':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
+ var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&C.clock.nightEnabled)||C.mode==='theme'||!!(C.wg&&C.wg.enabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: enable night mode, a theme clock, or WireGuard to start NTP':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
  var fw=$('fwVer'); if(fw)fw.textContent=s.fw+' '+s.version;
  // Surface the result of a boot-time GitHub update (ESP8266) once on first load,
  // so a failure that happened across the reboot is visible even if the original
@@ -793,6 +805,29 @@ function reboot(){if(confirm('Reboot device?'))j('/api/reboot',{method:'POST'}).
 function factory(){if(confirm('Erase ALL settings and reboot?'))j('/api/factory',{method:'POST'}).then(function(){toast('Reset, rebooting...')})}
 
 // OTA
+function themeRequest(path,body){return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'Theme request failed');return d})})}
+var themeEntries=[];
+function themeChoiceChanged(){var select=$('themeSelect');if(!select)return;
+ var theme=themeEntries.find(function(t){return t.id===select.value});
+ $('themeUseBtn').disabled=!theme||theme.valid===false;
+ $('themeDetails').textContent=!theme?'No theme selected':(theme.valid===false?'Invalid package: '+(theme.error||'Could not read theme')+' — remove it and install a corrected package.':theme.name+(theme.version?' · '+theme.version:'')+' · '+Math.ceil(theme.bytes/1024)+' KiB');
+}
+function loadThemes(){return j('/api/themes').then(function(d){
+ var select=$('themeSelect');if(!select)return;select.textContent='';themeEntries=d.themes||[];
+ themeEntries.forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.valid===false?t.id+' — invalid package':t.name+' — '+t.version;select.appendChild(o)});
+ if(d.selected)select.value=d.selected;
+ $('themeStatus').textContent=themeEntries.length+' installed · '+Math.floor(d.freeBytes/1024)+' KiB free'+(d.error?' · '+d.error:'');
+ themeChoiceChanged();
+ }).catch(function(e){toast(e.message)})}
+function selectTheme(){var id=$('themeSelect').value;var theme=themeEntries.find(function(t){return t.id===id});
+ if(!theme||theme.valid===false){toast('Choose a valid installed theme first');return}
+ themeRequest('/api/themes/select',{id:id}).then(function(){C.mode='theme';C.themeId=id;sv('mode','theme');modeChanged();toast('Theme selected');loadThemes()}).catch(function(e){toast(e.message)})}
+function deleteTheme(){var id=$('themeSelect').value;if(!id)return;
+ themeRequest('/api/themes/delete',{id:id}).then(function(){toast('Theme removed');loadThemes()}).catch(function(e){toast(e.message)})}
+function installTheme(){var f=$('themeFile').files[0];if(!f){toast('Choose a .stheme package');return}
+ var data=new FormData();data.append('theme',f);$('themeUploadBtn').disabled=true;$('themeStatus').textContent='Installing…';
+ fetch('/api/themes/install',{method:'POST',body:data}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'Install failed');return d})}).then(function(d){toast('Theme installed');return loadThemes().then(function(){$('themeSelect').value=d.id;themeChoiceChanged()})}).catch(function(e){$('themeStatus').textContent=e.message;toast(e.message)}).finally(function(){$('themeUploadBtn').disabled=false})}
+
 function upload(){var f=$('fw').files[0];if(!f){toast('Pick a .bin first');return}
  var fd=new FormData();fd.append('firmware',f,f.name);
  var x=new XMLHttpRequest();x.open('POST','/update');
