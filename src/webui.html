@@ -623,11 +623,12 @@ function collect(){
  return o;
 }
 function saveAll(){j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect())})
- .then(function(r){toast(r.reboot?'Saved — rebooting...':'Saved');if(r.reboot)setTimeout(function(){location.reload()},6000);loadStatus()})}
+ .then(function(r){if(!r.ok){toast(r.error||'Save failed');return}toast(r.reboot?'Saved — rebooting...':'Saved');if(r.reboot)setTimeout(function(){location.reload()},6000);loadStatus()})}
 
 function saveWifi(){
  var o={wifi:collectWifi()};
- j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)}).then(function(){
+ j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)}).then(function(r){
+  if(!r.ok){toast(r.error||'Save failed');return}
   toast('Saved, rebooting to connect...');j('/api/reboot',{method:'POST'});
  });
 }
