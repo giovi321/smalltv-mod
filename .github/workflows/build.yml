@@ -101,6 +101,14 @@ jobs:
           sh tests/theme/run.sh
           node tests/theme/test_webui.js
 
+      # Host-native, not board-specific: only needs ArduinoJson, which the
+      # firmware build above already fetched into .pio/libdeps.
+      - name: Test atomic settings storage
+        run: |
+          c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc -I.pio/libdeps/smalltv_esp32_8mb/ArduinoJson/src \
+            tests/test_storage.cpp -o /tmp/smalltv-storage-tests
+          /tmp/smalltv-storage-tests
+
       # One app image per target (web-UI OTA + GitHub self-update), the merged
       # factory images for first-time USB flashing of the ESP32 boards, and the
       # minimal loader used to install onto a SmallTV-ultra. Two boards get a
