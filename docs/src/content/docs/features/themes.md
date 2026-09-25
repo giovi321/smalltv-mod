@@ -153,11 +153,16 @@ periodically and exposes only the declared fields to text layers. A response is
 limited to 2 KiB, and a source can declare at most eight fields. The minimum
 refresh interval is 10 seconds.
 
-Fetching runs in a background task on the Pro, with one request in flight at a
-time. Connect and TLS handshake timeouts are three seconds; header/body reads
-also check a three-second overall request deadline. A stalled or slowly trickling
-response cannot hold up the display loop. The worker's 8 KiB stack exists only
-while fetching. Switching themes cancels the old request and discards its result.
+One request is in flight at a time, and every request is bounded by a
+three-second deadline that header and body reads also check. On the ESP32 boards
+the fetch runs in a background task, so a stalled or slowly trickling response
+cannot hold up the display loop; the task's 8 KiB stack exists only while
+fetching, and connect and TLS handshake timeouts are also three seconds. The
+ESP8266 has no FreeRTOS, so there the fetch is one blocking call in the main
+loop, like the ticker and radar fetchers, and the display waits for it within
+the same deadline. An HTTPS fetch is skipped while free heap is below 18,000
+bytes and counts as a failed request. Switching themes cancels the old request
+and discards its result.
 Failed requests keep the last displayed values until the next scheduled attempt.
 When a value changes, only text whose rendered content changed is repainted,
 including the area needed to erase its previous contents.
