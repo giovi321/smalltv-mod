@@ -59,14 +59,19 @@ class BoundedClient : public Transport {
   Deadline& deadline_;
 };
 
+// After GET(), read the body through HTTPClient's stream (the same pattern
+// StockClient and OtaUpdate use): HTTPClient owns the response from that
+// point, and on ESP8266 the raw client behind it never yields body bytes, so
+// every theme-data fetch failed at the body-read stage despite HTTP 200.
 struct BodyStream {
+  Stream& stream;
   NetClient& client;
   Deadline& deadline;
   uint32_t now() const { return millis(); }
   bool cancelled() const { return deadline.expired(); }
-  int available() { return client.available(); }
+  int available() { return stream.available(); }
   bool connected() { return client.connected(); }
-  int read(uint8_t* buffer, size_t count) { return client.read(buffer, count); }
+  int read(uint8_t* buffer, size_t count) { return (int)stream.readBytes(buffer, count); }
   void idle() { delay(1); }
 };
 
@@ -129,7 +134,7 @@ bool fetchThemeSource(smalltv::DataFetch& request) {
   http.addHeader("Accept", "application/json");
   if (http.GET() != HTTP_CODE_OK || deadline.expired()) return false;
   std::string body;
-  BodyStream stream{*client, deadline};
+  BodyStream stream{http.getStream(), *client, deadline};
   bool complete = smalltv::readDataBody(stream, http.getSize(), body);
   http.end();
   if (!complete || request.cancelled()) return false;
