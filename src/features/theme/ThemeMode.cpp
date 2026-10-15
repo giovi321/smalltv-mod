@@ -91,7 +91,7 @@ void ThemeMode::refreshData() {
 // unloading first; otherwise leaves the loaded package alone and only marks
 // the engine's next update() as a full repaint.
 void ThemeMode::invalidate(const Settings& s) {
-  if (loadedId_ != s.themeId || s.mode != MODE_THEME) unload();
+  if (loadedId_ != s.themeId || (s.mode != MODE_THEME && s.mode != MODE_CAROUSEL)) unload();
   // A failed load may be retried after installation or settings changes.
   if (!package_) attempted_ = false;
   engine_.invalidate();

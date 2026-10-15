@@ -40,7 +40,7 @@ If the screen says `Set home location`, the latitude and longitude in the Radar 
 
 ## Carousel
 
-Set the mode to **Carousel** and the device cycles through whichever of the three modes you ticked, staying on each for the number of seconds you set. It keeps fetching data for the mode on screen only.
+Set the mode to **Carousel** and the device cycles through whichever modes you ticked, staying on each for the number of seconds you set. It keeps fetching data for the mode on screen only. **Theme clock** is unticked by default; tick it once a theme is installed and selected.
 
 ## Getting back into the settings page
 

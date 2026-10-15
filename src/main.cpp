@@ -76,7 +76,9 @@ static bool carouselHas(const Settings& s, const DisplayMode* m) {
 #if WITH_HA
     case MODE_HA:     return s.carouselHa;
 #endif
-    case MODE_THEME:  return false; // explicitly selected, not in the existing carousel
+#if WITH_THEME
+    case MODE_THEME:  return s.carouselTheme;
+#endif
     default:          return true;
   }
 }

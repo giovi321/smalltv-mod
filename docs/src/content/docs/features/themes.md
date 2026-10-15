@@ -47,7 +47,9 @@ command-line tools.
 
 Notifications keep their existing behavior and cover the active theme. When the
 notification ends, the theme is restored with the current time and animation
-frame. Theme mode is selected directly; it is not part of the mode carousel in V1.
+frame. Theme mode can be selected directly or ticked as **Theme clock** under
+Carousel, where it rotates with the other features. The tick is off by default:
+with no theme installed the slot would only show `Select an installed theme`.
 
 Use **Remove** to delete an inactive theme. To replace the currently selected
 package, first choose another display mode and **Save settings**, remove the old

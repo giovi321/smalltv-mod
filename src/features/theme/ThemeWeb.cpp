@@ -273,12 +273,13 @@ void deleteTheme() {
     reply(404, "Theme not found");
     return;
   }
-  if (settings->themeId == id && settings->mode == MODE_THEME) {
+  bool onScreen = settings->mode == MODE_THEME || (settings->mode == MODE_CAROUSEL && settings->carouselTheme);
+  if (settings->themeId == id && onScreen) {
     ThemeFile file;
     file.open(path);
     auto info = smalltv::inspectInstalledTheme(file, id.c_str());
     if (info.valid) {
-      reply(409, "Switch away from theme mode before removing this theme");
+      reply(409, "Switch away from theme mode or untick it in the carousel before removing this theme");
       return;
     }
   }
