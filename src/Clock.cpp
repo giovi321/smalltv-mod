@@ -47,7 +47,9 @@ void clockReapply(const Settings& s) {
   // timezone change, and otherwise leave it alone. Night mode is one caller; a
   // WireGuard tunnel and theme clocks also need it. The peer rejects a handshake stamped
   // with a wrong clock (and that build is an ESP32, where the heap cost is moot).
-  if (!s.clock.nightEnabled && !wgNeedsClock(s) && !(WITH_THEME && s.mode == MODE_THEME)) return;
+  const bool themeOnScreen = WITH_THEME &&
+      (s.mode == MODE_THEME || (s.mode == MODE_CAROUSEL && s.carouselTheme));
+  if (!s.clock.nightEnabled && !wgNeedsClock(s) && !themeOnScreen) return;
   if (!s_ntpStarted || s.clock.tzPosix != s_armedTz) clockBegin(s);
 }
 
