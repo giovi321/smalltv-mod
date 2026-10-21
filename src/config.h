@@ -154,10 +154,12 @@
 #define BTN_ACT_HOME       2   // jump to the first page and resume the carousel
 #define BTN_ACT_NEXT       3   // next page, and pause the carousel auto-rotation
 #define BTN_ACT_NETINFO    4   // show the network / IP screen briefly
-#define BTN_ACT_MAX        BTN_ACT_NETINFO
+#define BTN_ACT_WAKE       5   // wake the screen to normal brightness briefly (e.g. from night mode)
+#define BTN_ACT_MAX        BTN_ACT_WAKE
 
 #define BTN_LONG_MS        600 // press held >= this many ms is a long press
 #define BTN_INFO_MS       4000 // how long the network-info screen stays up
+#define BTN_WAKE_MS       5000 // how long a wake press keeps the screen lit
 #define BTN_CONFIRM          3 // consecutive agreeing samples required to flip state
 
 #ifdef BTN_TOUCH_RATIO

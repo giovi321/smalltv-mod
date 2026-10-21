@@ -120,6 +120,7 @@ static bool     g_safeMode = false;   // last reset was an exception -> don't re
 static char     g_epcStr[16] = "";
 static char     g_addrStr[16] = "";
 static int g_lastBr = -1;        // last effective brightness written (-1 = none yet)
+static uint32_t g_btnWakeUntil = 0;  // button wake overrides dimming until this millis()
 #if HAS_LDR
 static uint32_t g_lastAutoBr = 0;
 static uint8_t  g_ldrCache   = DEFAULT_BRIGHTNESS;   // last LDR reading (2 s cadence)
@@ -128,6 +129,9 @@ static uint8_t  g_ldrCache   = DEFAULT_BRIGHTNESS;   // last LDR reading (2 s ca
 // Single brightness resolver: night mode overrides auto-brightness overrides the
 // manual level. Only writes the PWM when the effective target changes.
 static uint8_t appEffectiveBrightness() {
+  // A button wake press briefly lifts the screen to the manual level so a touch
+  // reveals it even when night mode has dimmed or blanked the backlight.
+  if (g_btnWakeUntil && millis() < g_btnWakeUntil) return g_settings.brightness;
   if (clockNightActive()) return g_settings.clock.nightLevel;
 #if HAS_LDR
   if (g_settings.autoBrightness) {
@@ -171,6 +175,12 @@ static void buttonShowNetInfo() {
   g_btnInfoUntil = millis() + BTN_INFO_MS;
 }
 
+static void buttonWake() {
+  g_btnWakeUntil = millis() + BTN_WAKE_MS;  // the brightness resolver lifts dimming for this window
+  g_lastBr = -1;                            // force the next tick to apply it
+  appApplyBrightness();
+}
+
 static void buttonGoHome() {
   g_carPaused = false;                 // resume normal rotation
   if (g_settings.mode == MODE_CAROUSEL && kModeCount > 0) {
@@ -197,6 +207,7 @@ static void buttonAction(uint8_t act) {
     case BTN_ACT_HOME:       buttonGoHome();      break;
     case BTN_ACT_NEXT:       buttonNext();        break;
     case BTN_ACT_NETINFO:    buttonShowNetInfo(); break;
+    case BTN_ACT_WAKE:       buttonWake();        break;
     default: break;                                 // BTN_ACT_NONE
   }
 }
