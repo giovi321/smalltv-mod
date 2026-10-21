@@ -144,6 +144,30 @@
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
+// ---------------------------------------------------------------------------
+// Physical button (boards that define BTN_PIN). Short and long press each run
+// a configurable action, and the touch sensitivity is adjustable in the web UI.
+// The values here are the first-boot defaults.
+// ---------------------------------------------------------------------------
+#define BTN_ACT_NONE       0   // do nothing
+#define BTN_ACT_SCREEN_OFF 1   // blink the backlight off for ~1 s
+#define BTN_ACT_HOME       2   // jump to the first page and resume the carousel
+#define BTN_ACT_NEXT       3   // next page, and pause the carousel auto-rotation
+#define BTN_ACT_NETINFO    4   // show the network / IP screen briefly
+#define BTN_ACT_MAX        BTN_ACT_NETINFO
+
+#define BTN_LONG_MS        600 // press held >= this many ms is a long press
+#define BTN_INFO_MS       4000 // how long the network-info screen stays up
+#define BTN_CONFIRM          3 // consecutive agreeing samples required to flip state
+
+#ifdef BTN_TOUCH_RATIO
+#define DEFAULT_BTN_SENS   BTN_TOUCH_RATIO  // press when touchRead < baseline * sens/100
+#else
+#define DEFAULT_BTN_SENS   85
+#endif
+#define DEFAULT_BTN_SHORT  BTN_ACT_NEXT
+#define DEFAULT_BTN_LONG   BTN_ACT_NETINFO
+
 // Full-screen attention overlay (POST /api/notify), in seconds.
 #define NOTIFY_TTL_DEFAULT_SEC  20
 #define NOTIFY_TTL_MIN_SEC       2

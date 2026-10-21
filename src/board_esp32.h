@@ -26,6 +26,13 @@
 // Backlight is active-low (vendor guide: TFT_BACKLIGHT_ON LOW). Runtime-overridable.
 #define TFT_BL_DEFAULT_INVERTED true
 
+// Capacitive touch button wired to GPIO32 on the classic ESP32 (verified on hardware). 
+// GPIO32 is touch channel T9, so it is read with touchRead(): the count drops when a finger 
+// is present. The press threshold is calibrated at runtime from an idle baseline rather than 
+// hard-coded, since touch counts vary per unit.
+#define BTN_PIN         32
+#define BTN_TOUCH_RATIO 85   // pressed when touchRead < baseline * ratio/100
+
 // No ambient-light sensor documented on this board -> auto-brightness compiled out.
 #define HAS_LDR     0
 #define ADC_MAX  4095   // classic ESP32 ADC is 12-bit (unused while HAS_LDR == 0)

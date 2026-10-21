@@ -177,6 +177,20 @@ struct RadarSettings {
   void fromJson(JsonObjectConst o);
 };
 
+// ---- Physical button slice (device-wide) -----------------------------------
+// Only acted on where BTN_PIN exists, but the fields persist everywhere so a
+// config export/import round-trips across boards. sensitivity is the touch press
+// threshold as a percent of the idle baseline; shortAction/longAction are BTN_ACT_*.
+struct ButtonSettings {
+  uint8_t sensitivity;   // press when touchRead < baseline * sensitivity/100 (50..99)
+  uint8_t shortAction;   // BTN_ACT_*
+  uint8_t longAction;    // BTN_ACT_*
+
+  void setDefaults();
+  void toJson(JsonObject o) const;
+  void fromJson(JsonObjectConst o);
+};
+
 // ---- Top-level settings ----------------------------------------------------
 struct Settings {
   // --- WiFi station networks (the device joins one of these) ---
@@ -212,6 +226,7 @@ struct Settings {
   DisplaySettings display;   // panel colour correction
   WgSettings      wg;        // WireGuard tunnel (ESP32 targets)
   AuthSettings    auth;      // optional web UI password
+  ButtonSettings  button;    // physical button behaviour (boards with BTN_PIN)
 
   void setDefaults();
 };

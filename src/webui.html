@@ -168,6 +168,27 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <div style="margin-top:10px"><button class="btn sec" onclick="resetColors()">Reset to 100%</button></div>
    <small class="hint">The panels shipped in these devices are not the same part, so the same firmware can look warm on one unit and green on another. Turn a channel down to pull that cast out. If red and blue come out swapped, switch the colour order; if the whole screen looks like a negative, tick Invert. Saving applies it immediately, so you can watch the screen while you adjust.</small>
   </div>
+  <div class="card" id="buttonCard" style="display:none"><h2>Button</h2>
+   <label>Short press</label>
+   <select id="btnShort">
+    <option value="0">Nothing</option>
+    <option value="1">Screen off (~1s)</option>
+    <option value="2">Home (first page)</option>
+    <option value="3">Next page (pause carousel)</option>
+    <option value="4">Show network / IP</option>
+   </select>
+   <label>Long press</label>
+   <select id="btnLong">
+    <option value="0">Nothing</option>
+    <option value="1">Screen off (~1s)</option>
+    <option value="2">Home (first page)</option>
+    <option value="3">Next page (pause carousel)</option>
+    <option value="4">Show network / IP</option>
+   </select>
+   <label>Touch sensitivity: <span id="btnSensVal"></span>%</label>
+   <input id="btnSens" type="range" min="50" max="99" oninput="btnSensVal.textContent=this.value">
+   <small class="hint">The capacitive button reads pressed when its touch value drops below this percent of the idle baseline. Lower = firmer touch needed; higher = more sensitive. Next page freezes the carousel on the current page; Home resumes it.</small>
+  </div>
   <div class="card"><h2>Clock &amp; night mode</h2>
    <label>Timezone</label>
    <select id="tz"></select>
@@ -446,6 +467,14 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  // WireGuard is only built for the chips with room for it; drop the card otherwise
  if(f.theme!==true){hideFeat('theme');var tc=$('themeCard');if(tc)tc.remove()}else{loadThemes()}
  if(f.wireguard===false){var wc=$('wgCard'); if(wc)wc.remove()}
+ // Physical button card: only on boards that wire one
+ if(f.button===true){var bc=$('buttonCard'); if(bc)bc.style.display='block';
+  var b=c.button||{};
+  sv('btnShort',b.shortAction!=null?b.shortAction:3);
+  sv('btnLong',b.longAction!=null?b.longAction:4);
+  sv('btnSens',b.sensitivity!=null?b.sensitivity:85);
+  $('btnSensVal')&&($('btnSensVal').textContent=(b.sensitivity!=null?b.sensitivity:85));
+ }
  var w=c.wg||{};
  sc('wgEnabled',!!w.enabled); sv('wgPeerPublicKey',w.peerPublicKey);
  sv('wgEndpointHost',w.endpointHost); sv('wgEndpointPort',w.endpointPort||51820);
@@ -592,6 +621,11 @@ function collect(){
    keepalive:parseInt(gv('wgKeepalive'))||0};
   var pk=gv('wgPrivateKey'); if(pk)w.privateKey=pk;
   o.wg=w;
+ }
+ // Physical button: only send when the board exposes one (card visible).
+ if($('buttonCard') && $('buttonCard').style.display!=='none'){
+  o.button={shortAction:parseInt(gv('btnShort')), longAction:parseInt(gv('btnLong')),
+   sensitivity:parseInt(gv('btnSens'))||85};
  }
  // ticker slice (only if compiled in)
  if($('ticker')){

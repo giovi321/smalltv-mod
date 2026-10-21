@@ -92,6 +92,12 @@ static void handleGetConfig() {
 #else
   feat["wireguard"] = false;
 #endif
+  // Physical button: only present in some boards, so the UI hides its card otherwise.
+#ifdef BTN_PIN
+  feat["button"] = true;
+#else
+  feat["button"] = false;
+#endif
   // Which chip this build runs on (the UI warns about per-chip limitations).
 #if defined(SMALLTV_ESP32C2)
   root["chip"] = "esp32c2";

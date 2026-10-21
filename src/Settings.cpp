@@ -184,6 +184,27 @@ void ClockSettings::fromJson(JsonObjectConst o) {
 }
 
 // ===========================================================================
+// Physical button slice
+// ===========================================================================
+void ButtonSettings::setDefaults() {
+  sensitivity = DEFAULT_BTN_SENS;
+  shortAction = DEFAULT_BTN_SHORT;
+  longAction  = DEFAULT_BTN_LONG;
+}
+
+void ButtonSettings::toJson(JsonObject o) const {
+  o["sensitivity"] = sensitivity;
+  o["shortAction"] = shortAction;
+  o["longAction"]  = longAction;
+}
+
+void ButtonSettings::fromJson(JsonObjectConst o) {
+  if (o["sensitivity"].is<int>()) sensitivity = constrain((int)o["sensitivity"], 50, 99);
+  if (o["shortAction"].is<int>()) shortAction = constrain((int)o["shortAction"], 0, BTN_ACT_MAX);
+  if (o["longAction"].is<int>())  longAction  = constrain((int)o["longAction"],  0, BTN_ACT_MAX);
+}
+
+// ===========================================================================
 // Web UI password slice
 // ===========================================================================
 void AuthSettings::setDefaults() {
@@ -451,6 +472,7 @@ void Settings::setDefaults() {
   display.setDefaults();
   wg.setDefaults();
   auth.setDefaults();
+  button.setDefaults();
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +563,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.display.toJson(root["display"].to<JsonObject>());
   s.wg.toJson(root["wg"].to<JsonObject>(), includeSecrets);
   s.auth.toJson(root["auth"].to<JsonObject>(), includeSecrets);
+  s.button.toJson(root["button"].to<JsonObject>());
 }
 
 // Apply only the keys that are present (partial update friendly). Accepts both
@@ -632,4 +655,5 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["display"].is<JsonObjectConst>()) s.display.fromJson(root["display"].as<JsonObjectConst>());
   if (root["wg"].is<JsonObjectConst>()) s.wg.fromJson(root["wg"].as<JsonObjectConst>());
   if (root["auth"].is<JsonObjectConst>()) s.auth.fromJson(root["auth"].as<JsonObjectConst>());
+  if (root["button"].is<JsonObjectConst>()) s.button.fromJson(root["button"].as<JsonObjectConst>());
 }

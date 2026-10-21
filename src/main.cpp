@@ -67,6 +67,7 @@ static const size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);
 // the incoming mode: repaint from cached data, no refetch.
 static size_t   g_carIdx = 0;
 static uint32_t g_carSwitch = 0;
+static bool     g_carPaused = false;   // button paused the auto-rotation (stays put)
 
 static bool carouselHas(const Settings& s, const DisplayMode* m) {
   switch (m->modeConst()) {
@@ -100,7 +101,9 @@ static DisplayMode* activeMode(const Settings& s) {
   if (s.mode == MODE_CAROUSEL && kModeCount > 0) {
     if (g_carSwitch == 0) g_carSwitch = millis();
     if (!carouselHas(s, kModes[g_carIdx])) carouselNext(s);   // settings changed
-    if (millis() - g_carSwitch >= (uint32_t)s.carouselSec * 1000UL) {
+    bool dwellExpired = millis() - g_carSwitch >= (uint32_t)s.carouselSec * 1000UL;
+    if (g_carPaused) dwellExpired = false;   // button froze the rotation on the current page
+    if (dwellExpired) {
       g_carSwitch = millis();
       carouselNext(s);
     }
@@ -146,6 +149,103 @@ void appApplyBrightness() {
     gfxSetBrightness(t, g_settings.backlightInverted);
   }
 }
+
+#ifdef BTN_PIN
+// Capacitive touch button (e.g. NM-TV-154, GPIO32). 
+// touchRead() returns a capacitance count that drops when a finger is present; the press
+// threshold is calibrated from an idle baseline (recomputed if the configured
+// sensitivity changes), since counts vary per unit. A short and a long press
+// each run a configurable action (Settings.button). Non-blocking except for the
+// deliberate ~1 s screen-off blink.
+static uint32_t g_btnInfoUntil = 0;   // network-info screen shown until this millis()
+
+static void buttonBlinkOff() {
+  gfxSetBrightness(0, g_settings.backlightInverted);   // blank the panel
+  delay(1000);
+  g_lastBr = -1;                       // force the next tick to restore brightness
+  appApplyBrightness();
+}
+
+static void buttonShowNetInfo() {
+  gfxStaInfo(netSSID().c_str(), netIP().c_str(), g_settings.hostname.c_str());
+  g_btnInfoUntil = millis() + BTN_INFO_MS;
+}
+
+static void buttonGoHome() {
+  g_carPaused = false;                 // resume normal rotation
+  if (g_settings.mode == MODE_CAROUSEL && kModeCount > 0) {
+    g_carIdx = 0;
+    g_carSwitch = millis();
+    if (!carouselHas(g_settings, kModes[0])) carouselNext(g_settings);  // 0 not ticked -> first ticked
+    else kModes[0]->wake(g_settings);
+  } else {
+    DisplayMode* m = activeMode(g_settings);
+    if (m) m->invalidate(g_settings);
+  }
+}
+
+static void buttonNext() {
+  if (g_settings.mode != MODE_CAROUSEL || kModeCount == 0) return;
+  g_carPaused = true;                  // manual navigation stops the auto-rotation
+  g_carSwitch = millis();
+  carouselNext(g_settings);            // advance + wake the incoming mode
+}
+
+static void buttonAction(uint8_t act) {
+  switch (act) {
+    case BTN_ACT_SCREEN_OFF: buttonBlinkOff();    break;
+    case BTN_ACT_HOME:       buttonGoHome();      break;
+    case BTN_ACT_NEXT:       buttonNext();        break;
+    case BTN_ACT_NETINFO:    buttonShowNetInfo(); break;
+    default: break;                                 // BTN_ACT_NONE
+  }
+}
+
+static void buttonService() {
+  static bool     inited   = false;
+  static uint16_t thrDown  = 0;       // press  when median < thrDown
+  static uint16_t thrUp    = 0;       // release when median > thrUp (hysteresis band)
+  static uint8_t  sensSeen = 0;       // sensitivity the thresholds were computed for
+  static bool     stable   = false;   // confirmed (debounced) button state
+  static uint8_t  run      = 0;       // consecutive samples disagreeing with 'stable'
+  static uint32_t downAt   = 0;
+
+  // Calibrate (or recalibrate when the web UI changes the sensitivity).
+  if (!inited || sensSeen != g_settings.button.sensitivity) {
+    uint32_t sum = 0;
+    for (int i = 0; i < 16; i++) { sum += touchRead(BTN_PIN); delay(2); }
+    uint16_t baseline = sum / 16;
+    uint8_t s = g_settings.button.sensitivity;
+    thrDown = (uint16_t)((uint32_t)baseline * s / 100);
+    uint8_t up = s + 5; if (up > 99) up = 99;            // ~5 % hysteresis band
+    thrUp = (uint16_t)((uint32_t)baseline * up / 100);
+    sensSeen = s;
+    inited = true;
+  }
+
+  // ESP32 touchRead() emits isolated low-going glitch samples; a median of three
+  // reads rejects any single spike, so a lone glitch can no longer be seen as a
+  // press. Hysteresis then keeps the state from chattering near the threshold.
+  uint16_t a = touchRead(BTN_PIN);
+  uint16_t b = touchRead(BTN_PIN);
+  uint16_t c = touchRead(BTN_PIN);
+  uint16_t m = a > b ? (b > c ? b : (a > c ? c : a))
+                     : (a > c ? a : (b > c ? c : b));
+
+  bool wantDown = stable ? (m < thrUp) : (m < thrDown);
+  if (wantDown == stable) { run = 0; return; }
+
+  // Integrator debounce: require BTN_CONFIRM consecutive agreeing samples before
+  // flipping the confirmed state, so a short burst of noise is ignored too.
+  if (++run < BTN_CONFIRM) return;
+  run = 0;
+  stable = wantDown;
+  if (stable) { downAt = millis(); return; }   // press start: decide on release
+  uint32_t held = millis() - downAt;
+  buttonAction(held >= BTN_LONG_MS ? g_settings.button.longAction
+                                   : g_settings.button.shortAction);
+}
+#endif
 
 // Exposed to the web portal (/api/status) so the last reset reason is visible.
 const char* appResetReason() { return g_resetReason.c_str(); }
@@ -249,6 +349,21 @@ void loop() {
   netLoop();
   webPortalLoop();
 
+#ifdef BTN_PIN
+  buttonService();
+  // The network-info screen (a long-press action) holds for BTN_INFO_MS, then
+  // the current mode repaints over it. Handled here so it works in AP mode too.
+  if (g_btnInfoUntil && millis() >= g_btnInfoUntil) {
+    g_btnInfoUntil = 0;
+    if (netMode() == NET_AP) {
+      gfxApInfo(g_settings.apSsid.c_str(), g_settings.apPass.c_str(), netIP().c_str());
+    } else {
+      DisplayMode* m = activeMode(g_settings);
+      if (m) m->wake(g_settings);
+    }
+  }
+#endif
+
   if (webPortalRebootDue()) {
     delay(120);
     ESP.restart();
@@ -275,6 +390,13 @@ void loop() {
     delay(5);
     return;  // setup mode: AP info stays on screen
   }
+
+#ifdef BTN_PIN
+  if (g_btnInfoUntil) {
+    delay(5);
+    return;  // network-info screen is up; don't let the mode repaint over it
+  }
+#endif
 
   // --- STA mode: the active feature fetches + renders itself ---
 
