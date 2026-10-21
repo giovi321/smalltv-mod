@@ -181,6 +181,12 @@ static void buttonWake() {
   appApplyBrightness();
 }
 
+static void buttonAckNotify() {
+#if WITH_NOTIFY
+  g_notifyMode.dismiss();   // expire the active overlay now; the next one (or the feature) takes over
+#endif
+}
+
 static void buttonGoHome() {
   g_carPaused = false;                 // resume normal rotation
   if (g_settings.mode == MODE_CAROUSEL && kModeCount > 0) {
@@ -208,6 +214,7 @@ static void buttonAction(uint8_t act) {
     case BTN_ACT_NEXT:       buttonNext();        break;
     case BTN_ACT_NETINFO:    buttonShowNetInfo(); break;
     case BTN_ACT_WAKE:       buttonWake();        break;
+    case BTN_ACT_ACK:        buttonAckNotify();   break;
     default: break;                                 // BTN_ACT_NONE
   }
 }

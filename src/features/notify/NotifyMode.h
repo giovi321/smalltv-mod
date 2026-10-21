@@ -64,6 +64,11 @@ class NotifyMode : public DisplayMode {
   bool    active() const { return owns(); }
   uint8_t queued() const { return qCount_; }
 
+  // Acknowledge the overlay on screen: expire it now so the next queued item, or
+  // the underlying feature, takes over on the next tick exactly as a natural TTL
+  // expiry would. A no-op when nothing owns the panel.
+  void dismiss() { if (owns()) untilMs_ = millis(); }
+
   // How long the overlay owned the panel, across the whole run rather than the
   // last request in it, so main.cpp can credit the carousel after active() has
   // gone false. Never exceeds what the run was entitled to, which is what keeps

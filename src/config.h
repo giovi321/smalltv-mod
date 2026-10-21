@@ -155,7 +155,8 @@
 #define BTN_ACT_NEXT       3   // next page, and pause the carousel auto-rotation
 #define BTN_ACT_NETINFO    4   // show the network / IP screen briefly
 #define BTN_ACT_WAKE       5   // wake the screen to normal brightness briefly (e.g. from night mode)
-#define BTN_ACT_MAX        BTN_ACT_WAKE
+#define BTN_ACT_ACK        6   // acknowledge the active notification (expire it now)
+#define BTN_ACT_MAX        BTN_ACT_ACK
 
 #define BTN_LONG_MS        600 // press held >= this many ms is a long press
 #define BTN_INFO_MS       4000 // how long the network-info screen stays up
