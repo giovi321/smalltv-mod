@@ -17,8 +17,15 @@ class UsageMode : public DisplayMode {
   void service(const Settings& s) override;
   void invalidate(const Settings& s) override;
   // repaint only (no refetch) — another mode may have drawn over the screen since,
-  // so force the full layout back in, not just a value diff
-  void wake(const Settings& s) override { needRender_ = true; layoutPrimed_ = false; }
+  // so force the full layout back in, not just a value diff. showingMascot_ is
+  // cleared too: without it a wake mid-animation re-enters the idle mascot on the
+  // incremental (diff) path, which skips the full-screen clear and leaves the old
+  // page bleeding through between cells. Clearing it forces a clean restart draw.
+  void wake(const Settings& s) override {
+    needRender_ = true;
+    layoutPrimed_ = false;
+    showingMascot_ = false;
+  }
 
  private:
   bool contentChanged(const UsageData& u) const;
