@@ -217,6 +217,65 @@ int main() {
   engine.update(4,nullptr);engine.setValues({{"weather.temp","12"}});
   assert(!engine.update(5,nullptr).empty() && engine.states()[0].text=="12");
 
+  // `show`: a layer is drawn only while every rule holds: its value lies in
+  // one of the rule's ranges (ends included, null open), or is missing and
+  // the rule says "missing": true. Hidden, the layer has no bounds, so it is
+  // not drawn, and hiding or showing it repaints just its own area.
+  {
+    auto withShow = [&](const std::string& rules) {
+      std::string json = dataJson;
+      const std::string end = "\"color\":\"#ffffff\"}]}";
+      json.replace(json.find(end), end.size(), "\"color\":\"#ffffff\",\"show\":" + rules + "}]}");
+      assert(parseTheme(json, theme, error));
+      return theme;
+    };
+    Engine e; e.setTheme(withShow("[{\"source\":\"weather.temp\",\"in\":[[0,9],[20,null]]}]"), 0);
+    e.update(0, nullptr);
+    auto visible = [&](const char* temp) {
+      e.setValues({{"weather.temp", temp}}); e.update(1, nullptr);
+      return e.states()[0].resolved.visible;
+    };
+    assert(!e.states()[0].resolved.visible && e.states()[0].bounds.empty());  // no value yet
+    for (const char* in : {"5", "0", "9", "20", "1000", " 7 "}) assert(visible(in));
+    for (const char* out : {"9.1", "15", "-1", "abc", "--"}) assert(!visible(out) && e.states()[0].bounds.empty());
+    e.setValues({{"weather.temp", "5"}}); e.update(2, nullptr);
+    e.setValues({{"weather.temp", "15"}}); auto hidden = e.update(3, nullptr);
+    assert(hidden.size() == 1 && hidden[0].x == 0 && hidden[0].y == 0 && hidden[0].w == 12 && hidden[0].h == 16);
+    e.setValues({{"weather.temp", "16"}}); assert(e.update(4, nullptr).empty());  // hidden: nothing to repaint
+    e.setValues({{"weather.temp", "20"}}); auto shownAgain = e.update(5, nullptr);
+    assert(shownAgain.size() == 1 && shownAgain[0].w == 24 && shownAgain[0].h == 16);
+    // Two rules must both hold; "missing": true counts a missing or
+    // non-numeric value as holding.
+    Engine both; both.setTheme(withShow("[{\"source\":\"weather.temp\",\"in\":[[0,9]],\"missing\":true},"
+                                        "{\"source\":\"weather.temp\",\"in\":[[5,null]],\"missing\":true}]"), 0);
+    both.update(0, nullptr);
+    assert(both.states()[0].resolved.visible);
+    auto bothVisible = [&](const char* temp) {
+      both.setValues({{"weather.temp", temp}}); both.update(1, nullptr);
+      return both.states()[0].resolved.visible;
+    };
+    assert(bothVisible("7") && bothVisible("abc") && !bothVisible("3") && !bothVisible("12"));
+    // Rules belong to their own layer. Here only the second layer, a
+    // rectangle, has one; hiding it changes nothing but its visibility, and
+    // that alone repaints its area.
+    std::string twoLayers = dataJson;
+    const std::string end = "\"color\":\"#ffffff\"}]}";
+    twoLayers.replace(twoLayers.find(end), end.size(), "\"color\":\"#ffffff\"},"
+      "{\"id\":\"box\",\"type\":\"shape\",\"shape\":\"rectangle\",\"x\":100,\"y\":100,\"width\":20,\"height\":10,\"fill\":\"#ff0000\","
+      "\"show\":[{\"source\":\"weather.temp\",\"in\":[[0,9]]}]}]}");
+    assert(parseTheme(twoLayers, theme, error));
+    Engine two; two.setTheme(theme, 0); two.update(0, nullptr);
+    two.setValues({{"weather.temp", "5"}}); two.update(1, nullptr);
+    assert(two.states()[0].resolved.visible && two.states()[1].resolved.visible);
+    two.setValues({{"weather.temp", "50"}}); two.update(2, nullptr);
+    assert(two.states()[0].resolved.visible && !two.states()[1].resolved.visible);
+    two.setValues({{"weather.temp", "8"}});
+    auto boxDirty = two.update(3, nullptr);
+    bool boxRepainted = false;
+    for (const Rect& r : boxDirty) if (r.x == 100 && r.y == 100 && r.w == 20 && r.h == 10) boxRepainted = true;
+    assert(boxRepainted && two.states()[1].resolved.visible);
+  }
+
   const char* bindingJson = R"({"spec":1,"theme":{"id":"binding","name":"Binding","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"sensor","url":"http://example.test/value.json","interval":60,"fields":[{"id":"value","path":"value"}]}],"layers":[{"id":"bar","type":"shape","shape":"rectangle","x":20,"y":120,"width":10,"height":18,"cornerRadius":8,"fill":"#00ff00","bind":{"width":{"source":"sensor.value","input":[0,50],"output":[0,100]},"fill":{"source":"sensor.value","stops":[{"at":0,"value":"#00ff00"},{"at":50,"value":"#ffff00"}]}}}]})";
   assert(parseTheme(bindingJson,theme,error));
   const uint16_t staticGreen=0x07e0,warningColor=0xffe0;

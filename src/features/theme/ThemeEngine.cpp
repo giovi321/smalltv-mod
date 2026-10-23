@@ -890,6 +890,44 @@ static bool parseScroll(JsonObjectConst object, const std::string& path, std::st
   result.scroll.enabled = true;
   return true;
 }
+// Parses the last parsed layer's `show` list into t.show (see ShowRule): 1 to
+// 4 rules, each a declared data field and 1 to 4 inclusive [low, high]
+// ranges, where null is an open end.
+__attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t, const std::string& path, std::string& error) {
+  Fields layer(object, path, error);
+  JsonArrayConst rules = object["show"].as<JsonArrayConst>();
+  if (rules.isNull() || rules.size() == 0 || rules.size() > 4) return layer.fail("show", "expected 1 to 4 rules");
+  for (size_t i = 0; i < rules.size(); ++i) {
+    const std::string rulePath = path + ".show[" + std::to_string(i) + "]";
+    JsonObjectConst item = rules[i].as<JsonObjectConst>();
+    Fields fields(item, rulePath, error);
+    if (item.isNull()) return fields.fail("", "expected an object");
+    ShowRule& rule = t.show.emplace_back();
+    rule.layer = static_cast<uint8_t>(t.layers.size() - 1);
+    if (!fields.keys("|source|in|missing|") || !fields.text("source", rule.source, 64) || !fields.boolean("missing", rule.missing, false)) return false;
+    // Declared data fields only: the built-in time.*/device.* sources of spec 2 are not offered to `show`.
+    if (!validFieldToken(rule.source, t)) return fields.fail("source", "expected a declared data field");
+    JsonArrayConst ranges = item["in"].as<JsonArrayConst>();
+    if (ranges.isNull() || ranges.size() == 0 || ranges.size() > 4) return fields.fail("in", "expected 1 to 4 ranges");
+    rule.ranges.reserve(ranges.size());
+    for (size_t r = 0; r < ranges.size(); ++r) {
+      Fields range(item, rulePath + ".in[" + std::to_string(r) + "]", error);
+      JsonArrayConst ends = ranges[r].as<JsonArrayConst>();
+      if (ends.isNull() || ends.size() != 2) return range.fail("", "expected [low, high]");
+      double value[2];
+      for (size_t e = 0; e < 2; ++e) {
+        JsonVariantConst end = ends[e];
+        if (end.isNull()) value[e] = e ? INFINITY : -INFINITY;
+        else if (end.is<double>() || end.is<long>() || end.is<int>()) value[e] = end.as<double>();
+        else return range.fail("", "expected numbers or null");
+      }
+      if (std::isinf(value[0]) && std::isinf(value[1])) return range.fail("", "at most one end may be null");
+      if (value[0] > value[1]) return range.fail("", "low must not be above high");
+      rule.ranges.emplace_back(value[0], value[1]);
+    }
+  }
+  return true;
+}
 // Parses a layer's `bind` object: at most 8 entries (already enforced key-by-
 // key by ManifestScanner, but re-checked here on the parsed count),
 // each either a numeric mapping or a color-stop table depending on which
@@ -1139,12 +1177,12 @@ bool parseTheme(ManifestSource& json, Theme& out, std::string& error) {
 }
 // Each shape's allowed keys. In flash on the ESP8266, where a string literal
 // would take RAM; Fields::keys() reads them with the _P functions.
-static const char rectangleKeys[] PROGMEM = "|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|cornerRadius|scroll|bind|";
-static const char circleKeys[] PROGMEM = "|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|";
-static const char lineKeys[] PROGMEM = "|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|";
-static const char arcKeys[] PROGMEM = "|id|type|shape|x|y|radius|start|sweep|stroke|strokeWidth|bind|";
-static const char handKeys[] PROGMEM = "|id|type|shape|x|y|length|tail|angle|stroke|strokeWidth|bind|";
-static const char ticksKeys[] PROGMEM = "|id|type|shape|x|y|radius|count|length|stroke|strokeWidth|bind|";
+static const char rectangleKeys[] PROGMEM = "|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|cornerRadius|scroll|bind|show|";
+static const char circleKeys[] PROGMEM = "|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|show|";
+static const char lineKeys[] PROGMEM = "|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|show|";
+static const char arcKeys[] PROGMEM = "|id|type|shape|x|y|radius|start|sweep|stroke|strokeWidth|bind|show|";
+static const char handKeys[] PROGMEM = "|id|type|shape|x|y|length|tail|angle|stroke|strokeWidth|bind|show|";
+static const char ticksKeys[] PROGMEM = "|id|type|shape|x|y|radius|count|length|stroke|strokeWidth|bind|show|";
 // What one translation holds while the theme runs: its entry and, once the
 // text outgrows the string's inline buffer, the heap block behind it. This is
 // what MaxTranslationBytes bounds -- the text alone says nothing of the entry,
@@ -1209,7 +1247,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
   if (!f.text("type", type, 16) || !f.number("x", -240, 479, l.x) || !f.number("y", -240, 479, l.y)) return false;
   if (type == "text") {
     l.type = LayerType::Text;
-    if (!f.keys("|id|type|x|y|anchor|value|size|font|color|scroll|bind|") || !parseTextValue(o, t, f, l)) return false;
+    if (!f.keys("|id|type|x|y|anchor|value|size|font|color|scroll|bind|show|") ||!parseTextValue(o, t, f, l)) return false;
     if (f.has("font")) {
       // A package font (#31): fonts/<name>.stf, whose line height is the
       // layer's size, so `size` is not given.
@@ -1242,7 +1280,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
     l.anchorY = a / 3;
   } else if (type == "image" || type == "animation") {
     l.type = type == "image" ? LayerType::Image : LayerType::Animation;
-    if (!f.keys(type == "image" ? "|id|type|x|y|source|scroll|bind|" : "|id|type|x|y|width|height|source|frames|fps|loop|scroll|bind|") || !f.text("source", l.source, 110)) return false;
+    if (!f.keys(type == "image" ? "|id|type|x|y|source|scroll|bind|show|" : "|id|type|x|y|width|height|source|frames|fps|loop|scroll|bind|show|") || !f.text("source", l.source, 110)) return false;
     if (!validPath(l.source)) return f.fail("source", "expected a safe relative asset path");
     if (type == "animation") {
       int frames = 0, fps = 0;
@@ -1295,13 +1333,14 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
       if (!f.number("x2", -240, 479, l.x2) || !f.number("y2", -240, 479, l.y2)) return false;
     }
   } else return f.fail("type", "expected text, image, animation or shape");
-  // `scroll` and `bind` are common to every layer type's own `keys()` list
-  // above, so they are parsed once here rather than duplicated per branch.
+  // `scroll`, `bind` and `show` are common to every layer type's own `keys()`
+  // list above, so they are parsed once here rather than duplicated per branch.
   if (f.has("scroll")) {
     if (l.type != LayerType::Text) return f.fail("scroll", "only allowed on text layers");
     if (!parseScroll(o, layerPath, error, l)) return false;
   }
   if (f.has("bind") && !parseBindings(o, t, layerPath, error, l)) return false;
+  if (f.has("show") && !parseShow(o, t, layerPath, error)) return false;
   return true;
 }
 std::string expandText(const std::string& value, const tm* t) {
@@ -1510,6 +1549,22 @@ void Engine::resolveLayer(size_t index) {
   if (layer.type == LayerType::Shape && layer.shape == Shape::Rectangle)
     resolved.cornerRadius = std::min<int>(resolved.cornerRadius,
       std::max(0, std::min(resolved.width, resolved.height) / 2));
+  // `show`: every rule of this layer must hold (see ShowRule).
+  for (const auto& rule : theme_.show) {
+    if (rule.layer != index || !resolved.visible) continue;
+    const std::string* source = nullptr;
+    for (const auto& item : values_) if (item.key == rule.source) {
+      source = &item.value;
+      break;
+    }
+    double value = 0;
+    if (!source || !parseFiniteNumber(*source, value)) {
+      resolved.visible = rule.missing;
+      continue;
+    }
+    resolved.visible = false;
+    for (const auto& range : rule.ranges) if (value >= range.first && value <= range.second) resolved.visible = true;
+  }
   states_[index].resolved = resolved;
 }
 // True once `now` is strictly past `deadline`; wrap-safe across millis() rollover.
@@ -1607,7 +1662,7 @@ static bool sameGeometry(const ResolvedLayer& a, const ResolvedLayer& b) {
   return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height &&
     a.x2 == b.x2 && a.y2 == b.y2 && a.radius == b.radius &&
     a.cornerRadius == b.cornerRadius && a.size == b.size &&
-    a.strokeWidth == b.strokeWidth && a.scrollWidth == b.scrollWidth;
+    a.strokeWidth == b.strokeWidth && a.scrollWidth == b.scrollWidth && a.visible == b.visible;
 }
 static bool sameColors(const ResolvedLayer& a, const ResolvedLayer& b) {
   return a.color == b.color && a.fill == b.fill && a.stroke == b.stroke;
@@ -1756,6 +1811,8 @@ static Rect arcBounds(const ResolvedLayer& r) {
 // the full (possibly much wider) expanded text -- render() maps viewport-
 // local pixels back to a position in the text itself via scrollContentColumn.
 static Rect bounds(const Theme& theme, const Layer& l, const ResolvedLayer& resolved, const std::string& text) {
+  // A hidden layer (`show`) covers nothing, so it is neither drawn nor repainted.
+  if (!resolved.visible) return Rect(resolved.x, resolved.y, 0, 0);
   if (l.type == LayerType::Text) {
     int w = l.scroll.enabled ? resolved.scrollWidth : textPixelWidth(theme, l, resolved.size, text);
     return Rect(resolved.x - w * l.anchorX / 2, resolved.y - resolved.size * l.anchorY / 2, w, resolved.size);

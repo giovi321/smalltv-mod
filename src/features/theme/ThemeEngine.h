@@ -106,6 +106,19 @@ struct ResolvedLayer {
   Coord x = 0, y = 0, width = 0, height = 0, x2 = 0, y2 = 0, radius = 0, cornerRadius = 0;
   Coord size = 16, strokeWidth = 1, scrollWidth = 0, scrollSpeed = 0;
   uint16_t color = 0xffff, fill = 0, stroke = 0;
+  // False while one of the layer's `show` rules does not hold.
+  bool visible = true;
+};
+// One rule of a layer's `show` list: the layer is drawn only while every one
+// of its rules holds. A rule holds when the value of `source` lies in one of
+// `ranges` (ends included; an open end is an infinity), or when the value is
+// missing or not a number and `missing` is true. Rules live in one list on
+// the Theme, not in each Layer, so themes without them pay nothing per layer.
+struct ShowRule {
+  uint8_t layer = 0;
+  bool missing = false;
+  std::string source;
+  std::vector<std::pair<double, double>> ranges;
 };
 bool parseFiniteNumber(const std::string& value, double& number);
 int resolveNumericBinding(const NumericBinding& binding, double value, int lo, int hi);
@@ -192,6 +205,7 @@ struct Theme {
   uint16_t translationBytes = 0;   // their cost so far, as parseTextValue() counts it
   std::vector<ThemeDataSource> data;
   std::vector<ThemeFont> fonts;
+  BlockList<ShowRule> show;
 };
 // Random-access bytes of a manifest. parseTheme() reads it forward in small
 // pieces, several times, so a package's manifest never has to be copied into

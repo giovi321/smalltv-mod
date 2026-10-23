@@ -748,6 +748,28 @@ and `device` can no longer be used as the `id` of a `data` source, since
 `time.second` would then be ambiguous. A name that starts with `time.` or
 `device.` but is not in the tables is rejected with `unknown time.* or device.* name`.
 
+### Showing and hiding layers
+
+`show` is an optional list on any layer. The layer is drawn only while every
+rule in the list holds:
+
+```json
+{"show": [{"source": "w.code", "in": [[51, 67], [80, 82]]},
+          {"source": "w.temp", "in": [[15, null]], "missing": true}]}
+```
+
+| Field | Type | Required | Rule |
+| --- | --- | --- | --- |
+| `source` | string | yes | Must reference a declared data field |
+| `in` | array | yes | 1–4 ranges `[low, high]`, ends included; `null` is an open end (not both) |
+| `missing` | boolean | no, default false | Whether the rule holds while the value is missing or not a number |
+
+A layer takes 1–4 rules. A rule holds when the fetched number lies in any of
+its ranges. A hidden layer is not drawn, and showing or hiding it repaints only
+its own area; its bindings and animation keep running. Before the first fetch
+every value is missing, so `"missing": true` picks the layers a theme shows
+until its data arrives.
+
 #### Data age: `<source>.age`
 
 Data age needs firmware v3.6.0 or later. In a `"spec": 2` theme every `data` source also has an `age` field that the

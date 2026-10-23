@@ -1,6 +1,7 @@
 #include "ThemeEngine.h"
 #include <ArduinoJson.h>
 #include <cassert>
+#include <cmath>
 #include <iostream>
 using namespace smalltv;
 const char* base=R"({"spec":1,"theme":{"id":"test","name":"Test","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"layers":[{"id":"time","type":"text","x":120,"y":100,"anchor":"center","value":"{HH}:{MM}","size":48,"color":"#ffffff"}]})";
@@ -287,5 +288,54 @@ int main() {
   tm t{};t.tm_hour=12;t.tm_year=100;t.tm_mon=0;t.tm_mday=1;t.tm_wday=6;
   assert(expandText("{hh} {HH} {DD} {MONTH} {WEEKDAY} {YYYY}",&t)=="12 12 01 January Saturday 2000");
   t.tm_hour=23;assert(expandText("{hh}",&t)=="11");assert(expandText("{HH}:{MM}",nullptr)=="--:--");
+  // `show`: up to 4 rules per layer, each a declared field and up to 4
+  // inclusive ranges; null is an open end. Rules are kept with their layer.
+  {
+    dataDocument(d);
+    JsonObject rule=d["layers"][0]["show"].add<JsonObject>();
+    rule["source"]="weather.temp";
+    JsonArray in=rule["in"].to<JsonArray>();
+    JsonArray first=in.add<JsonArray>();first.add(-5);first.add(4.5);
+    JsonArray second=in.add<JsonArray>();second.add(20);second.add(nullptr);
+    JsonObject other=d["layers"][0]["show"].add<JsonObject>();
+    other["source"]="weather.temp";other["missing"]=true;
+    JsonArray low=other["in"].to<JsonArray>().add<JsonArray>();low.add(nullptr);low.add(30);
+    serializeJson(d,json);
+    assert(parseTheme(json,theme,error));
+    assert(theme.show.size()==2);
+    const ShowRule& a=theme.show[0];
+    assert(a.layer==0&&a.source=="weather.temp"&&!a.missing&&a.ranges.size()==2);
+    assert(a.ranges[0].first==-5&&a.ranges[0].second==4.5&&a.ranges[1].first==20&&std::isinf(a.ranges[1].second)&&a.ranges[1].second>0);
+    const ShowRule& b=theme.show[1];
+    assert(b.missing&&std::isinf(b.ranges[0].first)&&b.ranges[0].first<0&&b.ranges[0].second==30);
+    dataDocument(d);serializeJson(d,json);assert(parseTheme(json,theme,error)&&theme.show.size()==0);
+  }
+  // Each malformed rule is refused, with the error pointing at it.
+  struct BadShow { const char* show; const char* where; };
+  const BadShow badShows[]={
+    {"{}","layers[0].show:"},
+    {"[]","layers[0].show:"},
+    {"[1]","layers[0].show[0]:"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"x\":1}]","layers[0].show[0].x:"},
+    {"[{\"source\":\"weather.wind\",\"in\":[[0,1]]}]","layers[0].show[0].source:"},
+    {"[{\"in\":[[0,1]]}]","layers[0].show[0].source:"},
+    {"[{\"source\":\"weather.temp\"}]","layers[0].show[0].in:"},
+    {"[{\"source\":\"weather.temp\",\"in\":[]}]","layers[0].show[0].in:"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1],[2,3],[4,5],[6,7],[8,9]]}]","layers[0].show[0].in:"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0]]}]","layers[0].show[0].in[0]:"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1,2]]}]","layers[0].show[0].in[0]:"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[2,1]]}]","layers[0].show[0].in[0]:"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[null,null]]}]","layers[0].show[0].in[0]:"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[\"0\",1]]}]","layers[0].show[0].in[0]:"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":1}]","layers[0].show[0].missing:"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1]]},{\"source\":\"weather.temp\",\"in\":[[0,1]]},"
+     "{\"source\":\"weather.temp\",\"in\":[[0,1]]},{\"source\":\"weather.temp\",\"in\":[[0,1]]},"
+     "{\"source\":\"weather.temp\",\"in\":[[0,1]]}]","layers[0].show:"},
+  };
+  for(const BadShow& bad:badShows){
+    dataDocument(d);JsonDocument value;assert(!deserializeJson(value,bad.show));
+    d["layers"][0]["show"]=value.as<JsonVariantConst>();serializeJson(d,json);
+    if(parseTheme(json,theme,error)||error.find(bad.where)!=0){std::cerr<<bad.show<<" -> "<<error<<"\n";assert(false);}
+  }
   std::cout<<"theme validation tests passed\n";
 }
