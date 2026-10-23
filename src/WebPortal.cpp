@@ -76,6 +76,9 @@ static void handleRoot() {
 
 static void handleGetConfig() {
   if (!requireAuth()) return;
+  // The full settings need about 4 KB of heap to send, which a running theme
+  // on the ESP8266 does not leave free; the theme reloads on its next frame.
+  appRelease();
   JsonDocument doc;
   JsonObject root = doc.to<JsonObject>();
   settingsToJson(*S, root, /*includeSecrets=*/false);
@@ -216,7 +219,7 @@ static void sendParseError(DeserializationError err) {
   if (err == DeserializationError::NoMemory)
     server.send(503, "application/json", "{\"ok\":false,\"error\":\"not enough memory\"}");
   else
-    server.send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
+    server.send(400, "application/json", String("{\"ok\":false,\"error\":\"bad json (") + err.c_str() + ")\"}");
 }
 
 static void handlePostConfig() {
