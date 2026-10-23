@@ -274,6 +274,12 @@ void appInvalidate() {
   for (size_t i = 0; i < kModeCount; i++) kModes[i]->invalidate(g_settings);
 }
 
+// Called by the web portal before a request that needs a lot of heap, such as
+// a settings save: every mode frees what it can rebuild on its next service().
+void appRelease() {
+  for (size_t i = 0; i < kModeCount; i++) kModes[i]->release();
+}
+
 static void bootProgress(const char* msg) {
   gfxBoot("SmallTV", msg);
 }

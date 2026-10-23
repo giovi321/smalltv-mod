@@ -27,6 +27,7 @@
 
 // Defined in main.cpp — re-init every mode + force a repaint after a config change.
 extern void appInvalidate();
+extern void appRelease();
 extern const char* appResetReason();   // last reset reason (diagnostics)
 extern void appApplyBrightness();   // main.cpp: re-resolve effective brightness now
 
@@ -208,21 +209,37 @@ static String wgFingerprint(const Settings& s) {
   return f;
 }
 
+// A settings body that could not be parsed. Running out of heap is reported
+// as that: on the ESP8266 it is the usual cause, and "bad json" sent people
+// looking for a syntax error that was not there.
+static void sendParseError(DeserializationError err) {
+  if (err == DeserializationError::NoMemory)
+    server.send(503, "application/json", "{\"ok\":false,\"error\":\"not enough memory\"}");
+  else
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
+}
+
 static void handlePostConfig() {
   if (!requireAuth()) return;
   if (!server.hasArg("plain")) { server.send(400, "text/plain", "no body"); return; }
 
+  // Parsing the page's full settings and building the document for the file
+  // need about 7 KB of heap. On the ESP8266 that is only free with the
+  // running theme released; appInvalidate() below brings it back.
+  appRelease();
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain"))) {
-    server.send(400, "text/plain", "bad json");
+  if (DeserializationError err = deserializeJson(doc, server.arg("plain"))) {
+    sendParseError(err);
     return;
   }
 
   String oldNet = netFingerprint(*S);
   String oldWg = wgFingerprint(*S);
 
+  // The request is freed once applied, before saveSettings() builds its own
+  // document: the two together do not fit on the ESP8266.
   if (!applyAndSaveSettings(*S,
-        [&](Settings& settings) { settingsApplyJson(settings, doc.as<JsonObjectConst>()); },
+        [&](Settings& settings) { settingsApplyJson(settings, doc.as<JsonObjectConst>()); doc.clear(); },
         [](const Settings& settings) { return saveSettings(settings); })) {
     server.send(500, "application/json", "{\"ok\":false,\"error\":\"could not save settings\"}");
     return;
@@ -296,13 +313,14 @@ static void handleExport() {
 static void handleImport() {
   if (!requireAuth()) return;
   if (!server.hasArg("plain")) { server.send(400, "text/plain", "no body"); return; }
+  appRelease();   // as in handlePostConfig(); the reboot below restores it
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain"))) {
-    server.send(400, "text/plain", "bad json");
+  if (DeserializationError err = deserializeJson(doc, server.arg("plain"))) {
+    sendParseError(err);
     return;
   }
   if (!applyAndSaveSettings(*S,
-        [&](Settings& settings) { settingsApplyJson(settings, doc.as<JsonObjectConst>()); },
+        [&](Settings& settings) { settingsApplyJson(settings, doc.as<JsonObjectConst>()); doc.clear(); },
         [](const Settings& settings) { return saveSettings(settings); })) {
     server.send(500, "application/json", "{\"ok\":false,\"error\":\"could not save settings\"}");
     return;

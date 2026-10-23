@@ -23,4 +23,7 @@ class DisplayMode {
   // Another mode drew on the screen (carousel switch): repaint from cached data,
   // do NOT refetch. Falls back to invalidate for modes without a light path.
   virtual void wake(const Settings& s) { invalidate(s); }
+  // Free what the next service() call can rebuild, so a web request that
+  // needs a lot of heap gets it. Modes that hold little keep the default.
+  virtual void release() {}
 };

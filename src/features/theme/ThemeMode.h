@@ -35,9 +35,9 @@ class ThemeMode : public DisplayMode {
   const String& error() const { return error_; }
   // Frees the loaded theme but keeps the selection, so a web request can
   // validate another package without two themes in RAM at once; on the
-  // ESP8266 both do not fit (issue #30). The next service() call loads the
-  // selected theme again and repaints it.
-  void release() { unload(); }
+  // ESP8266 both do not fit (issue #30). A settings save needs the room too.
+  // The next service() call loads the selected theme again and repaints it.
+  void release() override { unload(); }
  private:
   void unload();
   void refreshData();
