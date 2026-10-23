@@ -3,10 +3,11 @@
 #include "config.h"
 #endif
 #if !defined(ARDUINO) || WITH_THEME
+#include <algorithm>
 #include <cstring>
 #include <utility>
 namespace smalltv {
-// Both container formats (STH1 packages, STI1 images) are little-endian.
+// Both container formats (STH1 packages, STI1/STI2 images) are little-endian.
 static uint16_t u16(const uint8_t* b) { return b[0] | (uint16_t(b[1]) << 8); }
 static uint32_t u32(const uint8_t* b) { return u16(b) | (uint32_t(u16(b + 2)) << 16); }
 // The package's theme.json entry, read in place for parseTheme().
@@ -106,16 +107,20 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
       if (e.length == 0 || e.length > MaxManifest) return false;
     } else {
       // Every non-manifest entry must be a well-formed .sti image: "STI1"
-      // magic, width/height, an alpha flag that also selects the pixel
-      // stride (2 bytes/pixel opaque, 3 with an alpha byte), 3 reserved
-      // zero bytes, and a payload length that matches width*height*stride
-      // exactly -- nothing here is inferred, every field is cross-checked.
-      if (path.size() < 4 || path.substr(path.size() - 4) != ".sti" || e.length < 12 || !source_.read(pos, b, 12) || memcmp(b, "STI1", 4)) return false;
+      // (raw pixels) or "STI2" (rows as runs) magic, width/height, an alpha
+      // flag that also selects the pixel stride (2 bytes/pixel opaque, 3
+      // with an alpha byte), 3 reserved zero bytes. An STI1 payload length
+      // must match width*height*stride exactly; an STI2 row table must lie
+      // inside the payload -- nothing here is inferred, every field is
+      // cross-checked.
+      if (path.size() < 4 || path.substr(path.size() - 4) != ".sti" || e.length < 12 || !source_.read(pos, b, 12) ||
+          memcmp(b, "STI", 3) || (b[3] != '1' && b[3] != '2')) return false;
+      e.compressed = b[3] == '2';
       e.width = u16(b + 4);
       e.height = u16(b + 6);
       e.stride = b[8] ? 3 : 2;
-      if (!e.width || e.width > 240 || !e.height || e.height > 240 || b[8] > 1 || b[9] || b[10] || b[11] ||
-          e.length != 12 + uint32_t(e.width) * e.height * e.stride) return false;
+      if (!e.width || e.width > 240 || !e.height || e.height > 240 || b[8] > 1 || b[9] || b[10] || b[11]) return false;
+      if (e.compressed ? !checkRowTable(e) : e.length != 12 + uint32_t(e.width) * e.height * e.stride) return false;
     }
     const uint32_t length = e.length;
     entries_.push_back(std::move(e));
@@ -159,15 +164,96 @@ AssetHandle Package::resolve(const std::string& path) {
 // Reads exactly the `count` pixels of row `y` starting at column `x`,
 // unpacking each pixel from its 2- or 3-byte on-disk form (RGB565, plus an
 // alpha byte for a transparent asset) -- never more of the image than that.
+// An STI2 payload: the 12-byte header, one u32 offset per row (counted from
+// the end of the table), then the rows. The table must fit, and every offset
+// must point into the row data without going backwards (rows may share
+// data). Read in small pieces: this also runs when a package is listed.
+bool Package::checkRowTable(const Entry& e) const {
+  const uint32_t table = 4u * e.height;
+  if (e.length < 12 + table + 1) return false;
+  const uint32_t data = e.length - 12 - table;
+  uint8_t b[16];
+  uint32_t previous = 0;
+  for (uint32_t row = 0; row < e.height; row += 4) {
+    const uint32_t n = std::min<uint32_t>(4, e.height - row);
+    if (!source_.read(e.offset + 12 + 4 * row, b, 4 * n)) return false;
+    for (uint32_t i = 0; i < n; ++i) {
+      const uint32_t at = u32(b + 4 * i);
+      if (at >= data || at < previous) return false;
+      previous = at;
+    }
+  }
+  return true;
+}
+namespace {
+// Reads a package byte by byte through a 64-byte window: row() runs while a
+// frame is drawn, when little loop stack is left (a whole 240-pixel row was
+// a 720-byte buffer), and one storage read per byte would be slow.
+class Reader {
+ public:
+  Reader(Source& source, uint32_t at, uint32_t end) : source_(source), at_(at), end_(end) {}
+  bool byte(uint8_t& out) {
+    if (pos_ == len_) {
+      if (at_ >= end_) return false;
+      len_ = static_cast<uint8_t>(std::min<uint32_t>(sizeof(buf_), end_ - at_));
+      if (!source_.read(at_, buf_, len_)) return false;
+      at_ += len_;
+      pos_ = 0;
+    }
+    out = buf_[pos_++];
+    return true;
+  }
+  bool pixel(uint8_t stride, uint16_t& color, uint8_t& alpha) {
+    uint8_t lo, hi, a = 255;
+    if (!byte(lo) || !byte(hi) || (stride == 3 && !byte(a))) return false;
+    color = lo | (uint16_t(hi) << 8);
+    alpha = a;
+    return true;
+  }
+ private:
+  Source& source_;
+  uint32_t at_, end_;
+  uint8_t buf_[64];
+  uint8_t len_ = 0, pos_ = 0;
+};
+}
+// Reads exactly the `count` pixels of row `y` starting at column `x`. STI1
+// rows are raw pixels (RGB565, plus an alpha byte for a transparent asset).
+// STI2 rows are runs; a run's first byte holds its kind in the top two bits
+// and its length minus one in the rest: 00 transparent, 01 one pixel
+// repeated, 10 that many literal pixels. Runs before `x` are skipped, and a
+// run that goes past the row, or data that ends early, fails the row.
 bool Package::row(AssetHandle handle, int y, int x, int count, uint16_t* colors, uint8_t* alpha) {
   if (handle >= entries_.size()) return false;
   const Entry* e = &entries_[handle];
   if (!e->stride || x < 0 || y < 0 || y >= e->height || count < 0 || count > 240 || x + count > e->width) return false;
-  uint8_t bytes[720];
-  if (!source_.read(e->offset + 12 + (uint32_t(y) * e->width + x) * e->stride, bytes, count * e->stride)) return false;
-  for (int i = 0; i < count; ++i) {
-    colors[i] = u16(bytes + i * e->stride);
-    alpha[i] = e->stride == 3 ? bytes[i * 3 + 2] : 255;
+  const uint32_t end = e->offset + e->length;
+  if (!e->compressed) {
+    const uint32_t at = e->offset + 12 + (uint32_t(y) * e->width + x) * e->stride;
+    Reader reader(source_, at, at + uint32_t(count) * e->stride);
+    for (int i = 0; i < count; ++i) if (!reader.pixel(e->stride, colors[i], alpha[i])) return false;
+    return true;
+  }
+  uint8_t b[4];
+  if (!source_.read(e->offset + 12 + 4u * y, b, 4)) return false;
+  Reader reader(source_, e->offset + 12 + 4u * e->height + u32(b), end);
+  const int stop = x + count;
+  for (int px = 0; px < stop;) {
+    uint8_t head;
+    if (!reader.byte(head)) return false;
+    const int kind = head >> 6, length = (head & 63) + 1;
+    if (kind == 3 || px + length > e->width) return false;
+    uint16_t color = 0;
+    uint8_t a = 0;
+    if (kind == 1 && !reader.pixel(e->stride, color, a)) return false;
+    for (int i = px; i < px + length; ++i) {
+      if (kind == 2 && !reader.pixel(e->stride, color, a)) return false;
+      if (i >= x && i < stop) {
+        colors[i - x] = color;
+        alpha[i - x] = a;
+      }
+    }
+    px += length;
   }
   return true;
 }

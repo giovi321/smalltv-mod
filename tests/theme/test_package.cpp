@@ -58,5 +58,62 @@ int main() {
     flaky.failFrom=at;Package fp(flaky);Theme before;before.id="keep";
     assert(!fp.load(before,error) && before.id=="keep" && error=="theme.json: could not be read");
   }
+
+  // STI2: the same header, then one u32 offset per row (into the row data
+  // after the table), then each row as runs. A run's first byte holds its
+  // kind in the top two bits and its length minus one (1-64) in the rest:
+  // 00 transparent, 01 one pixel repeated, 10 literal pixels.
+  {
+    std::string rows[3];
+    rows[0]+=char(0x01);                                                   // 2 transparent
+    rows[0]+=char(0x81);u16(rows[0],0xf800);rows[0]+=char(255);u16(rows[0],0x07e0);rows[0]+=char(128);  // 2 literal
+    rows[0]+=char(0x40);u16(rows[0],0x001f);rows[0]+=char(255);            // 1 repeated
+    rows[1]+=char(0x44);u16(rows[1],0xffff);rows[1]+=char(255);            // 5 repeated
+    rows[2]+=char(0x04);                                                   // 5 transparent
+    auto sti2=[&](const std::string* r,unsigned height){
+      std::string s="STI2";u16(s,5);u16(s,height);s+=char(1);s.append(3,'\0');
+      unsigned at=0;
+      for(unsigned y=0;y<height;++y){u32(s,at);at+=r[y].size();}
+      for(unsigned y=0;y<height;++y) s+=r[y];
+      return s;
+    };
+    auto package=[&](const std::string& image){
+      std::string s="STH1";u16(s,2);u16(s,0);entry(s,"theme.json",json);entry(s,"images/bg.png.sti",image);return s;
+    };
+    Memory packed;Package rle(packed);Theme theme;
+    packed.data=package(sti2(rows,3));
+    assert(rle.load(theme,error) && theme.layers[0].width==5 && theme.layers[0].height==3);
+    uint16_t c[5];uint8_t a[5];
+    assert(rle.row("images/bg.png.sti",0,0,5,c,a));
+    assert(a[0]==0&&a[1]==0&&c[2]==0xf800&&a[2]==255&&c[3]==0x07e0&&a[3]==128&&c[4]==0x001f&&a[4]==255);
+    assert(rle.row("images/bg.png.sti",0,3,2,c,a) && c[0]==0x07e0&&a[0]==128&&c[1]==0x001f);   // starts inside a run
+    c[3]=0x1234;a[3]=7;   // past the 3 pixels asked for: must stay untouched
+    assert(rle.row("images/bg.png.sti",1,1,3,c,a) && c[0]==0xffff&&c[2]==0xffff&&a[1]==255);
+    assert(c[3]==0x1234&&a[3]==7);
+    assert(rle.row("images/bg.png.sti",2,4,1,c,a) && a[0]==0);
+    assert(!rle.row("images/bg.png.sti",3,0,1,c,a) && !rle.row("images/bg.png.sti",0,4,2,c,a));
+    // Damaged data is refused, never read past: a row whose runs go past
+    // the width, a row that ends early, a literal run cut off, an offset
+    // past the data, and offsets that go backwards.
+    std::string bad[3]={rows[0],rows[1],rows[2]};
+    bad[2]=std::string(1,char(0x05));                                      // 6 transparent in a 5-wide row
+    packed.data=package(sti2(bad,3));assert(rle.load(theme,error) && !rle.row("images/bg.png.sti",2,0,5,c,a));
+    bad[2]=std::string(1,char(0x02));                                      // only 3 of 5 pixels
+    packed.data=package(sti2(bad,3));assert(rle.load(theme,error) && !rle.row("images/bg.png.sti",2,0,5,c,a));
+    std::string cut=rows[0].substr(0,5);bad[0]=cut;bad[2]=rows[2];         // literal run without its pixels
+    packed.data=package(sti2(bad,3));assert(rle.load(theme,error) && !rle.row("images/bg.png.sti",0,0,5,c,a));
+    std::string image=sti2(rows,3);image[12+4*2]=char(200);                // row 2 offset past the data
+    packed.data=package(image);assert(!rle.load(theme,error));
+    image=sti2(rows,3);image[12+4*1]=0;image[12+4*2]=char(rows[0].size());  // rows may share data (1 reads row 0's),
+    packed.data=package(image);assert(rle.load(theme,error));
+    image=sti2(rows,3);image[12+4*2]=0;image[12+4*1]=char(rows[0].size()+1);// but offsets never go backwards
+    packed.data=package(image);assert(!rle.load(theme,error));
+    image=sti2(rows,3);image.resize(12+4*2);                               // table cut short,
+    packed.data=package(image);assert(!rle.load(theme,error));
+    packed.data="STH1";u16(packed.data,3);u16(packed.data,0);               // also with a file after it,
+    entry(packed.data,"theme.json",json);entry(packed.data,"images/bg.png.sti",image);  // so reading on would work
+    entry(packed.data,"images/other.png.sti",sti2(rows,3));
+    assert(!rle.load(theme,error));
+  }
   std::cout<<"theme package tests passed\n";
 }
