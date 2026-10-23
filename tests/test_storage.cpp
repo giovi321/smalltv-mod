@@ -74,6 +74,33 @@ int main() {
   assert(saved["hostname"] == "smalltv-1234");
   assert(!fs.files.count("/config.json.tmp"));
 
+  // A document that ran out of memory while it was built: ArduinoJson leaves
+  // out what did not fit, so it is complete JSON of only part of the settings.
+  // Saving it would replace the working config with a partial one, and the
+  // next boot would fall back to defaults for the rest (WiFi included).
+  struct LimitedAllocator : ArduinoJson::Allocator {
+    size_t left;
+    explicit LimitedAllocator(size_t bytes) : left(bytes) {}
+    void* allocate(size_t n) override {
+      if (n > left) return nullptr;
+      left -= n;
+      return malloc(n);
+    }
+    void deallocate(void* p) override { free(p); }
+    void* reallocate(void* p, size_t n) override {
+      if (n > left) return nullptr;
+      left -= n;
+      return realloc(p, n);
+    }
+  } small(1200);
+  JsonDocument partial(&small);
+  for (int i = 0; i < 200 && !partial.overflowed(); ++i) partial[std::string("key") + std::to_string(i)] = "a value long enough to need its own copy";
+  assert(partial.overflowed());
+  fs.files["/config.json"] = "old-settings";
+  assert(!saveJsonAtomically(fs, partial, "/config.json", "/config.json.tmp"));
+  assert(fs.files["/config.json"] == "old-settings");
+  assert(!fs.files.count("/config.json.tmp"));
+
   struct State {
     int value;
   } state{1};
