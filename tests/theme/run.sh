@@ -17,3 +17,7 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCL
 /tmp/smalltv-theme-example-check examples/themes/terminal-ops.stheme
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_catalog.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-catalog-tests
 /tmp/smalltv-theme-catalog-tests
+# 32-bit, so allocation sizes match the ESP8266; the wraps let the test count
+# ArduinoJson's malloc calls as well as operator new.
+c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" -Wl,--wrap=malloc,--wrap=free,--wrap=realloc tests/theme/test_memory.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-memory-tests
+/tmp/smalltv-theme-memory-tests

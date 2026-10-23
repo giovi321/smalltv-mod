@@ -43,5 +43,20 @@ int main() {
   source.data=valid;source.data[imageOffset+4]=0;assert(!p.load(t,error)); // zero width
   source.data=valid;source.data[4]=3;entry(source.data,"theme.json",json);assert(!p.load(t,error)); // duplicate path
   source.data=valid;size_t ref=source.data.find("images/bg.png");source.data.replace(ref,13,"images/no.png");assert(!p.load(t,error)); // missing asset
+  // A storage read that fails part-way through the manifest fails the load
+  // with its own message and leaves the caller's theme alone, wherever it
+  // happens. Only manifest bytes fail, so the package index still reads and
+  // the failure reaches the parser.
+  struct Flaky : Memory {
+    uint32_t failFrom = 0, failTo = 0;
+    bool read(uint32_t offset,void* dest,size_t count) override {
+      return (offset+count<=failFrom || offset>=failTo) && Memory::read(offset,dest,count);
+    }
+  } flaky;
+  flaky.data=valid;size_t manifestAt=valid.find("{\"spec\"");flaky.failTo=manifestAt+json.size();
+  for(size_t at=manifestAt;at<manifestAt+json.size();at+=7) {
+    flaky.failFrom=at;Package fp(flaky);Theme before;before.id="keep";
+    assert(!fp.load(before,error) && before.id=="keep" && error=="theme.json: could not be read");
+  }
   std::cout<<"theme package tests passed\n";
 }

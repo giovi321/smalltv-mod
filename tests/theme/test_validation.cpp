@@ -176,6 +176,35 @@ int main() {
   json.replace(json.rfind("\"x\""),3,"\"\\u0078\"");
   assert(parseTheme(json,theme,error));assert(theme.layers[0].bindings.size()==1);
 
+  // Behaviour that must survive reading layers one at a time (issue #30).
+  // `data` may follow the layers that use it.
+  json=R"({"spec":1,"layers":[{"id":"value","type":"text","x":0,"y":0,"value":"{weather.temp}","size":16,"color":"#ffffff"}],"theme":{"id":"test","name":"Test","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"weather","url":"http://example.test/w.json","interval":60,"fields":[{"id":"temp","path":"main.temp"}]}]})";
+  assert(parseTheme(json,theme,error));assert(theme.layers.size()==1 && theme.data.size()==1);
+  // A repeated `layers` key keeps the last list, as ArduinoJson does for any repeated key.
+  json=std::string(base);json.insert(json.find("\"layers\""),R"("layers":[{"id":"a","type":"text","x":0,"y":0,"value":"A","size":8,"color":"#ffffff"},{"id":"b","type":"text","x":0,"y":0,"value":"B","size":8,"color":"#ffffff"}],)");
+  assert(parseTheme(json,theme,error));assert(theme.layers.size()==1 && theme.layers[0].value=="{HH}:{MM}");
+  // Syntax errors inside a layer name the absolute byte.
+  json=base;json.insert(json.find("\"size\":48")+9,",}");
+  assert(!parseTheme(json,theme,error));
+  assert(error==std::string("theme.json: InvalidInput at byte ")+std::to_string(json.find(",}")+2));
+  // Unknown top-level fields are still named.
+  json=base;json.insert(1,R"("extra":1,)");
+  assert(!parseTheme(json,theme,error));assert(error=="extra: unknown field");
+  // Non-object layers and too many layers are still rejected with the same messages.
+  json=base;json.insert(json.find("[{")+1,"7,");
+  assert(!parseTheme(json,theme,error));assert(error=="layers[0]: expected an object");
+  {deserializeJson(d,base);JsonObject first=d["layers"][0];JsonDocument copy;copy.set(first);
+   for(int i=1;i<33;++i){JsonObject l=d["layers"].add<JsonObject>();l.set(copy.as<JsonObjectConst>());l["id"]=std::string("t")+std::to_string(i);}
+   serializeJson(d,json);assert(!parseTheme(json,theme,error));assert(error=="layers: expected an array of at most 32 layers");}
+  json=base;json.replace(json.find("[{"),1,"{\"x\":");json.replace(json.rfind("]"),1,"}");
+  assert(!parseTheme(json,theme,error));assert(error=="layers: expected an array of at most 32 layers");
+  json=base;json+=" x";assert(!parseTheme(json,theme,error));assert(error=="theme.json: trailing content after manifest");
+  // Nesting still stops at eight levels in all, counting the root object and the layers array.
+  json=base;json.insert(json.find("\"size\":48"),"\"deep\":"+std::string(6,'[')+std::string(6,']')+",");
+  assert(!parseTheme(json,theme,error));assert(error.find("theme.json: TooDeep at byte ")==0);
+  json=base;json.insert(json.find("\"size\":48"),"\"deep\":"+std::string(5,'[')+std::string(5,']')+",");
+  assert(!parseTheme(json,theme,error));assert(error=="layers[0].deep: unknown field");
+
   // Rounded corners are rectangle-only, integral, and bounded.
   deserializeJson(d,base);d["layers"][0]["cornerRadius"]=8;rejected(d);
   dataDocument(d);rectangle(d["layers"][0]);d["layers"][0]["cornerRadius"]="8";rejected(d);

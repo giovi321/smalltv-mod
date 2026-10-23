@@ -30,5 +30,7 @@ class Package : public Assets {
   Source& source_;
   std::vector<Entry> entries_;
   const Entry* find(const std::string& path) const;
+  bool readIndex(std::string& error);
+  bool checkAssets(Theme& theme, std::string& error) const;
 };
 }

@@ -32,5 +32,16 @@ vm.createContext(context);vm.runInContext(code,context);
  assert.equal(requests[0][0],'/api/themes/delete');assert.equal(requests[0][1].id,'broken');
  nodes.themeSelect.value='healthy';context.themeChoiceChanged();assert.equal(nodes.themeUseBtn.disabled,false);
  response={selected:'',freeBytes:65536,themes:[]};await context.loadThemes();assert.equal(nodes.themeUseBtn.disabled,true);
+ // A save the device refuses (or never answers) must say so: the Save
+ // buttons used to show nothing when the request failed.
+ const saveCode=html.slice(html.indexOf('function saveAll('),html.indexOf('// wifi networks'));
+ let saveToast='';
+ const saveContext={j:async()=>{throw new Error('not enough memory')},collect:()=>({}),collectWifi:()=>[],
+  toast:message=>saveToast=message,loadStatus:()=>{},setTimeout,JSON};
+ vm.createContext(saveContext);vm.runInContext(saveCode,saveContext);
+ for(const save of ['saveAll','saveWifi']){
+  saveToast='';saveContext[save]();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(saveToast,'Save failed: not enough memory',save);
+ }
  console.log('theme web UI tests passed');
 })().catch(error=>{console.error(error);process.exitCode=1});

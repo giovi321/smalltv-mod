@@ -133,6 +133,8 @@ void finishUpload() {
     resetUpload();
     return;
   }
+  // Validation parses a second theme; free the running one first (issue #30).
+  g_themeMode.release();
   smalltv::Theme theme;
   std::string error;
   bool valid = false;
@@ -196,6 +198,9 @@ void listThemes() {
   doc["error"] = g_themeMode.error();
   doc["freeBytes"] = freeBytes();
   JsonArray list = doc["themes"].to<JsonArray>();
+  // Inspecting a package parses it; free the running theme first (issue #30).
+  // Its error is already copied into the reply above.
+  g_themeMode.release();
   File dir = LittleFS.open("/themes", "r");
   unsigned count = 0;
   for (File entry = dir.openNextFile(); entry && count < MaxThemes; entry = dir.openNextFile()) {
@@ -232,6 +237,8 @@ void selectTheme() {
   if (!auth()) return;
   String id;
   if (!requestId(id)) return;
+  // Validation parses a second theme; free the running one first (issue #30).
+  g_themeMode.release();
   {
     ThemeFile file;
     smalltv::Theme theme;
@@ -275,6 +282,8 @@ void deleteTheme() {
   }
   bool onScreen = settings->mode == MODE_THEME || (settings->mode == MODE_CAROUSEL && settings->carouselTheme);
   if (settings->themeId == id && onScreen) {
+    // Inspecting parses the package; free the running copy first (issue #30).
+    g_themeMode.release();
     ThemeFile file;
     file.open(path);
     auto info = smalltv::inspectInstalledTheme(file, id.c_str());

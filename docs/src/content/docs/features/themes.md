@@ -488,6 +488,13 @@ selection intact. Boot removes an abandoned staging file. Installation reserves
 space for settings and filesystem metadata. Settings saves use a temporary file,
 check the complete byte count, then rename over the old config.
 
+Listing, installing, selecting, and removing a theme each check a package by
+loading it. To keep only one theme in RAM at a time, the running theme is
+released first and loaded again afterwards, so it redraws once and fetches its
+data again. The manifest is read straight from the package and parsed one
+layer at a time, and no list in the engine needs one large block of memory;
+on the ESP8266 that is what makes this fit beside the web server.
+
 The engine holds a bounded entry index and layer state in RAM. Compositing uses
 row buffers, not a 115,200-byte framebuffer. Static scenes produce no display
 writes after the first draw. Clock text is compared when wall time changes;

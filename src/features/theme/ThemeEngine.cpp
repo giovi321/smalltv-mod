@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <utility>
 
 namespace smalltv {
@@ -204,20 +205,59 @@ static bool validText(const std::string& s, const Theme& theme) {
   }
   return true;
 }
-// Adapts a std::string to ArduinoJson's Reader interface so deserializeJson()
-// streams directly from the manifest buffer already held by the caller,
-// instead of ArduinoJson copying it into its own buffer first.
-struct JsonReader {
-  const std::string& input;
-  size_t position = 0;
-  explicit JsonReader(const std::string& text) : input(text) {}
-  int read() { return position < input.size() ? static_cast<unsigned char>(input[position++]) : -1; }
-  size_t readBytes(char* out, size_t count) {
-    count = std::min(count, input.size() - position);
-    memcpy(out, input.data() + position, count);
-    position += count;
-    return count;
+// A manifest held in RAM, for the string overload of parseTheme().
+class StringManifest : public ManifestSource {
+ public:
+  explicit StringManifest(const std::string& text) : text_(text) {}
+  size_t size() const override { return text_.size(); }
+  bool read(size_t offset, char* out, size_t count) override {
+    if (offset > text_.size() || count > text_.size() - offset) return false;
+    memcpy(out, text_.data() + offset, count);
+    return true;
   }
+ private:
+  const std::string& text_;
+};
+// Reads bytes [begin, end) of a ManifestSource forward through a 32-byte
+// buffer. It is ArduinoJson's Reader interface (read/readBytes) plus the
+// peek() the scanner below needs, so every pass over a manifest streams it
+// instead of needing the whole text in RAM. A failed source read ends the
+// input early and sets failed(), which callers report as an unreadable
+// package rather than as a JSON error.
+class ManifestReader {
+ public:
+  ManifestReader(ManifestSource& source, size_t begin, size_t end) : source_(source), position_(begin), end_(end) {}
+  int peek() {
+    if (position_ >= end_) return -1;
+    if (position_ < start_ || position_ >= start_ + length_) {
+      size_t count = std::min(sizeof(buffer_), end_ - position_);
+      if (!source_.read(position_, buffer_, count)) {
+        failed_ = true;
+        end_ = position_;
+        return -1;
+      }
+      start_ = position_;
+      length_ = count;
+    }
+    return static_cast<unsigned char>(buffer_[position_ - start_]);
+  }
+  int read() {
+    int c = peek();
+    if (c >= 0) ++position_;
+    return c;
+  }
+  size_t readBytes(char* out, size_t count) {
+    size_t n = 0;
+    for (int c; n < count && (c = read()) >= 0;) out[n++] = char(c);
+    return n;
+  }
+  size_t position() const { return position_; }
+  bool failed() const { return failed_; }
+ private:
+  ManifestSource& source_;
+  size_t position_, end_, start_ = 0, length_ = 0;
+  bool failed_ = false;
+  char buffer_[32];
 };
 // Parses a "#RRGGBB" string into RGB565 (5/6/5 bits), the format the
 // renderer and the .sti asset container both use directly.
@@ -234,6 +274,21 @@ static bool parseColor(JsonVariantConst v, uint16_t& out) {
   }
   out = ((rgb >> 8) & 0xf800) | ((rgb >> 5) & 0x07e0) | ((rgb >> 3) & 0x001f);
   return true;
+}
+// An unknown key as it appears in a diagnostic: at most 64 bytes, with
+// anything outside printable ASCII written as \u00XX.
+static std::string printableKey(const char* raw, size_t size) {
+  std::string key;
+  for (size_t i = 0; i < std::min<size_t>(size, 64); ++i) {
+    unsigned char c = raw[i];
+    if (c >= 32 && c <= 126) key += char(c);
+    else {
+      char hex[7];
+      snprintf(hex, sizeof(hex), "\\u%04x", c);
+      key += hex;
+    }
+  }
+  return key;
 }
 // The device and desktop tool share both validation rules and field diagnostics.
 class Fields {
@@ -267,28 +322,19 @@ class Fields {
         }
         start = end + 1;
       }
-      if (!found) {
-        std::string key;
-        for (size_t i = 0; i < std::min<size_t>(p.key().size(), 64); ++i) {
-          unsigned char c = p.key().c_str()[i];
-          if (c >= 32 && c <= 126) key += char(c);
-          else {
-            char hex[7];
-            snprintf(hex, sizeof(hex), "\\u%04x", c);
-            key += hex;
-          }
-        }
-        return fail(key.c_str(), "unknown field");
-      }
+      if (!found) return fail(printableKey(p.key().c_str(), p.key().size()).c_str(), "unknown field");
     }
     return true;
   }
-  bool number(const char* key, int lo, int hi, int& value, bool required = true) const {
+  // `T` may be narrower than int (Layer stores 16-bit fields); the range
+  // check happens on the int, so `lo`..`hi` must fit in `T`.
+  template <typename T>
+  bool number(const char* key, int lo, int hi, T& value, bool required = true) const {
     auto v = object_[key];
     if (v.isNull() && !required) return true;
     if (!v.is<int>() || v.as<int>() < lo || v.as<int>() > hi)
       return fail(key, "expected an integer from " + std::to_string(lo) + " to " + std::to_string(hi));
-    value = v.as<int>();
+    value = static_cast<T>(v.as<int>());
     return true;
   }
   bool text(const char* key, std::string& value, size_t max, bool required = true) const {
@@ -330,52 +376,71 @@ class Fields {
   std::string path_;
   std::string& error_;
 };
+// What ManifestScanner records for parseTheme() to read the layers one at a
+// time instead of as one large document: the byte range of every element of
+// the root `layers` array (of its last occurrence, matching ArduinoJson) and
+// the root keys, whose check the filtered first pass cannot do itself.
+struct ManifestLayout {
+  struct Range {
+    size_t begin, end;
+  };
+  // Root `layers` elements, or none when the root has no `layers` array.
+  bool layersFound = false;
+  std::vector<Range> layerRanges;
+  size_t layerCount = 0;
+  std::vector<std::string> rootKeys;
+};
 // ArduinoJson retains only the last duplicate object member. Scan binding keys
 // in the raw manifest so that a manifest cannot silently replace a target.
-// Run only after JSON validation (including its eight-level nesting limit).
-// The manifest byte limit bounds string storage; at most eight keys are kept.
-class DuplicateBindingScanner {
+// The same walk fills in the ManifestLayout.
+// Run only after the first JSON pass (including its eight-level nesting
+// limit). The manifest byte limit bounds string storage; at most eight
+// binding keys, 33 layer ranges and the root keys are kept.
+class ManifestScanner {
  public:
-  DuplicateBindingScanner(const std::string& input, std::string& error) : input_(input), error_(error) {}
+  ManifestScanner(ManifestSource& input, ManifestLayout& layout, std::string& error)
+    : input_(input, 0, input.size()), layout_(layout), error_(error) {}
   bool valid() {
     const bool scanned = scanRoot();
     space();
-    if (scanned && position_ == input_.size()) return true;
-    if (error_.empty()) error_ = "theme.json: expected standard JSON object syntax";
+    if (scanned && input_.peek() < 0 && !input_.failed()) return true;
+    if (error_.empty()) error_ = input_.failed() ? "theme.json: could not be read" : "theme.json: expected standard JSON object syntax";
     return false;
   }
  private:
   // This is a minimal, purpose-built JSON walker: it only needs to reach
   // every `bind` object's keys in source order, so it does not build any
   // value representation, just skips over whatever it is not looking at.
-  void space() { while (position_ < input_.size() && (input_[position_] == ' ' || input_[position_] == '\n' || input_[position_] == '\r' || input_[position_] == '\t')) ++position_; }
+  bool more() { return input_.peek() >= 0; }
+  bool at(char c) { return input_.peek() == static_cast<unsigned char>(c); }
+  void space() { while (at(' ') || at('\n') || at('\r') || at('\t')) input_.read(); }
   bool take(char expected) {
     space();
-    if (position_ >= input_.size() || input_[position_] != expected) return false;
-    ++position_;
+    if (!at(expected)) return false;
+    input_.read();
     return true;
   }
   bool string(std::string& output) {
     space();
-    if (position_ >= input_.size() || input_[position_++] != '\"') return false;
+    if (input_.read() != '\"') return false;
     output.clear();
-    while (position_ < input_.size()) {
-      unsigned char c = input_[position_++];
+    for (int raw; (raw = input_.read()) >= 0;) {
+      unsigned char c = raw;
       if (c == '\"') return true;
       if (c < 32) return false;
       if (c != '\\') {
         output += char(c);
         continue;
       }
-      if (position_ >= input_.size()) return false;
-      c = input_[position_++];
+      int escaped = input_.read();
+      if (escaped < 0) return false;
+      c = escaped;
       if (c == '\"' || c == '\\' || c == '/') output += char(c);
       else if (c == 'b' || c == 'f' || c == 'n' || c == 'r' || c == 't') output += '?';
       else if (c == 'u') {
         unsigned value = 0;
         for (int i = 0; i < 4; ++i) {
-          if (position_ >= input_.size()) return false;
-          unsigned char hex = input_[position_++];
+          int hex = input_.read();
           int digit = hex >= '0' && hex <= '9' ? hex - '0' : hex >= 'a' && hex <= 'f' ? hex - 'a' + 10 : hex >= 'A' && hex <= 'F' ? hex - 'A' + 10 : -1;
           if (digit < 0) return false;
           value = (value << 4) | unsigned(digit);
@@ -389,57 +454,57 @@ class DuplicateBindingScanner {
   // scanner does not otherwise care about (anything outside `layers[].bind`).
   bool value() {
     space();
-    if (position_ >= input_.size()) return false;
-    if (input_[position_] == '{' || input_[position_] == '[') {
+    if (!more()) return false;
+    if (at('{') || at('[')) {
       if (depth_ == 8) return false;
       ++depth_;
-      const bool valid = input_[position_] == '{' ? object() : array();
+      const bool valid = at('{') ? object() : array();
       --depth_;
       return valid;
     }
-    if (input_[position_] == '\"') {
+    if (at('\"')) {
       std::string ignored;
       return string(ignored);
     }
-    const size_t start = position_;
-    while (position_ < input_.size() && input_[position_] != ',' && input_[position_] != ']' && input_[position_] != '}' && input_[position_] != ' ' && input_[position_] != '\n' && input_[position_] != '\r' && input_[position_] != '\t') ++position_;
-    return position_ > start;
+    const size_t start = input_.position();
+    while (more() && !at(',') && !at(']') && !at('}') && !at(' ') && !at('\n') && !at('\r') && !at('\t')) input_.read();
+    return input_.position() > start;
   }
   bool object() {
     if (!take('{')) return false;
     space();
-    if (position_ < input_.size() && input_[position_] == '}') {
-      ++position_;
+    if (at('}')) {
+      input_.read();
       return true;
     }
     for (;;) {
       std::string key;
       if (!string(key) || !take(':') || !value()) return false;
       space();
-      if (position_ >= input_.size()) return false;
-      if (input_[position_] == '}') {
-        ++position_;
+      if (!more()) return false;
+      if (at('}')) {
+        input_.read();
         return true;
       }
-      if (input_[position_++] != ',') return false;
+      if (input_.read() != ',') return false;
     }
   }
   bool array() {
     if (!take('[')) return false;
     space();
-    if (position_ < input_.size() && input_[position_] == ']') {
-      ++position_;
+    if (at(']')) {
+      input_.read();
       return true;
     }
     for (;;) {
       if (!value()) return false;
       space();
-      if (position_ >= input_.size()) return false;
-      if (input_[position_] == ']') {
-        ++position_;
+      if (!more()) return false;
+      if (at(']')) {
+        input_.read();
         return true;
       }
-      if (input_[position_++] != ',') return false;
+      if (input_.read() != ',') return false;
     }
   }
   // The one object this whole scanner exists for: walks a layer's `bind`
@@ -450,8 +515,8 @@ class DuplicateBindingScanner {
     if (!take('{')) return false;
     std::vector<std::string> seen;
     space();
-    if (position_ < input_.size() && input_[position_] == '}') {
-      ++position_;
+    if (at('}')) {
+      input_.read();
       return true;
     }
     for (;;) {
@@ -468,12 +533,12 @@ class DuplicateBindingScanner {
       seen.push_back(key);
       if (!value()) return false;
       space();
-      if (position_ >= input_.size()) return false;
-      if (input_[position_] == '}') {
-        ++position_;
+      if (!more()) return false;
+      if (at('}')) {
+        input_.read();
         return true;
       }
-      if (input_[position_++] != ',') return false;
+      if (input_.read() != ',') return false;
     }
   }
   // Walks one layer object, descending into `bind` specifically and skipping
@@ -481,8 +546,8 @@ class DuplicateBindingScanner {
   bool layer(size_t index) {
     if (!take('{')) return false;
     space();
-    if (position_ < input_.size() && input_[position_] == '}') {
-      ++position_;
+    if (at('}')) {
+      input_.read();
       return true;
     }
     for (;;) {
@@ -490,40 +555,49 @@ class DuplicateBindingScanner {
       if (!string(key) || !take(':')) return false;
       if (key == "bind") {
         space();
-        if (position_ < input_.size() && input_[position_] == '{') {
+        if (at('{')) {
           if (!bindings(index)) return false;
         } else if (!value()) return false;
       } else if (!value()) return false;
       space();
-      if (position_ >= input_.size()) return false;
-      if (input_[position_] == '}') {
-        ++position_;
+      if (!more()) return false;
+      if (at('}')) {
+        input_.read();
         return true;
       }
-      if (input_[position_++] != ',') return false;
+      if (input_.read() != ',') return false;
     }
   }
+  // Records every element's byte range, objects or not, so parseTheme()
+  // reports a non-object layer exactly as before. Ranges stop at 33: one
+  // more than allowed is enough to report "too many layers".
   bool layers() {
     if (!take('[')) return false;
+    layout_.layersFound = true;
+    layout_.layerRanges.clear();
+    layout_.layerCount = 0;
     size_t index = 0;
     space();
-    if (position_ < input_.size() && input_[position_] == ']') {
-      ++position_;
+    if (at(']')) {
+      input_.read();
       return true;
     }
     for (;;) {
       space();
-      if (position_ < input_.size() && input_[position_] == '{') {
+      const size_t begin = input_.position();
+      if (at('{')) {
         if (!layer(index)) return false;
       } else if (!value()) return false;
+      if (layout_.layerRanges.size() <= MaxLayers) layout_.layerRanges.push_back({begin, input_.position()});
+      ++layout_.layerCount;
       ++index;
       space();
-      if (position_ >= input_.size()) return false;
-      if (input_[position_] == ']') {
-        ++position_;
+      if (!more()) return false;
+      if (at(']')) {
+        input_.read();
         return true;
       }
-      if (input_[position_++] != ',') return false;
+      if (input_.read() != ',') return false;
     }
   }
   // Entry point: descends into the root object's `layers` array specifically
@@ -531,33 +605,45 @@ class DuplicateBindingScanner {
   bool scanRoot() {
     if (!take('{')) return false;
     space();
-    if (position_ < input_.size() && input_[position_] == '}') {
-      ++position_;
+    if (at('}')) {
+      input_.read();
       return true;
     }
     for (;;) {
       std::string key;
       if (!string(key) || !take(':')) return false;
+      bool known = false;
+      for (const auto& old : layout_.rootKeys) if (old == key) known = true;
+      if (!known) layout_.rootKeys.push_back(key);
       if (key == "layers") {
         space();
-        if (position_ < input_.size() && input_[position_] == '[') {
+        if (at('[')) {
           if (!layers()) return false;
-        } else if (!value()) return false;
+        } else {
+          layout_.layersFound = false;
+          if (!value()) return false;
+        }
       } else if (!value()) return false;
       space();
-      if (position_ >= input_.size()) return false;
-      if (input_[position_] == '}') {
-        ++position_;
+      if (!more()) return false;
+      if (at('}')) {
+        input_.read();
         return true;
       }
-      if (input_[position_++] != ',') return false;
+      if (input_.read() != ',') return false;
     }
   }
-  const std::string& input_;
+  ManifestReader input_;
+  ManifestLayout& layout_;
   std::string& error_;
-  size_t position_ = 0;
   unsigned depth_ = 0;
 };
+// Out of line, so the scanner and its reader are on the stack only while it
+// walks; parseTheme() keeps just the layout.
+__attribute__((noinline)) static bool scanManifest(ManifestSource& json, ManifestLayout& layout, std::string& error) {
+  ManifestScanner scanner(json, layout, error);
+  return scanner.valid();
+}
 // Maps a `bind` object's key to the numeric BoundProperty it names, or false
 // if the name is not a numeric property at all (it might still be a color
 // one -- see colorProperty below).
@@ -699,7 +785,7 @@ static bool parseScroll(JsonObjectConst object, const std::string& path, std::st
   return true;
 }
 // Parses a layer's `bind` object: at most 8 entries (already enforced key-by-
-// key by DuplicateBindingScanner, but re-checked here on the parsed count),
+// key by ManifestScanner, but re-checked here on the parsed count),
 // each either a numeric mapping or a color-stop table depending on which
 // property it names.
 static bool parseBindings(JsonObjectConst object, const Theme& theme, const std::string& path, std::string& error, Layer& layer) {
@@ -707,6 +793,7 @@ static bool parseBindings(JsonObjectConst object, const Theme& theme, const std:
   Fields bindings(objectBindings, path + ".bind", error);
   if (objectBindings.isNull()) return bindings.fail("", "expected an object");
   if (objectBindings.size() > 8) return bindings.fail("", "expected at most 8 bindings");
+  layer.bindings.reserve(objectBindings.size());
   for (JsonPairConst pair : objectBindings) {
     std::string name(pair.key().c_str(), pair.key().size());
     Binding binding;
@@ -754,33 +841,51 @@ static bool parseBindings(JsonObjectConst object, const Theme& theme, const std:
 // value, or structural inconsistency (duplicate ID, undeclared binding
 // source, ...) is rejected rather than coerced or ignored.
 bool parseTheme(const std::string& json, Theme& out, std::string& error) {
-  error.clear();
-  if (json.empty() || json.size() > MaxManifest) {
-    error = "theme.json: expected 1 to 16384 bytes";
-    return false;
-  }
-  JsonDocument doc;
-  JsonReader reader(json);
-  auto err = deserializeJson(doc, reader, DeserializationOption::NestingLimit(8));
-  if (err) {
-    error = "theme.json: " + std::string(err.c_str()) + " at byte " + std::to_string(reader.position);
-    return false;
-  }
-  for (size_t i = reader.position; i < json.size(); ++i) {
-    if (json[i] != ' ' && json[i] != '\n' && json[i] != '\r' && json[i] != '\t') {
+  StringManifest source(json);
+  return parseTheme(source, out, error);
+}
+__attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, BlockList<std::string>& ids, std::string& error);
+// A JSON pass's failure as a diagnostic: an unreadable source, or the
+// ArduinoJson error with the absolute byte it stopped at.
+static bool jsonFailed(DeserializationError err, const ManifestReader& reader, std::string& error) {
+  if (reader.failed()) error = "theme.json: could not be read";
+  else if (err) error = "theme.json: " + std::string(err.c_str()) + " at byte " + std::to_string(reader.position());
+  else return false;
+  return true;
+}
+// On the ESP8266 the loop stack is 4 KiB, and parsing JSON recurses: one
+// frame per nesting level, in ArduinoJson and in ManifestScanner alike. So
+// every recursive step runs from a small frame, and the validation, whose
+// field checkers need large frames, runs only after it has returned. Each
+// is a separate out-of-line function that parseTheme() calls in turn.
+
+// The first pass's JSON: everything except the layers, which the scanner
+// locates for parseLayers() to read one at a time.
+__attribute__((noinline)) static bool readHeader(ManifestSource& json, JsonDocument& doc, std::string& error) {
+  JsonDocument filter;
+  for (const char* key : {"spec", "theme", "display", "data"}) filter[key] = true;
+  ManifestReader reader(json, 0, json.size());
+  auto err = deserializeJson(doc, reader, DeserializationOption::Filter(filter), DeserializationOption::NestingLimit(8));
+  if (jsonFailed(err, reader, error)) return false;
+  for (int c; (c = reader.read()) >= 0;) {
+    if (c != ' ' && c != '\n' && c != '\r' && c != '\t') {
       error = "theme.json: trailing content after manifest";
       return false;
     }
   }
-  // ArduinoJson has already validated syntax and nesting depth at this point;
-  // only now is it safe to re-walk the raw text for the one thing ArduinoJson
-  // itself cannot catch (see DuplicateBindingScanner's own comment).
-  if (!DuplicateBindingScanner(json, error).valid()) return false;
-  auto root = doc.as<JsonObjectConst>();
+  return !jsonFailed(err, reader, error);
+}
+// Validates the first pass's document and the root keys `scan` found.
+__attribute__((noinline)) static bool parseHeader(JsonObjectConst root, const ManifestLayout& scan, Theme& t, std::string& error) {
+  for (const auto& key : scan.rootKeys) {
+    if (key != "spec" && key != "theme" && key != "display" && key != "layers" && key != "data") {
+      error = printableKey(key.data(), key.size()) + ": unknown field";
+      return false;
+    }
+  }
   Fields r(root, "", error);
   int spec = 0;
-  if (!r.keys("|spec|theme|display|layers|data|") || !r.number("spec", 1, 1, spec)) return false;
-  Theme t;
+  if (!r.number("spec", 1, 1, spec)) return false;
   // ---- theme metadata ----
   auto meta = root["theme"].as<JsonObjectConst>();
   Fields m(meta, "theme", error);
@@ -800,6 +905,7 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
     auto sources = root["data"].as<JsonArrayConst>();
     if (sources.isNull()) return r.fail("data", "expected an array of sources");
     if (sources.size() > MaxDataSources) return r.fail("data", "expected at most 4 sources");
+    t.data.reserve(sources.size());
     for (JsonObjectConst source : sources) {
       ThemeDataSource data;
       Fields sf(source, "data[" + std::to_string(t.data.size()) + "]", error);
@@ -817,6 +923,7 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
       data.interval = static_cast<uint32_t>(interval);
       auto fields = source["fields"].as<JsonArrayConst>();
       if (fields.isNull() || fields.size() == 0 || fields.size() > MaxDataFields) return sf.fail("fields", "expected 1 to 8 fields");
+      data.fields.reserve(fields.size());
       for (JsonObjectConst field : fields) {
         ThemeDataField item;
         Fields ff(field, "data[" + std::to_string(t.data.size()) + "].fields[" + std::to_string(data.fields.size()) + "]", error);
@@ -840,86 +947,143 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error) {
     }
   }
   // ---- layers: 0-32, drawn back to front in array order ----
-  auto layers = root["layers"].as<JsonArrayConst>();
-  if (layers.isNull() || layers.size() > MaxLayers) return r.fail("layers", "expected an array of at most 32 layers");
-  for (JsonObjectConst o : layers) {
-    Layer l;
-    std::string type;
-    std::string layerPath = "layers[" + std::to_string(t.layers.size()) + "]";
-    Fields f(o, layerPath, error);
-    if (o.isNull()) return f.fail("", "expected an object");
-    if (!f.text("id", l.id, 48)) return false;
-    if (!validId(l.id)) return f.fail("id", "use ASCII letters, digits, '-' or '_'");
-    for (const auto& existing : t.layers) if (existing.id == l.id) return f.fail("id", "duplicate layer ID");
-    if (!f.text("type", type, 16) || !f.number("x", -240, 479, l.x) || !f.number("y", -240, 479, l.y)) return false;
-    if (type == "text") {
-      l.type = LayerType::Text;
-      if (!f.keys("|id|type|x|y|anchor|value|size|color|scroll|bind|") || !f.text("value", l.value, 128)) return false;
-      if (!validText(l.value, t)) return f.fail("value", "use printable ASCII and declared clock/data variables only");
-      if (!f.number("size", 8, 96, l.size) || !f.color("color", l.color)) return false;
-      std::string anchor = "top-left";
-      if (!f.text("anchor", anchor, 20, false)) return false;
-      // The 9 anchor names are a 3x3 grid in row-major order (left/center/right
-      // columns, top/center/bottom rows), so its index decomposes directly
-      // into the 0/1/2 column and row bounds() later uses to offset the text
-      // cell by half its width/height per axis.
-      const char* anchors[] = {"top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"};
-      int a = 0;
-      for (; a < 9; ++a) if (anchor == anchors[a]) break;
-      if (a == 9) return f.fail("anchor", "unsupported text anchor");
-      l.anchorX = a % 3;
-      l.anchorY = a / 3;
-    } else if (type == "image" || type == "animation") {
-      l.type = type == "image" ? LayerType::Image : LayerType::Animation;
-      if (!f.keys(type == "image" ? "|id|type|x|y|source|scroll|bind|" : "|id|type|x|y|width|height|source|frames|fps|loop|scroll|bind|") || !f.text("source", l.source, 110)) return false;
-      if (!validPath(l.source)) return f.fail("source", "expected a safe relative asset path");
-      if (type == "animation") {
-        int frames = 0, fps = 0;
-        if (!f.number("width", 1, 240, l.width) || !f.number("height", 1, 240, l.height) || !f.number("frames", 1, 240, frames) || !f.number("fps", 1, 15, fps)) return false;
-        if (!o["loop"].is<bool>()) return f.fail("loop", "expected true or false");
-        l.frames = frames;
-        l.fps = fps;
-        l.loop = o["loop"].as<bool>();
-      }
-      // assetPath() appends a per-frame suffix; the *compiled* path (what
-      // ends up inside the .stheme container) must itself fit the package
-      // format's 120-byte path limit, not just the declared `source`.
-      if (assetPath(l, l.frames - 1).size() > 120) return f.fail("source", "compiled asset path exceeds 120 bytes");
-    } else if (type == "shape") {
-      l.type = LayerType::Shape;
-      std::string shape;
-      if (!f.text("shape", shape, 16)) return false;
-      if (shape != "rectangle" && shape != "circle" && shape != "line") return f.fail("shape", "expected rectangle, circle or line");
-      const char* allowed = shape == "rectangle" ? "|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|cornerRadius|scroll|bind|" :
-        shape == "circle" ? "|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|" : "|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|";
-      if (!f.keys(allowed)) return false;
-      l.hasFill = !o["fill"].isNull();
-      l.hasStroke = !o["stroke"].isNull();
-      if (!l.hasFill && !l.hasStroke) return f.fail(shape == "line" ? "stroke" : "fill", "provide a fill or stroke color");
-      if ((l.hasFill && !f.color("fill", l.fill)) || (l.hasStroke && !f.color("stroke", l.stroke)) || !f.number("strokeWidth", 1, 32, l.strokeWidth, false)) return false;
-      if (shape == "rectangle") {
-        if (!f.number("width", 1, 240, l.width) || !f.number("height", 1, 240, l.height)) return false;
-        if (f.has("cornerRadius") && !f.number("cornerRadius", 0, 120, l.cornerRadius)) return false;
-      } else if (shape == "circle") {
-        l.shape = Shape::Circle;
-        if (!f.number("radius", 1, 240, l.radius)) return false;
-      } else {
-        l.shape = Shape::Line;
-        if (!l.hasStroke) return f.fail("stroke", "required for a line");
-        if (!f.number("x2", -240, 479, l.x2) || !f.number("y2", -240, 479, l.y2)) return false;
-      }
-    } else return f.fail("type", "expected text, image, animation or shape");
-    // `scroll` and `bind` are common to every layer type's own `keys()` list
-    // above, so they are parsed once here rather than duplicated per branch.
-    if (f.has("scroll")) {
-      if (l.type != LayerType::Text) return f.fail("scroll", "only allowed on text layers");
-      if (!parseScroll(o, layerPath, error, l)) return false;
-    }
-    if (f.has("bind") && !parseBindings(o, t, layerPath, error, l)) return false;
-    t.layers.push_back(std::move(l));
+  if (!scan.layersFound || scan.layerCount > MaxLayers) return r.fail("layers", "expected an array of at most 32 layers");
+  return true;
+}
+// One element of the root `layers` array, as its own document.
+__attribute__((noinline)) static bool readLayer(ManifestSource& json, const ManifestLayout::Range& range, JsonDocument& doc, std::string& error) {
+  ManifestReader reader(json, range.begin, range.end);
+  // The root object and the layers array are two of the eight levels. The
+  // first pass already enforces the limit on the whole document (a looser
+  // value here changes no test result); this keeps a layer's parse from
+  // depending on that.
+  auto err = deserializeJson(doc, reader, DeserializationOption::NestingLimit(6));
+  return !jsonFailed(err, reader, error);
+}
+// The second pass: each layer `scan` found, parsed on its own and its JSON
+// freed before the next.
+__attribute__((noinline)) static bool parseLayers(ManifestSource& json, const ManifestLayout& scan, Theme& t, std::string& error) {
+  t.layers.reserve(scan.layerRanges.size());
+  // The layer IDs seen so far, for the duplicate check; Layer does not keep
+  // its ID, so they exist only while the layers are parsed.
+  BlockList<std::string> ids;
+  ids.reserve(scan.layerRanges.size());
+  for (const auto& range : scan.layerRanges) {
+    JsonDocument doc;
+    if (!readLayer(json, range, doc, error) || !parseLayer(doc.as<JsonObjectConst>(), t, ids, error)) return false;
   }
-  out = std::move(t);
+  return true;
+}
+// The manifest is never held as one document, which on the ESP8266 would
+// not fit next to a running theme (issue #30). A first pass parses
+// everything except the layers; the scanner then finds each layer's bytes,
+// and every layer is parsed on its own. This function holds only what the
+// passes share, so its own stack frame stays small.
+bool parseTheme(ManifestSource& json, Theme& out, std::string& error) {
   error.clear();
+  if (json.size() == 0 || json.size() > MaxManifest) {
+    error = "theme.json: expected 1 to 16384 bytes";
+    return false;
+  }
+  ManifestLayout scan;
+  // On the heap: 132 bytes that every pass would otherwise carry on the
+  // stack, and the stack is the tighter limit here.
+  std::unique_ptr<Theme> t(new Theme());
+  {
+    // Freed at the end of this block, before the layers are read.
+    JsonDocument doc;
+    if (!readHeader(json, doc, error)) return false;
+    // ArduinoJson has already validated syntax and nesting depth at this
+    // point; only now is it safe to re-walk the raw text for what the
+    // filtered pass cannot see (see ManifestScanner's own comment).
+    if (!scanManifest(json, scan, error) || !parseHeader(doc.as<JsonObjectConst>(), scan, *t, error)) return false;
+  }
+  if (!parseLayers(json, scan, *t, error)) return false;
+  out = std::move(*t);
+  error.clear();
+  return true;
+}
+// Parses one element of the root `layers` array and appends it to `t`, whose
+// data sources it is checked against; `ids` holds the earlier layers' IDs.
+// The layer is built in place in the list rather than in a local copy: a
+// Layer is over 100 bytes, too many for the ESP8266's loop stack this deep in
+// a parse. A failure leaves it half-filled, which is harmless because
+// parseTheme() then discards `t`.
+__attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, BlockList<std::string>& ids, std::string& error) {
+  std::string type, id;
+  std::string layerPath = "layers[" + std::to_string(t.layers.size()) + "]";
+  Layer& l = t.layers.emplace_back();
+  Fields f(o, layerPath, error);
+  if (o.isNull()) return f.fail("", "expected an object");
+  if (!f.text("id", id, 48)) return false;
+  if (!validId(id)) return f.fail("id", "use ASCII letters, digits, '-' or '_'");
+  for (const auto& old : ids) if (old == id) return f.fail("id", "duplicate layer ID");
+  ids.push_back(std::move(id));
+  if (!f.text("type", type, 16) || !f.number("x", -240, 479, l.x) || !f.number("y", -240, 479, l.y)) return false;
+  if (type == "text") {
+    l.type = LayerType::Text;
+    if (!f.keys("|id|type|x|y|anchor|value|size|color|scroll|bind|") || !f.text("value", l.value, 128)) return false;
+    if (!validText(l.value, t)) return f.fail("value", "use printable ASCII and declared clock/data variables only");
+    if (!f.number("size", 8, 96, l.size) || !f.color("color", l.color)) return false;
+    std::string anchor = "top-left";
+    if (!f.text("anchor", anchor, 20, false)) return false;
+    // The 9 anchor names are a 3x3 grid in row-major order (left/center/right
+    // columns, top/center/bottom rows), so its index decomposes directly
+    // into the 0/1/2 column and row bounds() later uses to offset the text
+    // cell by half its width/height per axis.
+    const char* anchors[] = {"top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"};
+    int a = 0;
+    for (; a < 9; ++a) if (anchor == anchors[a]) break;
+    if (a == 9) return f.fail("anchor", "unsupported text anchor");
+    l.anchorX = a % 3;
+    l.anchorY = a / 3;
+  } else if (type == "image" || type == "animation") {
+    l.type = type == "image" ? LayerType::Image : LayerType::Animation;
+    if (!f.keys(type == "image" ? "|id|type|x|y|source|scroll|bind|" : "|id|type|x|y|width|height|source|frames|fps|loop|scroll|bind|") || !f.text("source", l.source, 110)) return false;
+    if (!validPath(l.source)) return f.fail("source", "expected a safe relative asset path");
+    if (type == "animation") {
+      int frames = 0, fps = 0;
+      if (!f.number("width", 1, 240, l.width) || !f.number("height", 1, 240, l.height) || !f.number("frames", 1, 240, frames) || !f.number("fps", 1, 15, fps)) return false;
+      if (!o["loop"].is<bool>()) return f.fail("loop", "expected true or false");
+      l.frames = frames;
+      l.fps = fps;
+      l.loop = o["loop"].as<bool>();
+    }
+    // assetPath() appends a per-frame suffix; the *compiled* path (what
+    // ends up inside the .stheme container) must itself fit the package
+    // format's 120-byte path limit, not just the declared `source`.
+    if (assetPath(l, l.frames - 1).size() > 120) return f.fail("source", "compiled asset path exceeds 120 bytes");
+  } else if (type == "shape") {
+    l.type = LayerType::Shape;
+    std::string shape;
+    if (!f.text("shape", shape, 16)) return false;
+    if (shape != "rectangle" && shape != "circle" && shape != "line") return f.fail("shape", "expected rectangle, circle or line");
+    const char* allowed = shape == "rectangle" ? "|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|cornerRadius|scroll|bind|" :
+      shape == "circle" ? "|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|" : "|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|";
+    if (!f.keys(allowed)) return false;
+    l.hasFill = !o["fill"].isNull();
+    l.hasStroke = !o["stroke"].isNull();
+    if (!l.hasFill && !l.hasStroke) return f.fail(shape == "line" ? "stroke" : "fill", "provide a fill or stroke color");
+    if ((l.hasFill && !f.color("fill", l.fill)) || (l.hasStroke && !f.color("stroke", l.stroke)) || !f.number("strokeWidth", 1, 32, l.strokeWidth, false)) return false;
+    if (shape == "rectangle") {
+      if (!f.number("width", 1, 240, l.width) || !f.number("height", 1, 240, l.height)) return false;
+      if (f.has("cornerRadius") && !f.number("cornerRadius", 0, 120, l.cornerRadius)) return false;
+    } else if (shape == "circle") {
+      l.shape = Shape::Circle;
+      if (!f.number("radius", 1, 240, l.radius)) return false;
+    } else {
+      l.shape = Shape::Line;
+      if (!l.hasStroke) return f.fail("stroke", "required for a line");
+      if (!f.number("x2", -240, 479, l.x2) || !f.number("y2", -240, 479, l.y2)) return false;
+    }
+  } else return f.fail("type", "expected text, image, animation or shape");
+  // `scroll` and `bind` are common to every layer type's own `keys()` list
+  // above, so they are parsed once here rather than duplicated per branch.
+  if (f.has("scroll")) {
+    if (l.type != LayerType::Text) return f.fail("scroll", "only allowed on text layers");
+    if (!parseScroll(o, layerPath, error, l)) return false;
+  }
+  if (f.has("bind") && !parseBindings(o, t, layerPath, error, l)) return false;
   return true;
 }
 std::string expandText(const std::string& value, const tm* t) {
@@ -1045,7 +1209,7 @@ void Engine::resolveLayer(size_t index) {
   // height, and cornerRadius, so a rectangle that shrinks (via a bound
   // dimension) never draws rounding outside its own resolved bounds.
   if (layer.type == LayerType::Shape && layer.shape == Shape::Rectangle)
-    resolved.cornerRadius = std::min(resolved.cornerRadius,
+    resolved.cornerRadius = std::min<int>(resolved.cornerRadius,
       std::max(0, std::min(resolved.width, resolved.height) / 2));
   states_[index].resolved = resolved;
 }

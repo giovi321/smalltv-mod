@@ -27,6 +27,14 @@ class Panel : public smalltv::Display {
     if ((y & 15) == 15) yield();
   }
 };
+// What a load needs before it starts: its peak heap (tests/theme/
+// test_memory.cpp holds the examples to 5 KB) plus about 1 KB that the
+// network code may claim meanwhile, and blocks of up to 1 KB (the same test's
+// largest-request limit) with some slack. A failed allocation mid-load
+// restarts the ESP8266, so a load that would not fit waits instead.
+constexpr uint32_t LoadFreeHeap = 6144;
+constexpr uint32_t LoadLargestBlock = 1536;
+const char* const WaitingForMemory = "Waiting for free memory";
 }
 void ThemeMode::begin(const Settings&) {
   LittleFS.mkdir("/themes");
@@ -104,10 +112,19 @@ void ThemeMode::invalidate(const Settings& s) {
 // `loadedId_` together are the load state machine; everything past the load
 // block runs every call once a package is open.
 void ThemeMode::service(const Settings& s) {
-  if (loadedId_ != s.themeId) unload();
-  if (!attempted_) {
-    attempted_ = true;
+  if (loadedId_ != s.themeId) {
+    unload();
     loadedId_ = s.themeId;
+  }
+  // A web request, or the buffers of its reply, can briefly hold the heap a
+  // load needs; the load then waits, checked again every frame.
+  const bool loadFits = ESP.getFreeHeap() >= LoadFreeHeap && platformMaxFreeBlock() >= LoadLargestBlock;
+  if (!attempted_ && !loadFits && error_ != WaitingForMemory) {
+    error_ = WaitingForMemory;
+    messageDrawn_ = false;
+  }
+  if (!attempted_ && loadFits) {
+    attempted_ = true;
     std::string error;
     smalltv::Theme theme;
     if (!smalltv::validId(s.themeId.c_str())) error = "Select an installed theme";
