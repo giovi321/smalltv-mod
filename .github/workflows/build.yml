@@ -85,6 +85,12 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio==6.1.19
 
+      # Cheap, and a mismatch is not worth a 30 minute build to find out: every
+      # UPDATE_ASSET in src/config.h has to be a file the staging step below
+      # copies into dist/, or that variant's self-update finds no release asset.
+      - name: Check release asset names
+        run: python3 tools/ci_checks.py assets
+
       - name: Build firmware (all targets)
         run: pio run -e smalltv -e smalltv_lean -e smalltv_c2 -e smalltv_esp32 -e smalltv_esp32_wg -e smalltv_esp32_8mb -e smalltv_loader
 
@@ -143,6 +149,14 @@ jobs:
           copy .pio/build/smalltv_esp32_8mb/firmware.bin dist/smalltv-mod-firmware-esp32-pro.bin
           copy .pio/build/smalltv_esp32_8mb/firmware.factory.bin dist/smalltv-mod-firmware-esp32-pro.factory.bin
           copy .pio/build/smalltv_loader/firmware.bin dist/smalltv-mod-loader.bin
+
+      # Image headroom. Prints image / size / slot / free for every env and fails
+      # when one has less than 8192 B left in its app slot. Slot sizes are read
+      # from the env's partition CSV or linker script, see tools/ci_checks.py.
+      # The 8 KiB floor is a policy choice, not a measured value. After the
+      # staging step so a red gate still uploads the binaries.
+      - name: Check image headroom
+        run: python3 tools/ci_checks.py size --min-free 8192
 
       # always(), so a run that dies after linking still hands over whatever was
       # produced. A size question cannot be answered from a red run with no
