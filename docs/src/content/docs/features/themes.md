@@ -62,6 +62,15 @@ Up to 16 packages can coexist, subject to available filesystem space. Firmware
 updates do not require reinstalling packages. Settings export contains the selected
 ID, not the package files; keep your source themes and `.stheme` files separately.
 
+Installing a package also writes a small `<id>.meta` file next to it in
+`/themes` with its name, author, version and size. The list reads that file
+instead of validating every package again, so it never needs to free the
+running theme. A package without a matching `.meta` (installed by an older
+firmware, or changed since) is validated once, the next time the list is
+opened, like any other package parse; a package that fails is listed with its
+error and checked again each time. Selecting a theme always runs the full
+validation.
+
 ## Create a source theme
 
 ```text
