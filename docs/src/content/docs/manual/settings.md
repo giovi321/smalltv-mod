@@ -5,7 +5,7 @@ description: Every tab in the settings page, and every option in it, in plain la
 
 The settings page is a single page with tabs across the top: Status, WiFi, Display, Ticker, Clawdmeter, Radar, System. Not every device has all of them: a unit built without the radar feature, for example, has no Radar tab. This page goes through each tab. For the deeper technical reference (data source details, exact request formats) see [Data sources](/smalltv-mod/reference/data-sources/) and each mode's own page.
 
-One button applies everything: **Save settings**, at the very bottom of the page, under every tab. Nothing you type takes effect until you press it.
+One button applies everything: **Save settings**, at the very bottom of the page, under every tab. Nothing you type takes effect until you press it. If a save fails, a message on the page says why, and the device keeps the settings it had before.
 
 ## Status
 

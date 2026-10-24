@@ -495,10 +495,13 @@ entry, manifest, and referenced animation frame is checked before a rename makes
 the package visible. Failed or interrupted uploads leave existing themes and
 selection intact. Boot removes an abandoned staging file. Installation reserves
 space for settings and filesystem metadata. Settings saves use a temporary file,
-check the complete byte count, then rename over the old config.
+check the complete byte count, then rename over the old config. Reading,
+saving and importing settings free the running theme first when the heap is
+short, and a save that still runs out of memory fails with "not enough
+memory" and keeps the old settings.
 
-Listing, installing, selecting, and removing a theme each check a package by
-loading it. When the free heap is short of what that needs (on the ESP8266,
+Installing, selecting and removing a theme, and listing a package that has no
+`.meta` yet, each check a package by loading it. When the free heap is short of what that needs (on the ESP8266,
 not on the ESP32 boards), the running theme is released first and loaded
 again afterwards, so only one theme is in RAM at a time. It then redraws once
 and its animations restart; its fetched values stay, and no data source is

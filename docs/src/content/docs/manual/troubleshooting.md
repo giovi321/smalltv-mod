@@ -93,6 +93,16 @@ The ESP32-C2 and the SmallTV Pro carry the client, and so does an NM-TV-154 flas
 - "Tunnel suspended after repeated reboots" means the device crashed three times in a row with the tunnel enabled and stopped starting it. Check the settings and press **Save settings** again; re-saving is what clears the hold.
 - The tunnel is up but the device is unreachable at its tunnel address: this is almost always the Allowed IPs field. List the subnet the other end is on (`10.6.0.0/24`), not only the device's own address. [WireGuard VPN](/smalltv-mod/features/wireguard/) explains why.
 
+## Saving settings says "not enough memory"
+
+The device did not have enough free memory to process the save, so it refused it and kept the settings it had. This happens on the original ESP8266 model, most often while a clock-face theme is running. The running theme is already freed before a save when memory is short. If the message persists, switch the display away from the theme, save, then switch back.
+
+Before v3.0.0 the same situation could erase every setting, WiFi included, and restart the device in SETUP MODE. Update to v3.0.0 or later, and restore from a settings export if you have one.
+
+## An update to v2.16.0 or v2.17.0 fails with "Not Enough Space"
+
+On the SmallTV (ESP32-C2) and with the NM-TV-154 WireGuard image (`-esp32-wg`), those two releases were too large for the update slot, so the device refused them and kept running its current version. v3.0.0 fits; update to it from the System tab as usual.
+
 ## I pressed Factory reset and lost my settings
 
 Factory reset is meant to erase everything, so this is expected: it wipes saved WiFi networks, tickers, and every other setting, and restarts the device in first-time SETUP MODE. It does not touch the firmware itself, so no reinstall is needed. Set the device up again as in [Quick start](/smalltv-mod/manual/quick-start/).

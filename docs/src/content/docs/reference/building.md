@@ -40,7 +40,7 @@ That headroom decides whether two fetch paths run at all. `features/radar/RadarC
 
 Read the current figures from `/api/status`: `heap` is free bytes and `maxblk` is the largest contiguous block.
 
-The env inherits `smalltv` through `extends` and replaces its `build_flags`, so the board, flash layout, and libraries stay identical. Three flags do the work: `-D WITH_HA=0` and `-D WITH_USAGE=0` drop the features, and `-D SMALLTV_LEAN` selects the matching `UPDATE_ASSET` in `src/config.h` so a lean device self-updates to the lean image rather than the standard one.
+The env inherits `smalltv` through `extends` and interpolates its `build_flags` (`${env:smalltv.build_flags}`) before adding its own, so the board, flash layout, libraries and shared flags stay identical. Three flags do the work: `-D WITH_HA=0` and `-D WITH_USAGE=0` drop the features, and `-D SMALLTV_LEAN` selects the matching `UPDATE_ASSET` in `src/config.h` so a lean device self-updates to the lean image rather than the standard one.
 
 ### Rolling your own combination
 
@@ -79,11 +79,14 @@ Credentials are compile-time only and never live in the repo. The build output i
 
 Chip differences are centralized so the feature code stays the same on every board.
 
+- `src/Target.h` checks that the env selected exactly one chip and defines `SMALLTV_FAMILY_ESP32` (C2 and classic ESP32) or `SMALLTV_FAMILY_ESP8266`. Code that differs by chip family tests these two macros, and a build with no chip macro, or two, stops with an error
 - `src/Platform.h` holds every chip-specific include, class alias, and small shim. The WiFi stack, web server, HTTPS client, OTA, and reset handling all resolve through it. The ESP32 targets share its Arduino core 3.x branch.
 - `src/board_esp8266.h`, `src/board_esp32c2.h`, `src/board_esp32.h`, and `src/board_esp32_pro.h` hold the pin map and panel quirks for each board. `src/config.h` includes the right one based on the build target.
 - The three feature modes, the web UI, and the settings layer are identical across all targets.
 
 The target is chosen by a build flag: `SMALLTV_ESP8266`, `SMALLTV_ESP32C2`, or `SMALLTV_ESP32`. The SmallTV Pro defines `SMALLTV_ESP32` (chip-family code paths) plus `SMALLTV_ESP32_PRO` (its pin map and update asset).
+
+In `platformio.ini`, `[common]` holds the source include paths and the libraries every firmware env uses, and `[esp32_base]` holds the single ESP32 platform pin. Each env interpolates them, so a change there reaches every board.
 
 ## Project layout
 
@@ -91,6 +94,7 @@ The target is chosen by a build flag: `SMALLTV_ESP8266`, `SMALLTV_ESP32C2`, or `
 src/                    shared core (device, net, web, settings)
   main.cpp              setup/loop and the mode registry
   loader.cpp            the standalone smalltv_loader image (built on its own)
+  Target.h              chip check and the SMALLTV_FAMILY_* macros
   Platform.h            per-chip includes, aliases, and shims
   Mode.h                the DisplayMode interface every feature implements
   board_esp8266.h       ESP8266 pin map and panel quirks
@@ -112,6 +116,8 @@ src/                    shared core (device, net, web, settings)
     usage/              UsageMode + UsageClient + Mascot
     radar/              RadarMode + RadarClient
     notify/             NotifyMode + its overlay frames (armed over HTTP, never persisted)
+    ha/                 Home Assistant screens over MQTT
+    theme/              the .stheme clock-face engine and its web API
 partitions/             ESP32 flash layouts (4 MB shared by C2 + NM-TV-154, 8 MB for the Pro)
 n8n/                    webhook contract and importable workflows
 extra_script.py         Windows-only SCons spawn workaround for the ESP8266 envs
@@ -127,9 +133,10 @@ It is wired into `[env:smalltv]` with `extra_scripts = pre:extra_script.py`, so 
 
 The ESP32 targets have a few requirements the ESP8266 does not.
 
-- **Platform**: PlatformIO's official espressif32 does not support the C2 and is stuck on Arduino core 2.x. All ESP32 envs use the [pioarduino](https://github.com/pioarduino/platform-espressif32) fork, which tracks Arduino core 3.x on ESP-IDF 5.x (`Platform.h`'s ESP32 branch needs core 3.x). The first build downloads a large toolchain and compiles the IDF from source, so it takes several minutes. Later builds are fast.
+- **Platform**: PlatformIO's official espressif32 does not support the C2 and is stuck on Arduino core 2.x. All ESP32 envs use the [pioarduino](https://github.com/pioarduino/platform-espressif32) fork, pinned to one release in `[esp32_base]`, which tracks Arduino core 3.x on ESP-IDF 5.x (`Platform.h`'s ESP32 branch needs core 3.x). The first build downloads a large toolchain and compiles the IDF from source, so it takes several minutes. Later builds are fast.
 - **Display driver**: both use `Arduino_HWSPI` with explicit pins. The register-level `Arduino_ESP32SPI` hangs on the C2, and the software-SPI path in the library does not cover it. `Arduino_HWSPI` uses the stock SPI driver and works.
 - **Flashing the C2**: uploads call the system esptool, not the one bundled with PlatformIO, which hangs entering download mode on that board. Install it with `pip install esptool`. The classic ESP32 flashes with either.
+- **Image size flags**: the ESP32 envs build with `-D CORE_DEBUG_LEVEL=0 -fno-exceptions -fno-asynchronous-unwind-tables -fno-unwind-tables`. Without them the C2 and WireGuard images do not fit their 1,572,864-byte slot. The first flag also silences the Arduino core's own debug messages on the serial console; the firmware's serial output is unchanged
 - **Partitions**: the 4 MB layout in `partitions/smalltv_4mb_ota.csv` gives two OTA app slots plus about 0.9 MB for LittleFS, and is shared by the C2 and the NM-TV-154. The SmallTV Pro's 8 MB layout in `partitions/smalltv_8mb_ota.csv` doubles the app slots (2.125 MB each) and gives about 3.7 MB of LittleFS, matching the stock firmware's table exactly.
 
 ## WireGuard
@@ -144,12 +151,10 @@ The two peer limits are compile-time because `esp_wireguard` allocates peers sta
 
 | Build | `firmware.bin` | Of the 1,572,864 B slot | Free |
 |-------|---------------|-------------------------|------|
-| `smalltv_esp32` | 1,422,042 B | 90.4% | 150,822 B |
-| `smalltv_esp32_wg` | 1,467,670 B | 93.3% | 105,194 B |
+| `smalltv_esp32` | 1,434,192 B | 91.2% | 138,672 B |
+| `smalltv_esp32_wg` | 1,479,984 B | 94.1% | 92,880 B |
 
-Measured in CI, which is what builds the published binaries. The client costs 45,628 bytes, about a third of the plain image's spare flash. Both fit with room left, so this is a headroom decision rather than a hard limit: the plain image keeps all 150,822 spare bytes for whatever the firmware grows into next, and the WireGuard one spends a third of them on the tunnel.
-
-A local build reports about 75 KB more for each, 1,497,014 B and 1,543,046 B. That is the Arduino core, not your checkout: `platform` points at pioarduino's `stable` release, which is a mutable rolling tag, so a cold CI runner re-resolves it (55.3.311, core 3.3.11) while a warm `~/.platformio` keeps whatever it first cached (55.3.39, core 3.3.9 here). The published assets track the same step: the `esp32` image was 1,490,688 bytes at v2.13.1 and 1,453,632 at v2.14.0. Quote CI's figures for anything that describes a downloadable binary. That local build is also where the RAM numbers come from, since the table above does not carry them: 97,448 bytes without the client and 98,992 with it, so the tunnel costs 1,544 bytes of static RAM.
+Measured in CI on v3.0.0, which is what builds the published binaries. The client costs 45,792 bytes, about a third of the plain image's spare flash. Both fit with room left, so this is a headroom decision rather than a hard limit: the plain image keeps its spare bytes for whatever the firmware grows into next, and the WireGuard one spends a third of them on the tunnel.
 
 Growing the slot is the alternative to the split, and it is not one a field device can take: raising `app0` and `app1` in `partitions/smalltv_4mb_ota.csv` at the expense of `spiffs` (0xF0000 is generous for one `config.json`) is a partition-table change, and only `firmware.factory.bin` over USB can install that.
 
@@ -159,6 +164,19 @@ The env inherits `smalltv_esp32` through `extends` and interpolates that env's `
 
 ## Footprint
 
-Measured as the flashable `firmware.bin`, which is what an OTA slot has to hold. The ESP8266 build is 694 KB of a 1,020 KB budget and roughly half the RAM at boot, with headroom for OTA, which needs room for two sketch copies. The NM-TV-154 build is 1,422,042 bytes of a 1,572,864-byte app slot, 1,467,670 bytes with the WireGuard client, and uses about 30 percent of RAM. The ESP32-C2 shares that slot size and the SmallTV Pro has a 2,228,224-byte one; both carry the client. The figures this page used to give for those two have not been re-measured on the current toolchain, so they have been dropped rather than restated. The mascot frame data lives in flash, not the heap.
+Measured as the flashable `firmware.bin` in CI on v3.0.0, which is what an OTA slot has to hold:
+
+| Build | `firmware.bin` | Slot | Used | Free |
+|-------|---------------|------|------|------|
+| `smalltv` | 795,184 B | 1,044,464 B | 76.1% | 249,280 B |
+| `smalltv_lean` | 658,896 B | 1,044,464 B | 63.1% | 385,568 B |
+| `smalltv_c2` | 1,441,216 B | 1,572,864 B | 91.6% | 131,648 B |
+| `smalltv_esp32` | 1,434,192 B | 1,572,864 B | 91.2% | 138,672 B |
+| `smalltv_esp32_wg` | 1,479,984 B | 1,572,864 B | 94.1% | 92,880 B |
+| `smalltv_esp32_8mb` | 1,499,104 B | 2,228,224 B | 67.3% | 729,120 B |
+
+The ESP8266 slot comes from `eagle.flash.4m1m.ld`, the 4 MB ESP32 slot from `partitions/smalltv_4mb_ota.csv` and the Pro's from `partitions/smalltv_8mb_ota.csv`. The mascot frame data lives in flash, not the heap.
+
+CI checks every image against its slot on each build (`tools/ci_checks.py size`) and fails the build when an image has less than 8,192 bytes free, so an image that cannot be installed over the air is never published. After a local `pio run`, `python tools/ci_checks.py size --min-free 8192 --allow-missing` runs the same check on the envs you built.
 
 The PC-side usage daemon is a separate repo: [clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon).
