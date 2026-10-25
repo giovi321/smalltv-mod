@@ -101,4 +101,4 @@ Two exceptions worth knowing:
 
 - The USB-C port is there to power the device. It does not have to be plugged into a computer.
 - The screen is a small IPS panel with no touch. Every control is in the web page.
-- Most models have no buttons on the case (the SmallTV Pro has a touch button, set up in the Button card). A restart means unplugging it, or pressing Reboot in the System tab.
+- There are no power buttons on the case (the SmallTV Pro has a touch button, controlled by software). A restart means unplugging it, or pressing Reboot in the System tab.
