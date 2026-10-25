@@ -126,7 +126,7 @@ The pins are set in `src/board_esp32.h`.
 |---|---|
 | MCU | classic ESP32, 8 MB flash |
 | Display | 1.54" 240×240 IPS ST7789V, SPI, RGB colour order |
-| Extras | capacitive touch button (GPIO 32, unused by this firmware) |
+| Extras | capacitive touch button (GPIO 32), configured in the Button card of the web UI |
 | WireGuard VPN | included |
 | Build env | `smalltv_esp32_8mb` |
 
@@ -146,7 +146,7 @@ The pin map comes from the ESPHome SmallTV Pro community config and matches what
 | RST | 4 | |
 | CS | GND | tied low on the PCB, not driven |
 | Backlight | 25 | PWM, active-low |
-| Touch button | 32 | ESP32 T9 touch channel, unused |
+| Touch button | 32 | ESP32 T9 touch channel |
 
 The pins are set in `src/board_esp32_pro.h`.
 

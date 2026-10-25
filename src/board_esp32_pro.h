@@ -7,8 +7,8 @@
 // at 60 MHz SPI, mode 3). Note the NM-TV-154 pins in board_esp32.h
 // (GPIO 13/14/15/19/21) are a DIFFERENT board and do not apply here.
 //
-// The board also has a capacitive touch button on GPIO 32 (ESP32 T9); the
-// firmware has no button handling yet, so it is unused.
+// Capacitive touch button on GPIO 32 (ESP32 T9), handled by buttonService() in main.cpp
+// (same implementation as board_esp32.h). The press threshold is calibrated at runtime.
 #pragma once
 
 #define TFT_SCLK   18
@@ -27,3 +27,6 @@
 // No ambient-light sensor on this board -> auto-brightness compiled out.
 #define HAS_LDR     0
 #define ADC_MAX  4095   // classic ESP32 ADC is 12-bit (unused while HAS_LDR == 0)
+
+#define BTN_PIN         32
+#define BTN_TOUCH_RATIO 85   // pressed when touchRead < baseline * ratio/100
