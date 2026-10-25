@@ -65,7 +65,8 @@ static void netHookEvents() {
 // PSTR: on the ESP8266 a plain literal would sit in RAM, which is heap there.
 static const char* reasonText(uint16_t r) {
   switch (r) {
-    case 2: case 15: case 202: case 204: return PSTR("wrong password?");
+    case 2:                             return PSTR("auth timed out");
+    case 15: case 202: case 204:        return PSTR("wrong password?");
     case 201:                           return PSTR("network not found");
     case 210: case 211:                 return PSTR("security mode?");
     case 203:                           return PSTR("router refused");

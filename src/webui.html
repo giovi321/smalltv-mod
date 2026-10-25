@@ -694,7 +694,7 @@ function addWifiRow(o){var t=$('wifiTable');var tr=document.createElement('tr');
  t.appendChild(tr);}
 function addWifi(){if(document.querySelectorAll('#wifiTable tr').length>=4){toast('Max 4');return}addWifiRow({})}
 function collectWifi(){var w=[];document.querySelectorAll('#wifiTable tr').forEach(function(tr){
- var s=tr.querySelector('.ws').value.trim();if(!s)return;
+ var s=tr.querySelector('.ws').value;if(!s.trim())return; // SSIDs may end in spaces: keep them as typed
  var e={ssid:s};var p=tr.querySelector('.wp').value;if(p)e.pass=p;w.push(e);});return w}
 function scanPick(ssid){var rows=document.querySelectorAll('#wifiTable tr');var tr=null;
  for(var i=0;i<rows.length;i++){if(!rows[i].querySelector('.ws').value.trim()){tr=rows[i];break}}

@@ -71,6 +71,7 @@ The newer ESP32-based models have more memory and are not affected by this.
 The device tried the saved network for 30 seconds and gave up. The red line under the SETUP MODE title names the network and the reason, and the System tab shows the same text as "Last join failure":
 
 - "wrong password?" means the router turned the password down. Retype it in the WiFi tab, watching for spaces and capital letters.
+- "auth timed out" means the router did not finish checking the password in time. A wrong password can cause it, but so can a weak signal or a busy hotspot: retype the password, then move the device closer.
 - "network not found" means the network was not in range on 2.4 GHz. The device has no 5 GHz radio, and a router on channel 12, 13 or 14 can be invisible to it.
 - "security mode?" means the router asks for a security mode the device does not offer. Set the 2.4 GHz network to WPA2-PSK (AES), or to WPA2/WPA3 mixed mode without "PMF required".
 - "no IP (DHCP)" means the device joined but the router handed out no address. Check the router's DHCP pool and any MAC filter.
