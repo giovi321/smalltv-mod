@@ -201,6 +201,10 @@ static void buttonGoHome() {
 }
 
 static void buttonNext() {
+#if WITH_HA
+  // Home Assistant mode rotates its own screens: step through them directly.
+  if (g_settings.mode == MODE_HA) { g_haMode.nextPage(); return; }
+#endif
   if (g_settings.mode != MODE_CAROUSEL || kModeCount == 0) return;
   g_carPaused = true;                  // manual navigation stops the auto-rotation
   g_carSwitch = millis();

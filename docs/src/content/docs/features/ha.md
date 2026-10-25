@@ -30,7 +30,7 @@ Screen messages must be published with the retain flag. This is not optional: re
 
 Publishing an **empty retained payload** to a screen topic deletes that slot, from both the broker and the device.
 
-When several slots are set, the device rotates through them in slot order, dwelling on each for the time configured on the device (15 seconds by default). A screen whose `ttl` has expired drops out of the rotation without anything needing to republish.
+When several slots are set, the device rotates through them in slot order, dwelling on each for the time configured on the device (15 seconds by default). A screen whose `ttl` has expired drops out of the rotation without anything needing to republish. On a board with a touch button, a short press set to *Next page* steps to the next screen when the device is in Home Assistant mode, and the dwell timer restarts on it.
 
 ### Limits
 

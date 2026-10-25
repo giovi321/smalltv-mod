@@ -122,6 +122,13 @@ void HaMode::invalidate(const Settings& s) {
   needRender_ = true;
 }
 
+void HaMode::nextPage() {
+  uint8_t live = haScreensLive();
+  if (live > 1) page_ = (page_ + 1) % live;
+  lastRotate_ = millis();    // the auto-rotation dwell restarts on the page just chosen
+  needRender_ = true;
+}
+
 void HaMode::service(const Settings& s) {
   uint8_t live = haScreensLive();
 

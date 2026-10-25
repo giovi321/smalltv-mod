@@ -21,6 +21,7 @@ class HaMode : public DisplayMode {
     needRender_ = true;
     lastRotate_ = millis();
   }
+  void nextPage();                               // physical button: show the next live screen
 
  private:
   void render(const Settings& s, uint8_t live);
