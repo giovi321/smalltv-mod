@@ -71,7 +71,7 @@ bool Package::load(Theme& theme, std::string& error) {
   // by itself exceed what the ESP8266 has free next to a running theme.
   EntryManifest json(source_, manifest->offset, manifest->length);
   Theme candidate;
-  if (!parseTheme(json, candidate, error) || !checkAssets(candidate, error)) return false;
+  if (!parseTheme(json, candidate, error) || !checkSpec(candidate, error) || !checkAssets(candidate, error)) return false;
   theme = std::move(candidate);
   error.clear();
   return true;
@@ -130,6 +130,22 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
     pos += length;
   }
   return pos == size;
+}
+// STI2 images need a spec 2 manifest (#31). Firmware up to 3.1.0 refuses
+// spec 2 at the manifest, so a spec 1 package with an STI2 image would pass
+// that check there and fail only at the image. Every image counts, also one
+// that no layer uses.
+bool Package::checkSpec(const Theme& theme, std::string& error) const {
+  if (theme.spec >= 2) return true;
+  for (size_t i = 0; i < entries_.size(); ++i) {
+    const Entry& e = entries_[i];
+    if (!e.compressed) continue;
+    std::string path(e.pathLength, '\0');
+    if (!source_.read(e.offset - e.pathLength, &path[0], path.size())) path = "an image";
+    error = path + ": STI2 image needs \"spec\": 2";
+    return false;
+  }
+  return true;
 }
 // Assets are validated against the parsed manifest only after parseTheme()
 // succeeds, into a `candidate` that only replaces `theme` on full success --

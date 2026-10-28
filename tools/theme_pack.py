@@ -150,15 +150,18 @@ def unique_keys(pairs):
     return result
 
 
-def build(directory, sti2=False):
+def build(directory):
     root = Path(directory).resolve()
     manifest_path = root / 'theme.json'
     if manifest_path.stat().st_size > 16384:
         raise ValueError('Manifest exceeds 16 KiB')
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'), object_pairs_hook=unique_keys)
     validate_manifest(manifest_path)
-    if type(manifest.get('spec')) is not int or manifest['spec'] != 1:
-        raise ValueError('Expected spec: 1')
+    if type(manifest.get('spec')) is not int or manifest['spec'] not in (1, 2):
+        raise ValueError('Expected spec: 1 or 2')
+    # STI2 images only for spec 2 (#31): firmware up to 3.1.0 reads only
+    # STI1, and refuses spec 2 at the manifest.
+    sti2 = manifest['spec'] == 2
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,48}', manifest.get('theme', {}).get('id', '')):
         raise ValueError('Invalid theme ID')
     display = manifest.get('display', {})

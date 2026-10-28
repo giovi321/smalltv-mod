@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import struct
 import tempfile
 import unittest
@@ -161,12 +162,24 @@ class PackTests(unittest.TestCase):
                 'display': {'width': 240, 'height': 240, 'background': '#102030'},
                 'layers': [{'id': name, 'type': 'image', 'x': 40 + 50 * i, 'y': 100, 'source': 'images/%s.png' % name}
                            for i, name in enumerate(('photo', 'sprite', 'icon'))]}))
+            # The manifest decides (#31): STI2 only for "spec": 2.
+            def with_spec(theme, spec):
+                copy = Path(tmp)/('%s-%d' % (theme.name, spec))
+                shutil.copytree(theme, copy)
+                manifest = json.loads((copy/'theme.json').read_text())
+                manifest['spec'] = spec
+                (copy/'theme.json').write_text(json.dumps(manifest))
+                return copy
+
             for theme, expected in ((root, ['direct', 'indexed', 'sti1']), (ROOT/'examples/themes/pixel-room', None)):
-                sti1, sti2 = pack.build(theme), pack.build(theme, sti2=True)
+                sti1, sti2 = pack.build(with_spec(theme, 1)), pack.build(with_spec(theme, 2))
+                self.assertEqual(set(forms(sti1)), {'sti1'})
                 if expected:
                     self.assertEqual(forms(sti2), expected)
                 self.assertLess(len(sti2), len(sti1))
                 self.assertEqual(frames(sti1, tmp), frames(sti2, tmp))
+            with self.assertRaises(ValueError):
+                pack.build(with_spec(root, 3))
 
     def test_live_status_example_is_dynamic_and_reproducible(self):
         root = ROOT/'examples/themes/live-status'

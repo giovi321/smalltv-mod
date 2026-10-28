@@ -41,6 +41,7 @@ class Package : public Assets {
   size_t indexOf(const std::string& path) const;
   const Entry* find(const std::string& path) const;
   bool readIndex(std::string& error);
+  bool checkSpec(const Theme& theme, std::string& error) const;
   bool checkAssets(Theme& theme, std::string& error) const;
 };
 }

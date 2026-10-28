@@ -19,6 +19,7 @@ int main() {
   source.data="STH1";u16(source.data,2);u16(source.data,0);
   std::string json=R"({"spec":1,"theme":{"id":"test","name":"Test","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"layers":[{"id":"bg","type":"image","x":0,"y":0,"source":"images/bg.png"}]})";
   entry(source.data,"theme.json",json);
+  std::string json2=json;json2.replace(json2.find("\"spec\":1"),8,"\"spec\":2");   // STI2 needs spec 2 (#31)
   std::string image="STI1";u16(image,2);u16(image,1);image+=char(1);image.append(3,'\0');u16(image,0xf800);image+=char(255);u16(image,0x07e0);image+=char(0);
   entry(source.data,"images/bg.png.sti",image);
   assert(p.load(t,error));assert(t.layers[0].width==2);
@@ -78,7 +79,7 @@ int main() {
       return s;
     };
     auto package=[&](const std::string& image){
-      std::string s="STH1";u16(s,2);u16(s,0);entry(s,"theme.json",json);entry(s,"images/bg.png.sti",image);return s;
+      std::string s="STH1";u16(s,2);u16(s,0);entry(s,"theme.json",json2);entry(s,"images/bg.png.sti",image);return s;
     };
     Memory packed;Package rle(packed);Theme theme;
     packed.data=package(sti2(rows,3));
@@ -116,7 +117,7 @@ int main() {
     image=sti2(rows,3);image.resize(12+4*2);                               // table cut short,
     packed.data=package(image);assert(!rle.load(theme,error));
     packed.data="STH1";u16(packed.data,3);u16(packed.data,0);               // also with a file after it,
-    entry(packed.data,"theme.json",json);entry(packed.data,"images/bg.png.sti",image);  // so reading on would work
+    entry(packed.data,"theme.json",json2);entry(packed.data,"images/bg.png.sti",image);  // so reading on would work
     entry(packed.data,"images/other.png.sti",sti2(rows,3));
     assert(!rle.load(theme,error));
   }
@@ -136,7 +137,7 @@ int main() {
       return s;
     };
     auto package=[&](const std::string& image){
-      std::string s="STH1";u16(s,2);u16(s,0);entry(s,"theme.json",json);entry(s,"images/bg.png.sti",image);return s;
+      std::string s="STH1";u16(s,2);u16(s,0);entry(s,"theme.json",json2);entry(s,"images/bg.png.sti",image);return s;
     };
     std::string palette;                                                   // red, blue at half alpha, white
     u16(palette,0xf800);palette+=char(255);u16(palette,0x001f);palette+=char(128);u16(palette,0xffff);palette+=char(255);
@@ -179,6 +180,18 @@ int main() {
       std::string image=sti2(3,1,false,2,opaque,&one);image[at]=1;
       packed.data=package(image);assert(!indexed.load(theme,error));
     }
+    // An STI2 image needs a spec 2 manifest (#31), also when no layer uses
+    // it; the error names the image. Spec 2 still takes STI1 images.
+    packed.data="STH1";u16(packed.data,2);u16(packed.data,0);
+    entry(packed.data,"theme.json",json);entry(packed.data,"images/bg.png.sti",sti2(3,1,false,2,opaque,&one));
+    assert(!indexed.load(theme,error) && error=="images/bg.png.sti: STI2 image needs \"spec\": 2");
+    packed.data="STH1";u16(packed.data,3);u16(packed.data,0);entry(packed.data,"theme.json",json);
+    std::string still="STI1";u16(still,3);u16(still,1);still+=char(0);still.append(3,'\0');still.append(6,'\0');
+    entry(packed.data,"images/bg.png.sti",still);entry(packed.data,"images/unused.png.sti",sti2(3,1,false,2,opaque,&one));
+    assert(!indexed.load(theme,error) && error=="images/unused.png.sti: STI2 image needs \"spec\": 2");
+    packed.data="STH1";u16(packed.data,2);u16(packed.data,0);entry(packed.data,"theme.json",json2);
+    entry(packed.data,"images/bg.png.sti",still);
+    assert(indexed.load(theme,error) && theme.spec==2);
     // STI1 keeps byte 9 reserved: no palette there.
     std::string raw="STI1";u16(raw,1);u16(raw,1);raw+=char(0);raw+=char(1);raw.append(2,'\0');u16(raw,0xf800);
     packed.data=package(raw);assert(!indexed.load(theme,error));

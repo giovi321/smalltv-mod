@@ -884,8 +884,10 @@ __attribute__((noinline)) static bool parseHeader(JsonObjectConst root, const Ma
     }
   }
   Fields r(root, "", error);
+  // Spec 2 (#31) also allows STI2 images; firmware up to 3.1.0 refuses it here.
   int spec = 0;
-  if (!r.number("spec", 1, 1, spec)) return false;
+  if (!r.number("spec", 1, 2, spec)) return false;
+  t.spec = static_cast<uint8_t>(spec);
   // ---- theme metadata ----
   auto meta = root["theme"].as<JsonObjectConst>();
   Fields m(meta, "theme", error);

@@ -129,6 +129,7 @@ inline bool operator==(const ThemeValue& a, const ThemeValue& b) { return a.key 
 // The immutable parsed manifest. Engine::setTheme() takes this by value and
 // never mutates it afterward; fetched values only ever affect LayerState.
 struct Theme {
+  uint8_t spec = 1;   // manifest version; 2 allows STI2 images (#31)
   std::string id, name, author, version;
   uint16_t background = 0;
   BlockList<Layer> layers;

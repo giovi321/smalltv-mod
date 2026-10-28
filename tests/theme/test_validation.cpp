@@ -48,7 +48,16 @@ int main() {
   for(const char* path:{"../x","/x","a//b","a/./b","a/../b","a\\b","http://x","a/"}) assert(!validPath(path));
   assert(validPath("animations/cat/000.png.sti"));
   deserializeJson(d,base);d["spec|theme"]=0;rejected(d);
-  deserializeJson(d,base);d["spec"]=2;rejected(d);
+  // Spec 2 (#31) is accepted and kept in the theme; it allows STI2 images
+  // (see Package::load()). Other versions are refused.
+  {
+    std::string json,error;Theme t;
+    assert(parseTheme(base,t,error) && t.spec==1);
+    deserializeJson(d,base);d["spec"]=2;serializeJson(d,json);
+    assert(parseTheme(json,t,error) && t.spec==2);
+  }
+  for(int spec:{0,3,-1}) {deserializeJson(d,base);d["spec"]=spec;rejected(d);}
+  deserializeJson(d,base);d["spec"]=1.5;rejected(d);
   deserializeJson(d,base);d["display"]["width"]=320;rejected(d);
   deserializeJson(d,base);d["layers"][0]["x"]="50%";rejected(d);
   deserializeJson(d,base);d["layers"][0]["x"]=100000;rejected(d);
