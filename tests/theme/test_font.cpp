@@ -103,6 +103,11 @@ static void testRejected() {
   // Truncated anywhere, or with a byte too many.
   for(size_t n=0;n<font().size();++n) assert(!loads(font().substr(0,n),error));
   assert(!loads(font()+'\0',error));
+  // Code points stop at 126, even in an otherwise well-formed font.
+  std::string past="STF1";past+=char(8);past+=char(6);past+='~';past+=char(2);past+='~';past.append(3,'\0');
+  record(past,0,1,0,0,0,0);record(past,0,0,0,0,0,0);
+  assert(!loads(past,error));
+  past[7]=1;past.resize(20);assert(loads(past,error));
   // A font that falls back to a glyph without ink, a space, is fine.
   std::string spaceFallback=font();spaceFallback[8]='C';assert(loads(spaceFallback,error));
   // A font path must be fonts/<name>.stf.
@@ -166,6 +171,13 @@ static void testRender() {
   assert(sd.data[2*240+0]==0&&sd.data[2*240+1]==0xffff&&sd.data[2*240+2]==over(0,8));
   assert(render(s,s.update(100,nullptr),scrolling,sd));   // 1 pixel on
   assert(sd.data[2*240+0]==0xffff&&sd.data[2*240+1]==over(0,8)&&sd.data[2*240+2]==0);
+  // A viewport wider than one cycle (8 + a gap of 2) shows the next copy.
+  source.data=package(manifest(2,R"({"id":"t","type":"text","x":0,"y":0,"value":"AA","font":"test","color":"#ffffff","scroll":{"width":12,"speed":10,"pause":0,"mode":"loop","gap":2}})"),"fonts/test.stf",font());
+  Package wide(source);
+  assert(wide.load(t,error));
+  Engine w;w.setTheme(t,0);Pixels wd;
+  assert(render(w,w.update(0,nullptr),wide,wd));
+  assert(wd.data[2*240+9]==0&&wd.data[2*240+10]==0&&wd.data[2*240+11]==0xffff);
 }
 static void testManifest() {
   Theme t;std::string error;
