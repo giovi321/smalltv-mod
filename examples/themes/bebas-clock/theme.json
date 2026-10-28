@@ -1,0 +1,56 @@
+{
+  "spec": 2,
+  "theme": {
+    "id": "bebas-clock",
+    "name": "Bebas Clock",
+    "author": "smalltv-mod",
+    "version": "1.0.0"
+  },
+  "display": {
+    "width": 240,
+    "height": 240,
+    "background": "#10131a"
+  },
+  "layers": [
+    {
+      "id": "band",
+      "type": "shape",
+      "shape": "rectangle",
+      "x": 0,
+      "y": 70,
+      "width": 240,
+      "height": 72,
+      "fill": "#1d2635"
+    },
+    {
+      "id": "time",
+      "type": "text",
+      "x": 120,
+      "y": 106,
+      "anchor": "center",
+      "value": "{HH}:{MM}",
+      "font": "clock",
+      "color": "#ffb000"
+    },
+    {
+      "id": "date",
+      "type": "text",
+      "x": 120,
+      "y": 172,
+      "anchor": "center",
+      "value": "{WD} {DD} {MON}",
+      "font": "label",
+      "color": "#e8ecf2"
+    },
+    {
+      "id": "seconds",
+      "type": "text",
+      "x": 120,
+      "y": 40,
+      "anchor": "center",
+      "value": "{SS}",
+      "size": 16,
+      "color": "#5c6b80"
+    }
+  ]
+}
