@@ -114,6 +114,8 @@ jobs:
           cmp examples/themes/terminal-ops.stheme /tmp/terminal-ops.stheme
           python3 tools/theme_pack.py examples/themes/live-status /tmp/live-status.stheme
           cmp examples/themes/live-status.stheme /tmp/live-status.stheme
+          python3 tools/theme_pack.py examples/themes/bebas-clock /tmp/bebas-clock.stheme
+          cmp examples/themes/bebas-clock.stheme /tmp/bebas-clock.stheme
           sh tests/theme/run.sh
           node tests/theme/test_webui.js
           node tests/theme/test_webui_poll.js
