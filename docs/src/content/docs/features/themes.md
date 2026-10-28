@@ -88,7 +88,7 @@ pixel-room/
 ├── images/background.png
 ├── animations/cat/000.png
 ├── animations/cat/001.png
-└── fonts/                  (reserved for future compiled fonts)
+└── fonts/                  (spec 2: fonts, see Fonts in the package)
 ```
 
 The desktop tools require Python 3.10+, Pillow and a C++11 compiler (`c++`, `g++`,
@@ -160,10 +160,11 @@ workflow — see [Example: a dynamic dashboard](#example-a-dynamic-dashboard).
 This utility converts image pixels on your computer. The device reads RGB565
 assets directly; it does not decode PNG/GIF/TTF. The package stores the same
 manifest values, including logical source paths. A future compiler can replace
-the asset provider without changing those paths. GIF extraction, custom fonts,
-and advanced compiler features are not implemented in V1. Images are stored
-compressed (STI2, see [Device package format](#device-package-format)) only in
-a theme with `"spec": 2`.
+the asset provider without changing those paths. GIF extraction and advanced
+compiler features are not implemented in V1. Images are stored compressed
+(STI2, see [Device package format](#device-package-format)) only in a theme
+with `"spec": 2`, and only such a theme can carry its own
+[fonts](#fonts-in-the-package), which the packer compiles from TrueType files.
 
 ## Manifest
 
@@ -259,6 +260,7 @@ canvas. Colors are exactly `#RRGGBB`, case insensitive; asset alpha is supported
 ### Text
 
 Required fields: `value`, `size`, `color`. Optional `anchor` defaults to `top-left`.
+In a spec 2 theme, `font` replaces `size` (see [Fonts in the package](#fonts-in-the-package)).
 Anchors position the complete text cell rectangle:
 
 | Vertical position | Left | Center | Right |
@@ -310,6 +312,59 @@ the same as any other unknown `{...}`. (A spec 1 theme that declares its own
 field, as before.) `tools/smalltv_theme.py preview --data device.temperature=21`
 supplies a device value for a spec 2 theme, to see what the layer shows with and
 without it.
+
+#### Fonts in the package
+
+A theme with `"spec": 2` can bring its own fonts, antialiased over the layers
+below. A text layer names one with `font` and gives no `size`: the font's line
+height is the layer's height. Layers without `font` keep the built-in font.
+
+```json
+{"id": "time", "type": "text", "x": 120, "y": 106, "anchor": "center",
+ "value": "{HH}:{MM}", "font": "clock", "color": "#ffb000"}
+```
+
+The packer compiles `fonts/clock.json` in the source theme into
+`fonts/clock.stf` in the package, from a TrueType file next to it:
+
+```json
+{"file": "BebasNeue-Regular.ttf", "size": 80, "glyphs": "0123456789:"}
+```
+
+| Field | Value |
+| --- | --- |
+| `file` | A TrueType (`.ttf`, glyf outlines) file in `fonts/` |
+| `size` | Pixels per em, 4–200 |
+| `glyphs` | The printable ASCII characters to keep, for example `"0123456789:"` |
+| `fallback` | Optional: one of `glyphs`, drawn for any character the font lacks. Default `?` when kept, else the lowest character |
+
+Keep only the characters the theme shows: each costs flash in the package,
+not RAM on the device. For a clock face, the digits and `:` are enough; for
+`{WD}` and `{MON}`, add the letters of the English names. A character the
+font lacks, including any byte a fetched value brings outside printable
+ASCII, is drawn as the fallback glyph. The line box fits the ink of the
+glyphs kept, so `anchor` places what is drawn. Each glyph's ink lies within
+its advance: the compiler widens a glyph's advance rather than cut off ink
+that reaches past it. The compiler reads the outlines itself, without
+FreeType, so the same font and settings give the same bytes on any computer.
+It does not apply hinting or kerning. To check a font on its own:
+
+```bash
+python3 tools/theme_font.py fonts/BebasNeue-Regular.ttf /tmp/clock.stf --size 80 --glyphs 0123456789:
+```
+
+A theme may use up to four fonts. The device keeps one byte per glyph in RAM
+(its advance, to lay out text) and reads the glyph bitmaps from the package
+while it draws, one glyph row at a time. Fonts carry their own licence: use
+fonts whose licence allows embedding, such as the
+[SIL Open Font License](https://openfontlicense.org), and ship the licence
+text with the theme source. `examples/themes/bebas-clock` uses Bebas Neue
+(OFL, `fonts/OFL.txt`) in two sizes; its package is 14,094 bytes.
+
+Firmware up to 3.1.0 refuses a package with fonts with "Invalid or truncated
+.stheme package". A spec 1 manifest with `font` is rejected with
+`layers[N].font: needs "spec": 2`, and a spec 1 package with an `.stf` entry
+with `fonts/<name>.stf: font needs "spec": 2`.
 
 #### Scrolling text
 
@@ -536,7 +591,7 @@ unsupported and their declared size must match packaged assets.
 
 | Layer | Numeric properties | Color properties |
 | --- | --- | --- |
-| text | `x`, `y`, `size`, `scroll.width`, `scroll.speed` | `color` |
+| text | `x`, `y`, `size` (not with a `font`), `scroll.width`, `scroll.speed` | `color` |
 | rectangle | `x`, `y`, `width`, `height`, `cornerRadius`, `strokeWidth` | `fill`, `stroke` |
 | circle | `x`, `y`, `radius`, `strokeWidth` | `fill`, `stroke` |
 | line | `x`, `y`, `x2`, `y2`, `strokeWidth` | `stroke` |
@@ -653,6 +708,7 @@ preview it with the `--data` workflow documented above.
 | Hand length / tail; tick length | 1–240 / 0–240 / 1–240 pixels |
 | Tick count | 1–60 |
 | Animation | 1–240 frames, 1–15 FPS |
+| Fonts (spec 2) | 4 per theme; names 1–32 ID characters; printable ASCII glyphs; line height 6–96 pixels; advance 1–120 pixels; 64 KiB of glyph bitmaps |
 | Container | 256 entries, at most 3 MiB |
 | Installed packages | 16, within available storage |
 
@@ -704,7 +760,8 @@ integers are unsigned little endian. No extracted paths become filesystem paths.
 
 Paths are relative ASCII letters/digits plus `/`, `.`, `_`, `-`, at most 120 bytes.
 Empty components, `.` and `..`, absolute paths, backslashes, and duplicates are
-rejected. There must be one `theme.json`. Other entries must be `.sti` images.
+rejected. There must be one `theme.json`. Other entries must be `.sti` images,
+or in a spec 2 theme `fonts/<name>.stf` fonts.
 No padding, trailing bytes, executable entries, or external asset references are
 accepted. JSON data-source URLs remain allowed through the manifest's `data` block.
 
@@ -756,6 +813,46 @@ The device checks every row when the package is installed or loaded: the runs
 of a row must cover its width exactly without reading past the row's end, and
 every index must be below `P`. The shared test files in `tests/theme/sti/`
 show every form with the pixels it must decode to.
+
+A spec 2 theme may contain STF fonts, `fonts/<name>.stf`, which a text layer
+names with `font`. A font holds one 8-byte record for every code point from
+the first to the last it covers, so a glyph is found without a search, then
+the glyph bitmaps:
+
+| STF field | Encoding |
+| --- | --- |
+| Magic | Four ASCII bytes `STF1` |
+| Line height | `uint8`, 6–96 pixels: the height of a text layer in this font |
+| Baseline | `uint8`, 1 to the line height: from the top of the line |
+| First code point | `uint8`, 32–126 |
+| Glyph count | `uint8`, 1–95; the last code point is at most 126 |
+| Fallback | `uint8`: a code point with a glyph, drawn for any byte without one |
+| Reserved | Three zero bytes |
+| Glyph records | One per code point: see below |
+| Bitmaps | Each glyph's bitmap, in record order |
+
+| Glyph record field | Encoding |
+| --- | --- |
+| Bitmap offset | `uint16`, from the start of the bitmaps |
+| Advance | `uint8`, 1–120 pixels to the next glyph; 0 when the font has no glyph for this code point |
+| Left, top | Two `uint8`: where the ink starts, in the glyph's advance and in the line |
+| Width, height | Two `uint8`: the ink's size; left + width ≤ advance, top + height ≤ line height |
+| Reserved | One zero byte |
+
+A code point without a glyph has all eight bytes zero. A glyph without ink
+(a space) has an advance and zero offset, position and size. A bitmap is
+4-bit coverage, 0 for none and 15 for full, two pixels per byte with the left
+one in the high nibble; each row starts on a whole byte, and an odd width
+leaves the low nibble of the row's last byte 0. The bitmaps follow each other
+with nothing in between or after, so each offset is the sum of the bitmaps
+before it, at most 65,535 bytes in all.
+
+The device checks every record and every bitmap row when the package is
+installed or loaded, so drawing can trust them. Coverage blends the layer's
+colour over the pixels below it: `c × 17` is the alpha of the RGB565 blend
+used for images. Compared with 2-bit coverage, 4 bits make the bitmaps about
+1.8 times larger (Bebas Neue at 72 pixels per em, digits and `:`: 6,760
+against 3,607 bytes) but give 16 levels of antialiasing instead of 4.
 
 ## HTTP API
 
