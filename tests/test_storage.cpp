@@ -1,6 +1,7 @@
 // c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc -I<ArduinoJson include dir>
 // tests/test_storage.cpp -o /tmp/smalltv-storage-tests && /tmp/smalltv-storage-tests
 #include "AtomicJson.h"
+#include "DebouncedSave.h"
 #include "SettingsTransaction.h"
 #include <cassert>
 #include <cstring>
@@ -112,5 +113,54 @@ int main() {
   // A successful save keeps the mutation applied.
   assert(applyAndSaveSettings(state, [](State& s) { s.value = 3; }, [&](const State& s) { return savedState && s.value == 3; }));
   assert(state.value == 3);
+
+  // The HA brightness write (MqttClient): it waits for 5 s of quiet, and a
+  // write that fails (out of memory next to a running theme) stays pending and
+  // is tried again 30 s later, instead of being dropped.
+  int calls = 0;
+  bool saveOk = true;
+  auto save = [&] { ++calls; return saveOk; };
+  DebouncedSave brightness(5000, 30000);
+  brightness.service(100000, save);
+  assert(calls == 0);  // nothing requested
+  brightness.request(1000);
+  brightness.service(5999, save);
+  assert(calls == 0 && brightness.pending());
+  brightness.request(3000);  // another command restarts the wait
+  brightness.service(6000, save);
+  assert(calls == 0);
+  brightness.service(8000, save);
+  assert(calls == 1 && !brightness.pending());
+  brightness.service(50000, save);
+  assert(calls == 1);  // written once
+  // A failed write is kept and retried after 30 s, not sooner.
+  saveOk = false;
+  brightness.request(100000);
+  brightness.service(105000, save);
+  assert(calls == 2 && brightness.pending());
+  brightness.service(134999, save);
+  assert(calls == 2);
+  saveOk = true;
+  brightness.service(135000, save);
+  assert(calls == 3 && !brightness.pending());
+  // A new command while a retry waits: written 5 s after that command.
+  saveOk = false;
+  brightness.request(200000);
+  brightness.service(205000, save);
+  assert(calls == 4 && brightness.pending());
+  saveOk = true;
+  brightness.request(206000);
+  brightness.service(210999, save);
+  assert(calls == 4);
+  brightness.service(211000, save);
+  assert(calls == 5 && !brightness.pending());
+  // millis() wraps after 49 days: the deadline wraps before the clock does.
+  brightness.request(0xFFFFF000u);
+  brightness.service(0xFFFFF000u + 100, save);
+  assert(calls == 5);
+  brightness.service(0xFFFFF000u + 4999, save);
+  assert(calls == 5);
+  brightness.service(0xFFFFF000u + 5000, save);
+  assert(calls == 6 && !brightness.pending());
   std::cout << "atomic settings storage tests passed\n";
 }

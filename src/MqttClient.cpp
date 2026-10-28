@@ -6,10 +6,14 @@
 #include "Platform.h"   // brings in WiFi.h / ESP8266WiFi.h per target
 #include "Net.h"
 #include "HaScreens.h"
+#include "DebouncedSave.h"
 
 // Defined in main.cpp — re-resolve effective brightness now (the same call the
 // web UI's /api/config handler makes after a save).
 extern void appApplyBrightness();
+// Defined in main.cpp — every mode frees what it can rebuild (a running theme
+// on the ESP8266), as before the web UI's settings save.
+extern void appRelease();
 
 // Reconnect backoff: 5 s after a failure, doubling up to a 60 s cap; reset on
 // a successful connect.
@@ -19,6 +23,9 @@ extern void appApplyBrightness();
 // Delay between the last brightness/set command and the saveSettings() write:
 // a dragged slider can flap, so the flash write waits for quiet.
 #define MQTT_SAVE_DEBOUNCE_MS 5000UL
+// A write that failed (out of memory) is tried again this much later. Each
+// try can free the running theme, so not more often than this.
+#define MQTT_SAVE_RETRY_MS 30000UL
 
 static Settings*    S = nullptr;
 static WiFiClient   g_tcp;
@@ -44,8 +51,7 @@ static char g_discTopic[128];    // homeassistant/number/smalltv_<hostname>_brig
 
 static int      g_pubBrightness = -1;   // last value sent to the state topic
 static bool     g_haOnline = false;     // HA announced a restart: re-announce
-static bool     g_saveDue = false;      // brightness/set waiting out the debounce
-static uint32_t g_saveAt = 0;
+static DebouncedSave g_save(MQTT_SAVE_DEBOUNCE_MS, MQTT_SAVE_RETRY_MS);   // brightness/set
 
 static bool brokerChanged() {
   return g_connPort != S->ha.brokerPort
@@ -99,8 +105,7 @@ static void onBrightnessSet(const uint8_t* payload, unsigned int len) {
   if (S->brightness == val) return;             // no change, nothing to do
   S->brightness = val;
   appApplyBrightness();                         // respects night/auto/manual
-  g_saveAt = millis() + MQTT_SAVE_DEBOUNCE_MS;  // persist once the flap stops
-  g_saveDue = true;
+  g_save.request(millis());                     // persist once the flap stops
   // The state publish happens from mqttLoop()'s poll-and-compare, same as a
   // web UI change — one code path covers both sources.
 }
@@ -145,11 +150,11 @@ void mqttLoop() {
   // that arrived just before the broker was cleared still lands. The other
   // save paths (web UI) write immediately and don't touch this timer — a
   // later debounced write then simply rewrites the same current settings.
-  if (g_saveDue && (int32_t)(millis() - g_saveAt) >= 0) {
-    g_saveDue = false;
-    if (S) saveSettings(*S);
-  }
   if (!S) return;
+  g_save.service(millis(), [] {
+    appRelease();   // building the file's document needs heap a theme holds
+    return saveSettings(*S);
+  });
 
   // No broker configured: the feature is off. Dropping an existing connection
   // here is what turns a cleared broker host into a clean disconnect.
