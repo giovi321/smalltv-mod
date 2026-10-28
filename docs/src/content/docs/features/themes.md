@@ -365,6 +365,54 @@ between that outer shape and an inner shape whose radius is
 `max(0, cornerRadius - strokeWidth)`. A dynamic width or height that resolves to
 zero makes the rectangle temporarily invisible, regardless of `cornerRadius`.
 
+#### Arcs, hands and tick marks (spec 2)
+
+Three more shapes exist only in a theme with `"spec": 2`. A spec 1 theme that
+uses one is refused with `arc, hand and ticks need "spec": 2`, and a spec 1
+theme installs exactly as before. All three are drawn in `stroke` alone, with no
+`fill`, and take an optional `strokeWidth` of 1–32 (default 1).
+
+```json
+{"id":"progress","type":"shape","shape":"arc","x":120,"y":120,"radius":100,"start":0,"sweep":270,"stroke":"#47c2ff","strokeWidth":10}
+```
+
+```json
+{"id":"minute","type":"shape","shape":"hand","x":120,"y":120,"length":90,"tail":20,"angle":0,"stroke":"#ffffff","strokeWidth":4}
+```
+
+```json
+{"id":"dial","type":"shape","shape":"ticks","x":120,"y":120,"radius":112,"count":12,"length":10,"stroke":"#8a8a8a","strokeWidth":3}
+```
+
+Angles are whole degrees, **0 at 12 o'clock and growing clockwise**, so 90 is
+3 o'clock and a negative angle goes the other way (−90 is 9 o'clock).
+
+* **`arc`** draws a ring segment about the center `x`, `y`: the outer edge is
+  `radius` and the band is `strokeWidth` wide inside it, like a circle's stroke.
+  It starts at `start` (−360 to 360) and runs `sweep` degrees (−360 to 360)
+  clockwise, or counter-clockwise when `sweep` is negative. A `sweep` of 360 or
+  more is a full ring and a `sweep` of 0 draws nothing, so a progress ring at 0 %
+  is simply empty. A `strokeWidth` of at least `radius` fills the wedge. The
+  ends are flat and radial. `radius` is 1–240.
+* **`hand`** draws a line through the pivot `x`, `y`, from `tail` (0–240,
+  default 0) behind it to `length` (1–240) in front, in direction `angle` (−360
+  to 360), with a centered stroke and round ends like `line`.
+* **`ticks`** draws `count` (1–60) evenly spaced radial marks around the center
+  `x`, `y`, the first at 12 o'clock. Each runs `length` (1–240, stopped at the
+  center) inward from `radius` (1–240), with round ends.
+
+`sweep` on an arc, `angle` on a hand and `radius` on an arc or ticks can be bound
+(see [Dynamic bindings](#dynamic-bindings)), with an `output` of −360 to 360 for
+`sweep` and `angle`. A minute hand is `angle` bound to the minute with `input`
+`[0, 60]` and `output` `[0, 360]`; a progress ring is `sweep` bound to a
+percentage with `input` `[0, 100]` and `output` `[0, 360]`. Nothing else about
+these shapes moves: `start`, `length`, `tail` and `count` are fixed.
+
+Everything is drawn with integers, with no framebuffer and no table: a pixel is
+placed to within about a pixel of the exact geometry. When a bound angle or
+sweep changes, only the shape's old and new bounding boxes are repainted, so a
+single hand repaints two small boxes, not the dial behind it.
+
 ### Animation
 
 ```json
@@ -464,6 +512,9 @@ unsupported and their declared size must match packaged assets.
 | rectangle | `x`, `y`, `width`, `height`, `cornerRadius`, `strokeWidth` | `fill`, `stroke` |
 | circle | `x`, `y`, `radius`, `strokeWidth` | `fill`, `stroke` |
 | line | `x`, `y`, `x2`, `y2`, `strokeWidth` | `stroke` |
+| arc (spec 2) | `x`, `y`, `radius`, `sweep`, `strokeWidth` | `stroke` |
+| hand (spec 2) | `x`, `y`, `angle`, `strokeWidth` | `stroke` |
+| ticks (spec 2) | `x`, `y`, `radius`, `strokeWidth` | `stroke` |
 | image | `x`, `y` | none |
 | animation | `x`, `y` | none |
 
@@ -569,6 +620,10 @@ preview it with the `--data` workflow documented above.
 | Coordinates | −240 through 479, clipped to the canvas |
 | Rectangle/image/frame dimensions | 1–240 pixels |
 | Circle radius | 1–240 pixels |
+| Arc / ticks radius | 1–240 pixels |
+| Arc start, sweep; hand angle | −360 to 360 degrees |
+| Hand length / tail; tick length | 1–240 / 0–240 / 1–240 pixels |
+| Tick count | 1–60 |
 | Animation | 1–240 frames, 1–15 FPS |
 | Container | 256 entries, at most 3 MiB |
 | Installed packages | 16, within available storage |
