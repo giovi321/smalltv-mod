@@ -118,6 +118,26 @@ class PackTests(unittest.TestCase):
         tiny = Image.new('RGB', (1, 1), (1, 2, 3))
         self.assertEqual(pack.encode_image(tiny, sti2=True), pack.encode_image(tiny))
 
+    def test_sti2_shared_test_files_are_reproducible(self):
+        # tests/theme/sti holds the files other readers (SmallTV Pomodoro)
+        # test against; the packer must still write exactly those bytes.
+        folder = ROOT/'tests/theme/sti'
+        spec = importlib.util.spec_from_file_location('sti_files', folder/'make.py')
+        files = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(files)
+        built, expected = files.build()
+        self.assertEqual(sorted(built), sorted(p.name for p in folder.glob('*.sti')))
+        for name, data in built.items():
+            self.assertEqual((folder/name).read_bytes(), data, name)
+        self.assertEqual(json.loads((folder/'expected.json').read_text()), expected)
+        # Each source image in every form, named <source>-<form>.sti.
+        for name, data in built.items():
+            form = name[:-4].split('-', 1)[1]
+            self.assertEqual((data[:4], data[9] > 0), {'sti1': (b'STI1', False), 'sti2-direct': (b'STI2', False),
+                                                       'sti2-indexed': (b'STI2', True)}[form], name)
+        self.assertEqual(len(built), 6)
+        self.assertEqual({data[8] for data in built.values()}, {0, 1})   # with and without alpha
+
     def test_sti2_package_renders_like_sti1(self):
         # End to end: the firmware's own reader and renderer (theme_native)
         # must draw the same frames from an STI2 package as from STI1.

@@ -1,7 +1,10 @@
 #include "ThemePackage.h"
+#include <ArduinoJson.h>
 #include <cassert>
 #include <cstring>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 using namespace smalltv;
 struct Memory : Source {
   std::string data;
@@ -192,6 +195,31 @@ int main() {
     packed.data="STH1";u16(packed.data,2);u16(packed.data,0);entry(packed.data,"theme.json",json2);
     entry(packed.data,"images/bg.png.sti",still);
     assert(indexed.load(theme,error) && theme.spec==2);
+    // The shared test files (tests/theme/sti, also read by SmallTV
+    // Pomodoro): every row of each must read back as expected.json says.
+    {
+      std::ifstream list("tests/theme/sti/expected.json");
+      std::string text((std::istreambuf_iterator<char>(list)),std::istreambuf_iterator<char>());
+      JsonDocument expected;
+      assert(list && !deserializeJson(expected,text) && expected.as<JsonObjectConst>().size()==6);
+      for(JsonPairConst file : expected.as<JsonObjectConst>()) {
+        std::ifstream in(std::string("tests/theme/sti/")+file.key().c_str(),std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(in)),std::istreambuf_iterator<char>());
+        assert(in && bytes.size()>12);
+        packed.data=package(bytes);assert(indexed.load(theme,error));
+        const int width=file.value()["width"],height=file.value()["height"];
+        JsonArrayConst pixels=file.value()["pixels"];
+        assert(theme.layers[0].width==width && theme.layers[0].height==height && int(pixels.size())==width*height);
+        uint16_t rowColors[240];uint8_t rowAlpha[240];
+        for(int y=0;y<height;++y) {
+          assert(indexed.row("images/bg.png.sti",y,0,width,rowColors,rowAlpha));
+          for(int x=0;x<width;++x) {
+            JsonArrayConst pixel=pixels[y*width+x];
+            assert(rowColors[x]==pixel[0].as<unsigned>() && rowAlpha[x]==pixel[1].as<unsigned>());
+          }
+        }
+      }
+    }
     // STI1 keeps byte 9 reserved: no palette there.
     std::string raw="STI1";u16(raw,1);u16(raw,1);raw+=char(0);raw+=char(1);raw.append(2,'\0');u16(raw,0xf800);
     packed.data=package(raw);assert(!indexed.load(theme,error));
