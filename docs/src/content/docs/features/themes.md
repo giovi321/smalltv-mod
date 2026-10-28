@@ -179,8 +179,10 @@ a theme with `"spec": 2`.
 
 All fields shown at the root, in `theme`, and in `display` are required.
 `spec` is 1 or 2. Spec 2 lets the packer store images as STI2, which is much
-smaller for images with transparent areas or few colours; firmware up to
-3.1.0 refuses a spec 2 theme. A spec 1 theme packs exactly as before. The
+smaller for images with transparent areas or few colours. Firmware up to
+3.1.1 refuses a spec 2 theme; when it has STI2 images, the message there is
+"Invalid or truncated .stheme package", because that firmware checks the
+images before it reads the manifest. A spec 1 theme packs exactly as before. The
 canvas is always 240×240 with the origin at the top left. Coordinates and sizes
 are integer pixels. Layers draw in array order, back to front; IDs must be unique.
 Unknown fields, unsupported types, invalid values, and unknown text variables are

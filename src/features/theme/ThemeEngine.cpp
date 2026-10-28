@@ -884,7 +884,8 @@ __attribute__((noinline)) static bool parseHeader(JsonObjectConst root, const Ma
     }
   }
   Fields r(root, "", error);
-  // Spec 2 (#31) also allows STI2 images; firmware up to 3.1.0 refuses it here.
+  // Spec 2 (#31) also allows STI2 images. Firmware up to 3.1.1 refuses it:
+  // here, or already at the first STI2 image (readIndex() runs first).
   int spec = 0;
   if (!r.number("spec", 1, 2, spec)) return false;
   t.spec = static_cast<uint8_t>(spec);

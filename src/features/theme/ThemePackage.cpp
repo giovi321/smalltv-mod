@@ -131,10 +131,10 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
   }
   return pos == size;
 }
-// STI2 images need a spec 2 manifest (#31). Firmware up to 3.1.0 refuses
-// spec 2 at the manifest, so a spec 1 package with an STI2 image would pass
-// that check there and fail only at the image. Every image counts, also one
-// that no layer uses.
+// STI2 images need a spec 2 manifest (#31), so a package says which
+// firmware it needs. (Firmware up to 3.1.0 refuses any STI2 image, with
+// "Invalid or truncated .stheme package", before it reads the manifest.)
+// Every image counts, also one that no layer uses.
 bool Package::checkSpec(const Theme& theme, std::string& error) const {
   if (theme.spec >= 2) return true;
   for (size_t i = 0; i < entries_.size(); ++i) {
