@@ -11,8 +11,10 @@ import struct
 import tempfile
 try:
     from .theme_native import validate_manifest, validate_package
+    from .theme_font import compile_font
 except ImportError:
     from theme_native import validate_manifest, validate_package
+    from theme_font import compile_font
 from PIL import Image
 
 MAX_PACKAGE = 3 * 1024 * 1024
@@ -150,6 +152,19 @@ def unique_keys(pairs):
     return result
 
 
+def build_font(root, name):
+    """fonts/<name>.stf from fonts/<name>.json, which names a TrueType file
+    in fonts/, its size in pixels per em, the glyphs to keep and optionally
+    the fallback glyph (spec 2, #31)."""
+    settings = json.loads(source_file(root, f'fonts/{name}.json').read_text(encoding='utf-8'), object_pairs_hook=unique_keys)
+    if not isinstance(settings, dict) or not {'file', 'size', 'glyphs'} <= settings.keys() <= {'file', 'size', 'glyphs', 'fallback'}:
+        raise ValueError(f'fonts/{name}.json: expected "file", "size", "glyphs" and optionally "fallback"')
+    if not isinstance(settings['file'], str) or '/' in settings['file']:
+        raise ValueError('file: expected a font file name in fonts/')
+    data = source_file(root, 'fonts/' + settings['file']).read_bytes()
+    return compile_font(data, settings['size'], settings['glyphs'], settings.get('fallback'))
+
+
 def build(directory):
     root = Path(directory).resolve()
     manifest_path = root / 'theme.json'
@@ -178,6 +193,11 @@ def build(directory):
         kind = layer.get('type')
         if kind not in ('image', 'animation', 'text', 'shape'):
             raise ValueError(f'Unknown layer type: {kind}')
+        if kind == 'text' and 'font' in layer and f'fonts/{layer["font"]}.stf' not in entries:
+            try:
+                entries[f'fonts/{layer["font"]}.stf'] = build_font(root, layer['font'])
+            except (OSError, ValueError, TypeError) as error:
+                raise ValueError(f'layers[{index}].font: {layer["font"]}: {error}') from error
         if kind not in ('image', 'animation'):
             continue
         source = layer.get('source')
