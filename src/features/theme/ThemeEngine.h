@@ -162,6 +162,7 @@ bool parseTheme(const std::string& json, Theme& out, std::string& error);
 bool parseTheme(ManifestSource& json, Theme& out, std::string& error);
 std::string expandText(const std::string& value, const tm* time);
 std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values);
+std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values, const std::vector<ThemeValue>& device);
 std::string assetPath(const Layer& layer, uint16_t frame);
 
 // Per-layer runtime state: the current resolved geometry/color, the expanded

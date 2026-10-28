@@ -165,6 +165,36 @@ class ThemeCliTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn('Traceback', result.stderr)
 
+    def test_spec_2_text_tokens_and_device_values(self):
+        def manifest(spec, value):
+            return {'spec': spec, 'theme': {'id': 'tokentest', 'name': 'Token Test', 'author': 'Test', 'version': '1'},
+                    'display': {'width': 240, 'height': 240, 'background': '#000000'},
+                    'layers': [{'id': 'line', 'type': 'text', 'x': 0, 'y': 0, 'value': value, 'size': 16,
+                                'color': '#ffffff'}]}
+        with tempfile.TemporaryDirectory() as d:
+            source = Path(d)
+            (source/'theme.json').write_text(json.dumps(manifest(2, '{H}:{MM} {AMPM} {MO} {device.temperature}')))
+            frames = {}
+            for name, extra in (('absent', []), ('present', ['--data', 'device.temperature=21'])):
+                result = self.run_cli('preview', source, source/f'{name}.html', '--seconds', 1, '--fps', 1,
+                                      '--time', '2026-09-18T15:04:00', *extra)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                data = self.preview_data(source/f'{name}.html')
+                frames[name] = self.frame(data, 0).crop((0, 0, 240, 16)).tobytes()
+            self.assertNotEqual(frames['absent'], frames['present'])
+            # The preview feeds device values only to a spec 2 theme.
+            (source/'theme.json').write_text(json.dumps(manifest(1, '{MM}')))
+            result = self.run_cli('preview', source, source/'one.html', '--seconds', 1, '--fps', 1,
+                                  '--data', 'device.temperature=21')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn('Traceback', result.stderr)
+            # A spec 1 theme that uses a spec 2 token is refused.
+            for token in ('{H}', '{MO}', '{AMPM}', '{device.streak}'):
+                (source/'theme.json').write_text(json.dumps(manifest(1, token)))
+                result = self.run_cli('validate', source)
+                self.assertNotEqual(result.returncode, 0, token)
+                self.assertNotIn('Traceback', result.stderr)
+
     def test_documentation_covers_scrolling_and_dynamic_properties(self):
         documentation = (ROOT/'docs/src/content/docs/features/themes.md').read_text()
         for token in ('"mode": "loop"', '"mode": "bounce"', 'cornerRadius',

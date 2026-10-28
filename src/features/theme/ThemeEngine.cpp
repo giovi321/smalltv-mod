@@ -180,6 +180,13 @@ uint16_t resolveColorBinding(const ColorBinding& binding, double value) {
 // Clock/date tokens recognized inside {...} regardless of what data sources a
 // theme declares; anything else must resolve to a declared "<source>.<field>".
 static const char* const tokens[] = {"HH", "hh", "MM", "SS", "DD", "MON", "MONTH", "WD", "WEEKDAY", "YYYY"};
+// Added by spec 2 (#31 item 6): the hour without a leading zero, the month as
+// a number, and AM/PM. A spec 1 theme that uses one is refused like any other
+// unknown {...} span.
+static const char* const tokensSpec2[] = {"H", "MO", "AMPM"};
+// The `device.*` names a firmware may provide, shared by binding sources and
+// text tokens (docs/features/themes.md).
+static const char deviceNames[5][12] PROGMEM = {"focusToday", "focusGoal", "streak", "humidity", "temperature"};
 // True if `token` is a declared "<source-id>.<field-id>" reference: both
 // halves must be valid IDs, and the source and field must actually appear in
 // this theme's `data` block. Shared between text-template validation
@@ -207,6 +214,11 @@ static bool validText(const std::string& s, const Theme& theme) {
     if (end == std::string::npos) return false;
     bool found = false;
     for (auto token : tokens) if (s.substr(i + 1, end - i - 1) == token) found = true;
+    if (theme.spec >= 2) {
+      const std::string span = s.substr(i + 1, end - i - 1);
+      for (auto token : tokensSpec2) if (span == token) found = true;
+      if (span.compare(0, 7, "device.") == 0) for (size_t n = 0; n < 5; ++n) if (strcmp_P(span.c_str() + 7, deviceNames[n]) == 0) found = true;
+    }
     if (!found) found = validFieldToken(s.substr(i + 1, end - i - 1), theme);
     if (!found) return false;
     i = end;
@@ -752,7 +764,6 @@ static bool applicable(const Layer& layer, BoundProperty property, bool color) {
 // The tables and the messages sit in flash on the ESP8266, where a string
 // literal would otherwise take RAM; the host tests see plain arrays.
 static const char timeNames[9][12] PROGMEM = {"second", "minute", "hour", "hour12", "secondOfDay", "day", "month", "weekday", "moon"};
-static const char deviceNames[5][12] PROGMEM = {"focusToday", "focusGoal", "streak", "humidity", "temperature"};
 static const char needSpec2[] PROGMEM = "time.* and device.* sources need \"spec\": 2";
 static const char unknownBuiltIn[] PROGMEM = "unknown time.* or device.* name";
 static const char reservedId[] PROGMEM = "time and device are the names of built-in sources";
@@ -1178,6 +1189,12 @@ std::string expandText(const std::string& value, const tm* t) {
 // matching fetched value, and "--" if neither resolves -- the same fallback
 // an unsynchronized clock or a field that has never been fetched produces.
 std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values) {
+  static const std::vector<ThemeValue> noDevice;
+  return expandText(value, t, values, noDevice);
+}
+// `device` holds the firmware's values keyed "device.<name>"; a name it does
+// not provide stays "--". Validation only lets a spec 2 theme use them.
+std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeValue>& device) {
   static const char* months[] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
   static const char* days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
   std::string out;
@@ -1201,9 +1218,15 @@ std::string expandText(const std::string& value, const tm* t, const std::vector<
       else if (key == "SS") n = t->tm_sec;
       else if (key == "DD") n = t->tm_mday;
       else if (key == "YYYY") n = t->tm_year + 1900;
+      else if (key == "MO" && t->tm_mon >= 0 && t->tm_mon < 12) n = t->tm_mon + 1;
       if (n >= 0) {
         snprintf(b, sizeof(b), key == "YYYY" ? "%04d" : "%02d", n);
         v = b;
+      } else if (key == "H" && t->tm_hour >= 0 && t->tm_hour < 24) {
+        snprintf(b, sizeof(b), "%d", t->tm_hour);
+        v = b;
+      } else if (key == "AMPM" && t->tm_hour >= 0 && t->tm_hour < 24) {
+        v = t->tm_hour < 12 ? "AM" : "PM";
       } else if ((key == "MON" || key == "MONTH") && t->tm_mon >= 0 && t->tm_mon < 12) {
         v = months[t->tm_mon];
         if (key == "MON") v.resize(3);
@@ -1213,6 +1236,10 @@ std::string expandText(const std::string& value, const tm* t, const std::vector<
       }
     }
     if (v == "--") for (const auto& item : values) if (item.key == key) {
+      v = item.value;
+      break;
+    }
+    if (v == "--") for (const auto& item : device) if (item.key == key) {
       v = item.value;
       break;
     }
@@ -1503,7 +1530,7 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     }
     bool textChanged = false;
     if (l.type == LayerType::Text && (timeChanged || valuesChanged_)) {
-      std::string text = expandText(l.value, time, values_);
+      std::string text = expandText(l.value, time, values_, device_);
       if (text != s.text) {
         s.text = std::move(text);
         changed = true;
