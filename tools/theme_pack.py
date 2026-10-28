@@ -150,7 +150,7 @@ def unique_keys(pairs):
     return result
 
 
-def build(directory):
+def build(directory, sti2=False):
     root = Path(directory).resolve()
     manifest_path = root / 'theme.json'
     if manifest_path.stat().st_size > 16384:
@@ -196,7 +196,7 @@ def build(directory):
                 with Image.open(source_file(root, name)) as image:
                     if kind == 'animation' and image.size != (layer.get('width'), layer.get('height')):
                         raise ValueError('frame dimensions must match width and height')
-                    entries[asset_name] = encode_image(image)
+                    entries[asset_name] = encode_image(image, sti2)
             except (OSError, ValueError, Image.DecompressionBombError) as error:
                 raise ValueError(f'layers[{index}].source: {name}: {error}') from error
             if len(entries) > 256 or sum(map(len, entries.values())) > MAX_PACKAGE:

@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT/'tools'))
 spec = importlib.util.spec_from_file_location('theme_pack', ROOT / 'tools/theme_pack.py')
 pack = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pack)
+import theme_native as native
 
 class PackTests(unittest.TestCase):
     def test_pixels_and_alpha(self):
@@ -115,6 +116,57 @@ class PackTests(unittest.TestCase):
         # Where STI2 is larger, STI1 stays: one opaque pixel is 14 bytes as STI1.
         tiny = Image.new('RGB', (1, 1), (1, 2, 3))
         self.assertEqual(pack.encode_image(tiny, sti2=True), pack.encode_image(tiny))
+
+    def test_sti2_package_renders_like_sti1(self):
+        # End to end: the firmware's own reader and renderer (theme_native)
+        # must draw the same frames from an STI2 package as from STI1.
+        def forms(package):
+            found = []
+            count, at = struct.unpack_from('<H', package, 4)[0], 8
+            for _ in range(count):
+                length, size = struct.unpack_from('<HI', package, at)
+                payload = package[at + 6 + length:at + 6 + length + size]
+                if payload[:3] == b'STI':
+                    found.append('sti1' if payload[3:4] == b'1' else 'indexed' if payload[9] else 'direct')
+                at += 6 + length + size
+            return sorted(found)
+
+        def frames(package, tmp):
+            path, output = Path(tmp)/'theme.stheme', Path(tmp)/'frames.stp'
+            path.write_bytes(package)
+            native.run('preview', path, output, 1700000000, 8, 16)
+            return output.read_bytes()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # One image for each form: many colours with no runs stays STI1,
+            # many colours on a transparent field is STI2 direct, two
+            # colours are STI2 indexed.
+            root = Path(tmp)/'forms'
+            (root/'images').mkdir(parents=True)
+            photo = Image.new('RGB', (40, 40))
+            photo.putdata([(x * 6, y * 6, (x + y) * 3) for y in range(40) for x in range(40)])
+            photo.save(root/'images/photo.png')
+            sprite = Image.new('RGBA', (40, 40), (0, 0, 0, 0))
+            for x in range(20):
+                for y in range(15, 25):
+                    sprite.putpixel((10 + x, y), (x * 12, 255 - x * 12, 128, 255))
+            sprite.save(root/'images/sprite.png')
+            icon = Image.new('RGBA', (40, 40), (0, 0, 0, 0))
+            for x in range(10, 30):
+                for y in range(10, 30):
+                    icon.putpixel((x, y), (255, 255, 255, 255) if (x + y) % 2 else (255, 0, 0, 128))
+            icon.save(root/'images/icon.png')
+            (root/'theme.json').write_text(json.dumps({
+                'spec': 1, 'theme': {'id': 'forms', 'name': 'Forms', 'author': 'test', 'version': '1.0.0'},
+                'display': {'width': 240, 'height': 240, 'background': '#102030'},
+                'layers': [{'id': name, 'type': 'image', 'x': 40 + 50 * i, 'y': 100, 'source': 'images/%s.png' % name}
+                           for i, name in enumerate(('photo', 'sprite', 'icon'))]}))
+            for theme, expected in ((root, ['direct', 'indexed', 'sti1']), (ROOT/'examples/themes/pixel-room', None)):
+                sti1, sti2 = pack.build(theme), pack.build(theme, sti2=True)
+                if expected:
+                    self.assertEqual(forms(sti2), expected)
+                self.assertLess(len(sti2), len(sti1))
+                self.assertEqual(frames(sti1, tmp), frames(sti2, tmp))
 
     def test_live_status_example_is_dynamic_and_reproducible(self):
         root = ROOT/'examples/themes/live-status'
