@@ -12,6 +12,7 @@ constexpr size_t MaxManifest = 16384;
 constexpr size_t MaxLayers = 32;
 constexpr size_t MaxDataSources = 4;
 constexpr size_t MaxDataFields = 8;
+constexpr size_t MaxFonts = 4;
 
 // Integer pixel rectangle. w/h <= 0 means empty, not "invalid" -- callers rely
 // on that to skip drawing without a separate validity flag.
@@ -124,6 +125,7 @@ struct Layer {
   uint16_t color = 0xffff, fill = 0, stroke = 0;
   bool hasFill = false, hasStroke = false, loop = true;
   bool timeBound = false;   // some binding reads a time.* source
+  uint8_t font = 0;   // 1 + index into Theme::fonts; 0 is the built-in font
   uint16_t frames = 1, fps = 1;
   Scroll scroll;
   std::vector<Binding> bindings;
@@ -146,6 +148,23 @@ struct ThemeValue {
   std::string key, value;
 };
 inline bool operator==(const ThemeValue& a, const ThemeValue& b) { return a.key == b.key && a.value == b.value; }
+// A package font (spec 2, #31), as far as the engine needs it to lay out
+// text: every glyph's advance, read from `fonts/<name>.stf` when the package
+// is loaded. The bitmaps stay in the package (Assets::glyphRow()), and the
+// font's line height becomes the `size` of every text layer that uses it.
+struct ThemeFont {
+  std::string name;
+  uint8_t first = 0, fallback = 0;
+  std::vector<uint8_t> advances;   // from code point `first` on; 0: no glyph
+  // The code point drawn for byte `c`: `c` itself, or the fallback glyph.
+  uint8_t glyph(uint8_t c) const {
+    return c >= first && size_t(c - first) < advances.size() && advances[c - first] ? c : fallback;
+  }
+  int advance(uint8_t c) const {
+    const size_t at = size_t(glyph(c) - first);
+    return at < advances.size() ? advances[at] : 0;
+  }
+};
 // The immutable parsed manifest. Engine::setTheme() takes this by value and
 // never mutates it afterward; fetched values only ever affect LayerState.
 struct Theme {
@@ -154,6 +173,7 @@ struct Theme {
   uint16_t background = 0;
   BlockList<Layer> layers;
   std::vector<ThemeDataSource> data;
+  std::vector<ThemeFont> fonts;
 };
 // Random-access bytes of a manifest. parseTheme() reads it forward in small
 // pieces, several times, so a package's manifest never has to be copied into
@@ -233,6 +253,10 @@ class Assets {
            uint16_t* colors, uint8_t* alpha) {
     return row(resolve(path), y, x, count, colors, alpha);
   }
+  // One row of a package font's glyph: line `y` of the line box, as 0-255
+  // coverage for the `width` pixels from `left` within the glyph's advance;
+  // `width` is 0 where the glyph has no ink. `coverage` holds 240 bytes.
+  virtual bool glyphRow(AssetHandle, uint8_t, int, uint8_t*, int&, int&) { return false; }
 };
 // Font/output sink render() writes into. glyphColumn() returns the built-in
 // bitmap font's column bits for one character; row() streams one already
