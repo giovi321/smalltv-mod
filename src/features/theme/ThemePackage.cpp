@@ -71,7 +71,8 @@ bool Package::load(Theme& theme, std::string& error) {
   // by itself exceed what the ESP8266 has free next to a running theme.
   EntryManifest json(source_, manifest->offset, manifest->length);
   Theme candidate;
-  if (!parseTheme(json, candidate, error) || !checkSpec(candidate, error) || !checkAssets(candidate, error)) return false;
+  if (!parseTheme(json, candidate, error) || !checkSpec(candidate, error) || !checkAssets(candidate, error) ||
+      !loadFonts(candidate, error)) return false;
   theme = std::move(candidate);
   error.clear();
   return true;
@@ -105,6 +106,15 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
     if (e.length > size - pos) return false;
     if (path == "theme.json") {
       if (e.length == 0 || e.length > MaxManifest) return false;
+    } else if (path.compare(0, 6, "fonts/") == 0 && path.size() > 10 && path.compare(path.size() - 4, 4, ".stf") == 0) {
+      // A font (spec 2, #31): "STF1", then the line height, baseline, first
+      // code point, glyph count and fallback code point, 3 zero bytes;
+      // checkFont() checks the rest.
+      if (e.length < 12 || !source_.read(pos, b, 12) || memcmp(b, "STF1", 4)) return false;
+      e.compressed = true;
+      e.width = b[6];
+      e.height = b[7];
+      if (!checkFont(e)) return false;
     } else {
       // Every non-manifest entry must be a well-formed .sti image: "STI1"
       // (raw pixels) or "STI2" (rows as runs) magic, width/height, an alpha
@@ -131,18 +141,18 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
   }
   return pos == size;
 }
-// STI2 images need a spec 2 manifest (#31), so a package says which
-// firmware it needs. (Firmware up to 3.1.1 refuses any STI2 image, with
-// "Invalid or truncated .stheme package", before it reads the manifest.)
-// Every image counts, also one that no layer uses.
+// STI2 images and fonts need a spec 2 manifest (#31), so a package says
+// which firmware it needs. (Firmware up to 3.1.1 refuses any STI2 image, and
+// up to 3.3.0 any font, with "Invalid or truncated .stheme package", before
+// it reads the manifest.) Every entry counts, also one that no layer uses.
 bool Package::checkSpec(const Theme& theme, std::string& error) const {
   if (theme.spec >= 2) return true;
   for (size_t i = 0; i < entries_.size(); ++i) {
     const Entry& e = entries_[i];
     if (!e.compressed) continue;
     std::string path(e.pathLength, '\0');
-    if (!source_.read(e.offset - e.pathLength, &path[0], path.size())) path = "an image";
-    error = path + ": STI2 image needs \"spec\": 2";
+    if (!source_.read(e.offset - e.pathLength, &path[0], path.size())) path = e.font() ? "a font" : "an image";
+    error = path + (e.font() ? ": font needs \"spec\": 2" : ": STI2 image needs \"spec\": 2");
     return false;
   }
   return true;
@@ -175,10 +185,11 @@ __attribute__((noinline)) bool Package::checkAssets(Theme& candidate, std::strin
 }
 // An asset handle is simply an entry's index into `entries_`; `stride` doubles
 // as "is this entry an image, not the manifest" -- the manifest entry always
-// has stride 0 and so can never be resolved as an asset.
+// has stride 0 and so can never be resolved as an asset. A font resolves
+// too, for glyphRow(); row() refuses it, and glyphRow() an image.
 AssetHandle Package::resolve(const std::string& path) {
   size_t i = indexOf(path);
-  return i < entries_.size() && entries_[i].stride ? static_cast<AssetHandle>(i) : InvalidAsset;
+  return i < entries_.size() && (entries_[i].stride || entries_[i].font()) ? static_cast<AssetHandle>(i) : InvalidAsset;
 }
 namespace {
 // Reads a package byte by byte through a 64-byte window: row() runs while a
@@ -333,6 +344,97 @@ bool Package::row(AssetHandle handle, int y, int x, int count, uint16_t* colors,
   if (!source_.read(table + 4u * y, b, 4)) return false;
   Reader reader(source_, table + 4u * e->height + u32(b), e->offset + e->length);
   return walkRow(reader, e->stride, e->palette, e->width, paletteColor, paletteAlpha, x, x + count, colors, alpha);
+}
+// An STF font (spec 2): the 12-byte header (see readIndex()), one 8-byte
+// record per code point from the first on, then the glyph bitmaps. A record
+// is a u16 bitmap offset (from the start of the bitmaps), the advance, the
+// ink's left and top within the glyph's advance and the line, its width and
+// height, and a zero byte; an advance of 0 means no glyph, with all 8 bytes
+// zero. A bitmap is 4-bit coverage, two pixels per byte, high nibble first,
+// each row on a whole byte with an odd width's unused low nibble 0. The
+// bitmaps follow each other in record order, with nothing in between or
+// after, so every packer writes the same bytes. Checked whole here, read
+// in small pieces, so glyphRow() can trust what it reads.
+bool Package::checkFont(const Entry& e) const {
+  uint8_t h[12];
+  if (!source_.read(e.offset, h, 12)) return false;
+  const unsigned height = h[4], baseline = h[5], first = h[6], count = h[7], fallback = h[8];
+  if (height < 6 || height > 96 || !baseline || baseline > height || first < 32 || !count || first + count > 127 ||
+      fallback < first || fallback >= first + count || h[9] || h[10] || h[11] || e.length < 12 + 8 * count) return false;
+  const uint32_t bitmaps = 12 + 8 * count;
+  uint32_t at = 0;
+  bool hasFallback = false;
+  for (unsigned i = 0; i < count; ++i) {
+    uint8_t g[8];
+    if (!source_.read(e.offset + 12 + 8 * i, g, 8)) return false;
+    const unsigned advance = g[2], left = g[3], top = g[4], width = g[5], rows = g[6], bytes = (width + 1) / 2;
+    if (!width || !rows) {
+      // No glyph, or one without ink (a space): no bitmap.
+      if (u16(g) || left || top || width || rows || g[7] || advance > 120) return false;
+      hasFallback = hasFallback || (first + i == fallback && advance);
+      continue;
+    }
+    if (u16(g) != at || !advance || advance > 120 || left + width > advance || top + rows > height || g[7] ||
+        e.length - bitmaps - at < bytes * rows) return false;
+    if (width % 2) {
+      Reader reader(source_, e.offset + bitmaps + at, e.offset + bitmaps + at + bytes * rows);
+      for (unsigned n = 1; n <= bytes * rows; ++n) {
+        uint8_t byte;
+        if (!reader.byte(byte) || (n % bytes == 0 && (byte & 15))) return false;
+      }
+    }
+    at += bytes * rows;
+    if (at > 65535) return false;
+    hasFallback = hasFallback || first + i == fallback;
+  }
+  return hasFallback && e.length == bitmaps + at;
+}
+// Reads every font a text layer names (fonts/<name>.stf) into the theme:
+// the glyph advances the engine lays text out with, and the line height as
+// the layer's size.
+__attribute__((noinline)) bool Package::loadFonts(Theme& candidate, std::string& error) const {
+  for (size_t i = 0; i < candidate.layers.size(); ++i) {
+    auto& l = candidate.layers[i];
+    if (l.type != LayerType::Text || !l.font) continue;
+    ThemeFont& font = candidate.fonts[l.font - 1];
+    const std::string path = "fonts/" + font.name + ".stf";
+    const Entry* e = find(path);
+    uint8_t h[12];
+    if (!e || !e->font() || !source_.read(e->offset, h, 12)) {
+      error = "layers[" + std::to_string(i) + "].font: missing font: " + path;
+      return false;
+    }
+    l.size = h[4];
+    if (!font.advances.empty()) continue;
+    font.first = h[6];
+    font.fallback = h[8];
+    font.advances.assign(h[7], 0);
+    Reader reader(source_, e->offset + 12, e->offset + 12 + 8u * h[7]);
+    for (uint8_t& advance : font.advances) {
+      uint8_t g[8];
+      for (uint8_t& byte : g) if (!reader.byte(byte)) return false;
+      advance = g[2];
+    }
+  }
+  return true;
+}
+// Line `y` of glyph `code` as 0-255 coverage (see checkFont()). The packed
+// row is read into the start of `coverage` and spread out from the end, so
+// no second buffer is needed.
+bool Package::glyphRow(AssetHandle handle, uint8_t code, int y, uint8_t* coverage, int& left, int& width) {
+  if (handle >= entries_.size()) return false;
+  const Entry& e = entries_[handle];
+  if (!e.font() || code < e.width || code >= e.width + e.height) return false;
+  uint8_t g[8];
+  if (!source_.read(e.offset + 12 + 8u * (code - e.width), g, 8)) return false;
+  left = g[3];
+  width = 0;
+  if (y < g[4] || y >= g[4] + g[6]) return true;
+  const unsigned bytes = (g[5] + 1) / 2;
+  if (!source_.read(e.offset + 12 + 8u * e.height + u16(g) + (y - g[4]) * bytes, coverage, bytes)) return false;
+  for (int i = g[5] - 1; i >= 0; --i) coverage[i] = (i % 2 ? coverage[i / 2] & 15 : coverage[i / 2] >> 4) * 17;
+  width = g[5];
+  return true;
 }
 }
 #endif
