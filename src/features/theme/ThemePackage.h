@@ -30,13 +30,14 @@ class Package : public Assets {
     uint16_t width = 0, height = 0;
     uint8_t pathLength = 0, stride = 0;
     bool compressed = false;   // STI2: rows as runs (see row())
+    uint8_t palette = 0;       // STI2 palette size, 0 for direct colours
   };
   Source& source_;
   // In blocks: in one vector, a package with many frames needed a block of
   // several KiB.
   BlockList<Entry> entries_;
   bool samePath(const Entry& entry, const std::string& path) const;
-  bool checkRowTable(const Entry& entry) const;
+  bool checkRows(const Entry& entry) const;
   size_t indexOf(const std::string& path) const;
   const Entry* find(const std::string& path) const;
   bool readIndex(std::string& error);

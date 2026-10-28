@@ -109,9 +109,10 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
       // Every non-manifest entry must be a well-formed .sti image: "STI1"
       // (raw pixels) or "STI2" (rows as runs) magic, width/height, an alpha
       // flag that also selects the pixel stride (2 bytes/pixel opaque, 3
-      // with an alpha byte), 3 reserved zero bytes. An STI1 payload length
-      // must match width*height*stride exactly; an STI2 row table must lie
-      // inside the payload -- nothing here is inferred, every field is
+      // with an alpha byte), then 3 reserved zero bytes, except that STI2
+      // keeps its palette size (0-16) in the first. An STI1 payload length
+      // must match width*height*stride exactly; an STI2 image is checked
+      // row by row (checkRows()) -- nothing here is inferred, every field is
       // cross-checked.
       if (path.size() < 4 || path.substr(path.size() - 4) != ".sti" || e.length < 12 || !source_.read(pos, b, 12) ||
           memcmp(b, "STI", 3) || (b[3] != '1' && b[3] != '2')) return false;
@@ -119,8 +120,10 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
       e.width = u16(b + 4);
       e.height = u16(b + 6);
       e.stride = b[8] ? 3 : 2;
-      if (!e.width || e.width > 240 || !e.height || e.height > 240 || b[8] > 1 || b[9] || b[10] || b[11]) return false;
-      if (e.compressed ? !checkRowTable(e) : e.length != 12 + uint32_t(e.width) * e.height * e.stride) return false;
+      e.palette = e.compressed ? b[9] : 0;
+      if (!e.width || e.width > 240 || !e.height || e.height > 240 || b[8] > 1 || (e.compressed ? b[9] > 16 : b[9]) ||
+          b[10] || b[11]) return false;
+      if (e.compressed ? !checkRows(e) : e.length != 12 + uint32_t(e.width) * e.height * e.stride) return false;
     }
     const uint32_t length = e.length;
     entries_.push_back(std::move(e));
@@ -161,30 +164,6 @@ AssetHandle Package::resolve(const std::string& path) {
   size_t i = indexOf(path);
   return i < entries_.size() && entries_[i].stride ? static_cast<AssetHandle>(i) : InvalidAsset;
 }
-// Reads exactly the `count` pixels of row `y` starting at column `x`,
-// unpacking each pixel from its 2- or 3-byte on-disk form (RGB565, plus an
-// alpha byte for a transparent asset) -- never more of the image than that.
-// An STI2 payload: the 12-byte header, one u32 offset per row (counted from
-// the end of the table), then the rows. The table must fit, and every offset
-// must point into the row data without going backwards (rows may share
-// data). Read in small pieces: this also runs when a package is listed.
-bool Package::checkRowTable(const Entry& e) const {
-  const uint32_t table = 4u * e.height;
-  if (e.length < 12 + table + 1) return false;
-  const uint32_t data = e.length - 12 - table;
-  uint8_t b[16];
-  uint32_t previous = 0;
-  for (uint32_t row = 0; row < e.height; row += 4) {
-    const uint32_t n = std::min<uint32_t>(4, e.height - row);
-    if (!source_.read(e.offset + 12 + 4 * row, b, 4 * n)) return false;
-    for (uint32_t i = 0; i < n; ++i) {
-      const uint32_t at = u32(b + 4 * i);
-      if (at >= data || at < previous) return false;
-      previous = at;
-    }
-  }
-  return true;
-}
 namespace {
 // Reads a package byte by byte through a 64-byte window: row() runs while a
 // frame is drawn, when little loop stack is left (a whole 240-pixel row was
@@ -216,46 +195,106 @@ class Reader {
   uint8_t buf_[64];
   uint8_t len_ = 0, pos_ = 0;
 };
+// Walks an STI2 row's runs up to column `stop` and keeps the pixels from `x`
+// on; with `colors` null it only checks them. A run's first byte holds its
+// kind in the top two bits and its length minus one in the rest: 00
+// transparent (only in an image with alpha), 01 one pixel repeated, 10 that
+// many literal pixels; 11 is reserved. With a palette a pixel is an index
+// below its size: one byte in a repeat, two per byte in a literal (high
+// nibble first, an odd run's unused low nibble 0). A run that goes past the
+// row, or data that ends early, fails the row.
+bool walkRow(Reader& reader, uint8_t stride, uint8_t palette, int width, const uint16_t* paletteColor,
+             const uint8_t* paletteAlpha, int x, int stop, uint16_t* colors, uint8_t* alpha) {
+  for (int px = 0; px < stop;) {
+    uint8_t head;
+    if (!reader.byte(head)) return false;
+    const int kind = head >> 6, length = (head & 63) + 1;
+    if (kind == 3 || (kind == 0 && stride != 3) || px + length > width) return false;
+    uint16_t color = 0;
+    uint8_t a = 0, pair = 0;
+    for (int i = 0; i < length; ++i) {
+      if (kind == 2 || (kind == 1 && i == 0)) {
+        if (!palette) {
+          if (!reader.pixel(stride, color, a)) return false;
+        } else {
+          uint8_t index;
+          if (kind == 1) {
+            if (!reader.byte(index)) return false;
+          } else if (i % 2 == 0) {
+            if (!reader.byte(pair) || (i + 1 == length && (pair & 15))) return false;
+            index = pair >> 4;
+          } else {
+            index = pair & 15;
+          }
+          if (index >= palette) return false;
+          if (paletteColor) {
+            color = paletteColor[index];
+            a = paletteAlpha[index];
+          }
+        }
+      }
+      if (colors && px + i >= x && px + i < stop) {
+        colors[px + i - x] = color;
+        alpha[px + i - x] = a;
+      }
+    }
+    px += length;
+  }
+  return true;
+}
+}
+// An STI2 payload: the 12-byte header, the palette, one u32 offset per row
+// (counted from the end of the table), then the rows. Every offset must point
+// into the row data without going backwards; rows with equal offsets share
+// data. Each distinct row must cover the width exactly without reading past
+// the next larger offset (or the end), so row() can trust what it reads.
+// Read in small pieces: this also runs when a package is listed.
+bool Package::checkRows(const Entry& e) const {
+  const uint32_t table = 12 + uint32_t(e.palette) * e.stride, rows = table + 4u * e.height;
+  if (e.length < rows + 1) return false;
+  const uint32_t data = e.length - rows;
+  uint32_t start = 0;
+  for (uint32_t y = 0; y <= e.height; ++y) {
+    uint32_t at = data;   // after the last row: its limit is the end
+    if (y < e.height) {
+      uint8_t b[4];
+      if (!source_.read(e.offset + table + 4 * y, b, 4)) return false;
+      at = u32(b);
+      if (at >= data || at < start) return false;
+      if (y > 0 && at == start) continue;   // shares the row above
+    }
+    if (y > 0) {
+      Reader reader(source_, e.offset + rows + start, e.offset + rows + at);
+      if (!walkRow(reader, e.stride, e.palette, e.width, nullptr, nullptr, 0, e.width, nullptr, nullptr)) return false;
+    }
+    start = at;
+  }
+  return true;
 }
 // Reads exactly the `count` pixels of row `y` starting at column `x`. STI1
-// rows are raw pixels (RGB565, plus an alpha byte for a transparent asset).
-// STI2 rows are runs; a run's first byte holds its kind in the top two bits
-// and its length minus one in the rest: 00 transparent, 01 one pixel
-// repeated, 10 that many literal pixels. Runs before `x` are skipped, and a
-// run that goes past the row, or data that ends early, fails the row.
+// rows are raw pixels (RGB565, plus an alpha byte for a transparent asset);
+// STI2 rows are runs (see walkRow()). Runs before `x` are skipped.
 bool Package::row(AssetHandle handle, int y, int x, int count, uint16_t* colors, uint8_t* alpha) {
   if (handle >= entries_.size()) return false;
   const Entry* e = &entries_[handle];
   if (!e->stride || x < 0 || y < 0 || y >= e->height || count < 0 || count > 240 || x + count > e->width) return false;
-  const uint32_t end = e->offset + e->length;
   if (!e->compressed) {
     const uint32_t at = e->offset + 12 + (uint32_t(y) * e->width + x) * e->stride;
     Reader reader(source_, at, at + uint32_t(count) * e->stride);
     for (int i = 0; i < count; ++i) if (!reader.pixel(e->stride, colors[i], alpha[i])) return false;
     return true;
   }
-  uint8_t b[4];
-  if (!source_.read(e->offset + 12 + 4u * y, b, 4)) return false;
-  Reader reader(source_, e->offset + 12 + 4u * e->height + u32(b), end);
-  const int stop = x + count;
-  for (int px = 0; px < stop;) {
-    uint8_t head;
-    if (!reader.byte(head)) return false;
-    const int kind = head >> 6, length = (head & 63) + 1;
-    if (kind == 3 || px + length > e->width) return false;
-    uint16_t color = 0;
-    uint8_t a = 0;
-    if (kind == 1 && !reader.pixel(e->stride, color, a)) return false;
-    for (int i = px; i < px + length; ++i) {
-      if (kind == 2 && !reader.pixel(e->stride, color, a)) return false;
-      if (i >= x && i < stop) {
-        colors[i - x] = color;
-        alpha[i - x] = a;
-      }
-    }
-    px += length;
+  const uint32_t table = e->offset + 12 + uint32_t(e->palette) * e->stride;
+  uint16_t paletteColor[16];
+  uint8_t paletteAlpha[16];
+  {
+    Reader reader(source_, e->offset + 12, table);   // one read: at most 48 bytes
+    for (uint8_t i = 0; i < e->palette; ++i) if (!reader.pixel(e->stride, paletteColor[i], paletteAlpha[i])) return false;
   }
-  return true;
+  uint8_t b[4];
+  if (!source_.read(table + 4u * y, b, 4)) return false;
+  Reader reader(source_, table + 4u * e->height + u32(b), e->offset + e->length);
+  return walkRow(reader, e->stride, e->palette, e->width, paletteColor, paletteAlpha, x, x + count, colors, alpha);
 }
 }
 #endif
