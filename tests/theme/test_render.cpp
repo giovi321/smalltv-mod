@@ -107,13 +107,13 @@ static Layer rotationLayer(Shape shape) {
   return l;
 }
 static Layer arcLayer(int radius,int start,int sweep,int strokeWidth) {
-  Layer l=rotationLayer(Shape::Arc);l.radius=radius;l.angle=start;l.sweep=sweep;l.strokeWidth=strokeWidth;return l;
+  Layer l=rotationLayer(Shape::Arc);l.radius=radius;l.x2=start;l.y2=sweep;l.strokeWidth=strokeWidth;return l;
 }
 static Layer handLayer(int length,int tail,int angle,int strokeWidth) {
-  Layer l=rotationLayer(Shape::Hand);l.length=length;l.tail=tail;l.angle=angle;l.strokeWidth=strokeWidth;return l;
+  Layer l=rotationLayer(Shape::Hand);l.radius=length;l.cornerRadius=tail;l.x2=angle;l.strokeWidth=strokeWidth;return l;
 }
 static Layer ticksLayer(int radius,int count,int length,int strokeWidth) {
-  Layer l=rotationLayer(Shape::Ticks);l.radius=radius;l.count=count;l.length=length;l.strokeWidth=strokeWidth;return l;
+  Layer l=rotationLayer(Shape::Ticks);l.radius=radius;l.x2=count;l.y2=length;l.strokeWidth=strokeWidth;return l;
 }
 static void renderOne(const Layer& layer,Pixels& d) {
   Theme theme;theme.spec=2;theme.background=0;theme.layers={layer};

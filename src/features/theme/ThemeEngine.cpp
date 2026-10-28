@@ -1167,13 +1167,13 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
       // Every pixel of an arc, hand or tick is `stroke`; `fill` is not a key.
       if (shape == "arc") {
         l.shape = Shape::Arc;
-        if (!f.number("radius", 1, 240, l.radius) || !f.number("start", -360, 360, l.angle) || !f.number("sweep", -360, 360, l.sweep)) return false;
+        if (!f.number("radius", 1, 240, l.radius) || !f.number("start", -360, 360, l.x2) || !f.number("sweep", -360, 360, l.y2)) return false;
       } else if (shape == "hand") {
         l.shape = Shape::Hand;
-        if (!f.number("length", 1, 240, l.length) || !f.number("tail", 0, 240, l.tail, false) || !f.number("angle", -360, 360, l.angle)) return false;
+        if (!f.number("length", 1, 240, l.radius) || !f.number("tail", 0, 240, l.cornerRadius, false) || !f.number("angle", -360, 360, l.x2)) return false;
       } else {
         l.shape = Shape::Ticks;
-        if (!f.number("radius", 1, 240, l.radius) || !f.number("count", 1, 60, l.count) || !f.number("length", 1, 240, l.length)) return false;
+        if (!f.number("radius", 1, 240, l.radius) || !f.number("count", 1, 60, l.x2) || !f.number("length", 1, 240, l.y2)) return false;
       }
     } else if (shape == "rectangle") {
       if (!f.number("width", 1, 240, l.width) || !f.number("height", 1, 240, l.height)) return false;
@@ -1281,8 +1281,6 @@ void Engine::resolveLayer(size_t index) {
   resolved.color = layer.color;
   resolved.fill = layer.fill;
   resolved.stroke = layer.stroke;
-  resolved.angle = layer.angle;
-  resolved.sweep = layer.sweep;
   for (const auto& binding : layer.bindings) {
     double value = 0;
     if (binding.builtin == BuiltIn::None || binding.builtin == BuiltIn::Device) {
@@ -1321,8 +1319,8 @@ void Engine::resolveLayer(size_t index) {
       case BoundProperty::StrokeWidth: resolved.strokeWidth = number; break;
       case BoundProperty::ScrollWidth: resolved.scrollWidth = number; break;
       case BoundProperty::ScrollSpeed: resolved.scrollSpeed = number; break;
-      case BoundProperty::Angle: resolved.angle = number; break;
-      case BoundProperty::Sweep: resolved.sweep = number; break;
+      case BoundProperty::Angle: resolved.x2 = number; break;
+      case BoundProperty::Sweep: resolved.y2 = number; break;
       default: break;
     }
   }
@@ -1429,8 +1427,7 @@ static bool sameGeometry(const ResolvedLayer& a, const ResolvedLayer& b) {
   return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height &&
     a.x2 == b.x2 && a.y2 == b.y2 && a.radius == b.radius &&
     a.cornerRadius == b.cornerRadius && a.size == b.size &&
-    a.strokeWidth == b.strokeWidth && a.scrollWidth == b.scrollWidth &&
-    a.angle == b.angle && a.sweep == b.sweep;
+    a.strokeWidth == b.strokeWidth && a.scrollWidth == b.scrollWidth;
 }
 static bool sameColors(const ResolvedLayer& a, const ResolvedLayer& b) {
   return a.color == b.color && a.fill == b.fill && a.stroke == b.stroke;
@@ -1490,23 +1487,23 @@ struct Segment {
 // renderer and bounds() both come here, so the box always holds the ink.
 static Segment handSegment(const Layer& l, const ResolvedLayer& r) {
   int dx, dy;
-  direction(r.angle * 16, dx, dy);
-  return Segment{r.x - roundQ14(dx * l.tail), r.y - roundQ14(dy * l.tail),
-    r.x + roundQ14(dx * l.length), r.y + roundQ14(dy * l.length)};
+  direction(r.x2 * 16, dx, dy);
+  return Segment{r.x - roundQ14(dx * l.cornerRadius), r.y - roundQ14(dy * l.cornerRadius),
+    r.x + roundQ14(dx * l.radius), r.y + roundQ14(dy * l.radius)};
 }
 // Tick `k` of `count`: a radial segment from radius - length to radius.
 static Segment tickSegment(const Layer& l, const ResolvedLayer& r, int k) {
   int dx, dy;
-  direction((k * Turn16 + l.count / 2) / l.count, dx, dy);
-  const int inner = std::max(0, r.radius - l.length);
+  direction((k * Turn16 + l.x2 / 2) / l.x2, dx, dy);
+  const int inner = std::max(0, r.radius - l.y2);
   return Segment{r.x + roundQ14(dx * inner), r.y + roundQ14(dy * inner),
     r.x + roundQ14(dx * r.radius), r.y + roundQ14(dy * r.radius)};
 }
 // An arc's start in [0, Turn16) and its sweep, always clockwise from there
 // (a negative sweep is the same arc started at its far end).
 static void arcRange(const ResolvedLayer& r, int& start, int& sweep) {
-  start = r.angle * 16;
-  sweep = r.sweep * 16;
+  start = r.x2 * 16;
+  sweep = r.y2 * 16;
   if (sweep < 0) {
     start += sweep;
     sweep = -sweep;
@@ -1517,7 +1514,7 @@ static void arcRange(const ResolvedLayer& r, int& start, int& sweep) {
 // its sweep and, in the pad, the approximations' error. Only this box turns
 // dirty when the sweep changes.
 static Rect arcBounds(const ResolvedLayer& r) {
-  if (r.radius <= 0 || r.sweep == 0) return Rect(r.x, r.y, 0, 0);
+  if (r.radius <= 0 || r.y2 == 0) return Rect(r.x, r.y, 0, 0);
   int start, sweep;
   arcRange(r, start, sweep);
   int x0 = r.x - r.radius, x1 = r.x + r.radius, y0 = r.y - r.radius, y1 = r.y + r.radius;
@@ -1852,17 +1849,17 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
             const int dx = x - s.resolved.x, dy = y - s.resolved.y, dist = dx * dx + dy * dy;
             if (l.shape == Shape::Arc) {
               const int outer = s.resolved.radius, inner = std::max(0, outer - s.resolved.strokeWidth);
-              draw = s.resolved.sweep != 0 && dist <= outer * outer && (inner == 0 || dist > inner * inner) &&
+              draw = s.resolved.y2 != 0 && dist <= outer * outer && (inner == 0 || dist > inner * inner) &&
                 (arcSweep >= Turn16 || wrap16(pixelAngle16(dx, dy) - arcStart) <= arcSweep);
             } else if (l.shape == Shape::Hand) {
               draw = linePixel(hand.x0, hand.y0, hand.x1, hand.y1, s.resolved.strokeWidth, x, y);
             } else {
               // Only the tick nearest in angle can reach this pixel: the
               // distance to a radial line grows with the angle away from it.
-              const int pad = (s.resolved.strokeWidth + 1) / 2 + 1, near = std::max(0, s.resolved.radius - l.length - pad),
+              const int pad = (s.resolved.strokeWidth + 1) / 2 + 1, near = std::max(0, s.resolved.radius - l.y2 - pad),
                 far = s.resolved.radius + pad;
               if (dist <= far * far && dist >= near * near) {
-                const int k = ((pixelAngle16(dx, dy) * l.count + Turn16 / 2) / Turn16) % l.count;
+                const int k = ((pixelAngle16(dx, dy) * l.x2 + Turn16 / 2) / Turn16) % l.x2;
                 if (k != tickIndex) {
                   tickIndex = k;
                   tick = tickSegment(l, s.resolved, k);

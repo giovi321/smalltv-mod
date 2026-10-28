@@ -231,11 +231,11 @@ int main() {
     // Spec 1 refuses all three, with a reason that names the spec.
     for(const std::string& s:{arc,hand,ticks}) {assert(!rot(1,s));assert(lastError.find("need \"spec\": 2")!=std::string::npos);}
     // Spec 2 accepts them and keeps every field.
-    assert(rot(2,arc,&t2));assert(t2.layers[0].shape==Shape::Arc&&t2.layers[0].radius==100&&t2.layers[0].angle==0&&t2.layers[0].sweep==90&&t2.layers[0].strokeWidth==1);
-    assert(rot(2,hand,&t2));assert(t2.layers[0].shape==Shape::Hand&&t2.layers[0].length==90&&t2.layers[0].tail==10&&t2.layers[0].angle==45&&t2.layers[0].strokeWidth==3);
-    assert(rot(2,ticks,&t2));assert(t2.layers[0].shape==Shape::Ticks&&t2.layers[0].radius==110&&t2.layers[0].count==12&&t2.layers[0].length==10);
+    assert(rot(2,arc,&t2));assert(t2.layers[0].shape==Shape::Arc&&t2.layers[0].radius==100&&t2.layers[0].x2==0&&t2.layers[0].y2==90&&t2.layers[0].strokeWidth==1);
+    assert(rot(2,hand,&t2));assert(t2.layers[0].shape==Shape::Hand&&t2.layers[0].radius==90&&t2.layers[0].cornerRadius==10&&t2.layers[0].x2==45&&t2.layers[0].strokeWidth==3);
+    assert(rot(2,ticks,&t2));assert(t2.layers[0].shape==Shape::Ticks&&t2.layers[0].radius==110&&t2.layers[0].x2==12&&t2.layers[0].y2==10);
     // A hand's tail is optional and defaults to 0; the other fields are required.
-    assert(rot(2,"\"shape\":\"hand\",\"length\":50,\"angle\":0,\"stroke\":\"#ffffff\"",&t2)&&t2.layers[0].tail==0);
+    assert(rot(2,"\"shape\":\"hand\",\"length\":50,\"angle\":0,\"stroke\":\"#ffffff\"",&t2)&&t2.layers[0].cornerRadius==0);
     assert(!rot(2,"\"shape\":\"hand\",\"angle\":0,\"stroke\":\"#ffffff\""));
     assert(!rot(2,"\"shape\":\"hand\",\"length\":50,\"stroke\":\"#ffffff\""));
     assert(!rot(2,"\"shape\":\"arc\",\"radius\":50,\"sweep\":10,\"stroke\":\"#ffffff\""));

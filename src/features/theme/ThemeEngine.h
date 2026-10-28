@@ -100,7 +100,6 @@ struct Binding {
 struct ResolvedLayer {
   Coord x = 0, y = 0, width = 0, height = 0, x2 = 0, y2 = 0, radius = 0, cornerRadius = 0;
   Coord size = 16, strokeWidth = 1, scrollWidth = 0, scrollSpeed = 0;
-  Coord angle = 0, sweep = 0;
   uint16_t color = 0xffff, fill = 0, stroke = 0;
 };
 bool parseFiniteNumber(const std::string& value, double& number);
@@ -116,12 +115,12 @@ struct Layer {
   LayerType type = LayerType::Text;
   Shape shape = Shape::Rectangle;
   Coord x = 0, y = 0, width = 0, height = 0, x2 = 0, y2 = 0, radius = 0;
+  // The rotation shapes (spec 2) reuse fields rather than add their own, since
+  // every running layer carries a Layer and a LayerState: arc is radius, x2 =
+  // start, y2 = sweep; hand is radius = length, cornerRadius = tail, x2 = angle;
+  // ticks is radius, x2 = count, y2 = length. A binding writes the resolved x2/y2.
   Coord size = 16, strokeWidth = 1, cornerRadius = 0;
   uint8_t anchorX = 0, anchorY = 0;
-  // Rotation shapes. `angle` is an arc's start or a hand's direction; `length`
-  // is a hand's or a tick's, and `tail` a hand's reach behind its pivot.
-  Coord angle = 0, sweep = 0;
-  uint8_t length = 0, tail = 0, count = 0;
   uint16_t color = 0xffff, fill = 0, stroke = 0;
   bool hasFill = false, hasStroke = false, loop = true;
   bool timeBound = false;   // some binding reads a time.* source
