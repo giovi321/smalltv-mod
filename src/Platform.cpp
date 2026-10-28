@@ -34,10 +34,10 @@ void platformOnTimeSync(void (*cb)()) {
 }
 
 // ---- crash record in RTC user memory ---------------------------------------
-// The RTC block has 128 user words (512 B). Nothing else in the firmware or its
-// libraries touches it (the core keeps its own state in the system words ahead
-// of the user area), so the record sits at word 96, clear of the low offsets
-// that other code tends to pick first. It is 11 words, ending at word 107.
+// The RTC block has 128 user words (512 B). The core's OTA hand-off to eboot
+// (struct eboot_command, at 0x60001200) occupies user words 64-95, so the
+// record sits right after it, at word 96, also clear of the low offsets that
+// other code tends to pick first. It is 11 words, ending at word 107.
 //
 // Written only on an abnormal reset: custom_crash_callback() covers exceptions
 // and the software watchdog and is the only place the uptime is still known;
