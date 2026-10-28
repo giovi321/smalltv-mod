@@ -159,7 +159,9 @@ This utility converts image pixels on your computer. The device reads RGB565
 assets directly; it does not decode PNG/GIF/TTF. The package stores the same
 manifest values, including logical source paths. A future compiler can replace
 the asset provider without changing those paths. GIF extraction, custom fonts,
-compression, and advanced compiler features are not implemented in V1.
+and advanced compiler features are not implemented in V1. Images are stored
+compressed (STI2, see [Device package format](#device-package-format)) only in
+a theme with `"spec": 2`.
 
 ## Manifest
 
@@ -175,7 +177,10 @@ compression, and advanced compiler features are not implemented in V1.
 }
 ```
 
-All fields shown at the root, in `theme`, and in `display` are required. The
+All fields shown at the root, in `theme`, and in `display` are required.
+`spec` is 1 or 2. Spec 2 lets the packer store images as STI2, which is much
+smaller for images with transparent areas or few colours; firmware up to
+3.1.0 refuses a spec 2 theme. A spec 1 theme packs exactly as before. The
 canvas is always 240×240 with the origin at the top left. Coordinates and sizes
 are integer pixels. Layers draw in array order, back to front; IDs must be unique.
 Unknown fields, unsupported types, invalid values, and unknown text variables are
@@ -564,6 +569,39 @@ The asset resolver appends `.sti` to an image's logical `source`, or resolves
 Alpha 0 is transparent, 255 opaque. Intermediate values blend RGB565 channels
 with rounding. Opaque files use two bytes/pixel, transparent files three. The
 payload length must match the dimensions exactly.
+
+A theme with `"spec": 2` may also contain STI2 images, which store each row as
+runs. The packer writes whichever is smallest per image: STI1, STI2 with
+RGB565 colours, or STI2 with a palette of up to 16 colours. A spec 1 package
+with an STI2 image is rejected, with the image named.
+
+| STI2 field | Encoding |
+| --- | --- |
+| Magic | Four ASCII bytes `STI2` |
+| Width, height | Two `uint16`, each 1–240 |
+| Alpha flag | `uint8`: 0 for opaque, 1 for alpha |
+| Palette size `P` | `uint8`: 0 for RGB565 colours, 1–16 for a palette |
+| Reserved | Two zero bytes |
+| Palette | `P` colours: RGB565 `uint16`, followed by alpha `uint8` if flag=1 |
+| Row table | One `uint32` per row: where the row starts, counted from the end of the table |
+| Rows | Each row as runs |
+
+Offsets never go backwards; rows with equal offsets share their data. A row
+ends at the next larger offset, or at the end of the image. A run starts with
+one byte: its kind in the top two bits, its length minus one (1–64 pixels) in
+the low six:
+
+| Kind | Run |
+| --- | --- |
+| `00` | Transparent pixels, no payload; only in an image with alpha |
+| `01` | One colour repeated: RGB565 (+ alpha), or with a palette one index byte |
+| `10` | That many colours: RGB565 (+ alpha) each, or with a palette two 4-bit indices per byte, high nibble first; the unused low nibble of an odd run is 0 |
+| `11` | Reserved; the image is rejected |
+
+The device checks every row when the package is installed or loaded: the runs
+of a row must cover its width exactly without reading past the row's end, and
+every index must be below `P`. The shared test files in `tests/theme/sti/`
+show every form with the pixels it must decode to.
 
 ## HTTP API
 
