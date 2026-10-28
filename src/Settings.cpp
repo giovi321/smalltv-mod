@@ -4,6 +4,9 @@
 #include <LittleFS.h>
 
 static const char* CONFIG_PATH = "/config.json";
+// Bytes in CONFIG_PATH as last read or written: what the next save needs on
+// the filesystem, known without building the settings document again.
+static size_t g_storedSize = 0;
 
 // ===========================================================================
 // Ticker slice
@@ -487,6 +490,7 @@ bool loadSettings(Settings& s) {
   s.setDefaults();
   File f = LittleFS.open(CONFIG_PATH, "r");
   if (!f) return false;
+  g_storedSize = f.size();
 
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, f);
@@ -504,13 +508,18 @@ bool saveSettings(const Settings& s) {
 
   // Never truncate the working settings when a full disk or interrupted
   // save prevents writing the replacement.
-  return saveJsonAtomically(LittleFS, doc, CONFIG_PATH, "/config.json.tmp");
+  if (!saveJsonAtomically(LittleFS, doc, CONFIG_PATH, "/config.json.tmp")) return false;
+  g_storedSize = measureJson(doc);   // saveJsonAtomically() wrote exactly this
+  return true;
 }
 
 void factoryReset(Settings& s) {
   LittleFS.remove(CONFIG_PATH);
+  g_storedSize = 0;
   s.setDefaults();
 }
+
+size_t settingsStoredSize() { return g_storedSize; }
 
 // ---------------------------------------------------------------------------
 void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {

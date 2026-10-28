@@ -63,8 +63,15 @@ void writeMeta(const String& id, const smalltv::InstalledTheme& entry) {
 }
 unsigned installedCount() {
   unsigned count = 0;
+#if defined(SMALLTV_ESP8266)
+  // Reads the directory entries only. openNextFile() opens every file in
+  // turn, and this runs at the start of an upload, when heap is shortest.
+  Dir dir = LittleFS.openDir("/themes");
+  while (dir.next()) if (dir.isFile() && dir.fileName().endsWith(".stheme")) ++count;
+#else
   File dir = LittleFS.open("/themes", "r");
   for (File f = dir.openNextFile(); f; f = dir.openNextFile()) if (!f.isDirectory() && String(f.name()).endsWith(".stheme")) ++count;
+#endif
   return count;
 }
 void resetUpload() {
@@ -105,18 +112,19 @@ void receiveUpload() {
       uploadError = "Remove a theme first (limit 16)";
       return;
     }
-    // Receiving a package needs the receive buffers, the settings document
-    // below and the staging file at once, and then a package parse. On the
-    // ESP8266 that did not fit beside a running theme (a 16-byte allocation
-    // failed here with 160 B free), so an install always frees it.
+    // Receiving a package needs the receive buffers and the staging file at
+    // once, and then a package parse. On the ESP8266 that did not fit beside
+    // a running theme (a 16-byte allocation failed here with 160 B free), so
+    // an install always frees it; there the hook in themeWebBegin() has freed
+    // it already.
     g_themeMode.release(UINT32_MAX);
     LittleFS.remove(staging);
     // Preserve room for a settings rewrite plus filesystem metadata overhead,
     // so a large upload cannot leave too little space for the device to save
-    // its own configuration afterward.
-    JsonDocument config;
-    settingsToJson(*settings, config.to<JsonObject>(), true);
-    size_t reserve = measureJson(config) + 4096;
+    // its own configuration afterward. The size of the last save stands in
+    // for the next one: building the settings document here to measure it
+    // took the ESP8266's heap down to 896 B at an install's tightest point.
+    size_t reserve = settingsStoredSize() + 4096;
     if (reserve < 16384) reserve = 16384;
     size_t free = freeBytes();
     if (free <= reserve) {
@@ -393,5 +401,17 @@ void themeWebBegin(WebServerClass& web, Settings& s, bool (*requireAuth)()) {
   web.on("/api/themes/install", HTTP_POST, finishUpload, receiveUpload);
   web.on("/api/themes/select", HTTP_POST, selectTheme);
   web.on("/api/themes/delete", HTTP_POST, deleteTheme);
+#if defined(SMALLTV_ESP8266)
+  // The web server reserves its 2 KB upload buffer before the first call to
+  // receiveUpload(), so the release there comes too late: beside a running
+  // theme the heap fell to 512 B at that point, and the Wi-Fi driver crashed
+  // on an empty heap. This hook runs once the request line is read, before
+  // the headers and the body, so an install frees the theme first. (The
+  // ESP32 WebServer has no hooks, and has the heap.)
+  web.addHook([](const String& method, const String& url, WiFiClient*, WebServerClass::ContentTypeFunction) {
+    if (method == "POST" && url == "/api/themes/install") g_themeMode.release(UINT32_MAX);
+    return WebServerClass::CLIENT_REQUEST_CAN_CONTINUE;
+  });
+#endif
 }
 #endif
