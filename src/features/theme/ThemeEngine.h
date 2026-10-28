@@ -33,7 +33,9 @@ bool validPath(const std::string& path);
 using Coord = int16_t;
 
 enum class LayerType : uint8_t { Text, Image, Animation, Shape };
-enum class Shape : uint8_t { Rectangle, Circle, Line };
+// Arc, Hand and Ticks are spec 2 (#31). Angles are whole degrees, 0 at 12 o'clock
+// and growing clockwise.
+enum class Shape : uint8_t { Rectangle, Circle, Line, Arc, Hand, Ticks };
 enum class ScrollMode : uint8_t { Loop, Bounce };
 
 // Declared on a text layer to scroll content wider than its viewport. `width`
@@ -49,7 +51,7 @@ struct Scroll {
 // type is enforced by `applicable()` in the .cpp, not by this enum.
 enum class BoundProperty : uint8_t {
   X, Y, Width, Height, Radius, CornerRadius, X2, Y2, Size, StrokeWidth,
-  ScrollWidth, ScrollSpeed, Color, Fill, Stroke
+  ScrollWidth, ScrollSpeed, Color, Fill, Stroke, Angle, Sweep
 };
 
 // Linear map from a fetched number to an integer property. See
@@ -98,6 +100,7 @@ struct Binding {
 struct ResolvedLayer {
   Coord x = 0, y = 0, width = 0, height = 0, x2 = 0, y2 = 0, radius = 0, cornerRadius = 0;
   Coord size = 16, strokeWidth = 1, scrollWidth = 0, scrollSpeed = 0;
+  Coord angle = 0, sweep = 0;
   uint16_t color = 0xffff, fill = 0, stroke = 0;
 };
 bool parseFiniteNumber(const std::string& value, double& number);
@@ -115,6 +118,10 @@ struct Layer {
   Coord x = 0, y = 0, width = 0, height = 0, x2 = 0, y2 = 0, radius = 0;
   Coord size = 16, strokeWidth = 1, cornerRadius = 0;
   uint8_t anchorX = 0, anchorY = 0;
+  // Rotation shapes. `angle` is an arc's start or a hand's direction; `length`
+  // is a hand's or a tick's, and `tail` a hand's reach behind its pivot.
+  Coord angle = 0, sweep = 0;
+  uint8_t length = 0, tail = 0, count = 0;
   uint16_t color = 0xffff, fill = 0, stroke = 0;
   bool hasFill = false, hasStroke = false, loop = true;
   bool timeBound = false;   // some binding reads a time.* source

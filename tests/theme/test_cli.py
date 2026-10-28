@@ -37,6 +37,31 @@ class ThemeCliTests(unittest.TestCase):
             self.assertIn('layers[0].color:', result.stderr)
             self.assertFalse((source/'bad.stheme').exists())
 
+    def test_rotation_shapes_need_spec_2(self):
+        layers = [
+            {'id': 'ring', 'type': 'shape', 'shape': 'arc', 'x': 120, 'y': 120, 'radius': 100,
+             'start': 0, 'sweep': 270, 'stroke': '#47c2ff', 'strokeWidth': 10},
+            {'id': 'hand', 'type': 'shape', 'shape': 'hand', 'x': 120, 'y': 120, 'length': 90,
+             'tail': 20, 'angle': 45, 'stroke': '#ffffff', 'strokeWidth': 4},
+            {'id': 'dial', 'type': 'shape', 'shape': 'ticks', 'x': 120, 'y': 120, 'radius': 112,
+             'count': 12, 'length': 10, 'stroke': '#8a8a8a', 'strokeWidth': 3}]
+        for spec in (2, 1):
+            with self.subTest(spec=spec), tempfile.TemporaryDirectory() as d:
+                source = Path(d)
+                (source/'theme.json').write_text(json.dumps({
+                    'spec': spec,
+                    'theme': {'id': 'dials', 'name': 'Dials', 'author': 'Test', 'version': '1'},
+                    'display': {'width': 240, 'height': 240, 'background': '#000000'},
+                    'layers': layers}))
+                result = self.run_cli('build', source, source/'dials.stheme')
+                if spec == 2:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue((source/'dials.stheme').exists())
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('need "spec": 2', result.stderr)
+                    self.assertFalse((source/'dials.stheme').exists())
+
     def test_preview_is_standalone_and_escapes_metadata(self):
         with tempfile.TemporaryDirectory() as d:
             output = Path(d)/'preview.html'

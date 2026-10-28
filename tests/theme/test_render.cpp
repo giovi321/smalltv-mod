@@ -1,6 +1,9 @@
 #include "ThemeEngine.h"
 #include <cassert>
+#include <algorithm>
+#include <cmath>
 #include <iostream>
+#include <vector>
 using namespace smalltv;
 struct Pixels : Display {
  uint16_t data[240*240]{};int writes=0;
@@ -98,8 +101,157 @@ static void testRoundedRectRendering() {
   assert(e.states()[0].resolved.cornerRadius==2);
   assert(d.data[4]==0x0000);
 }
+// ---- Rotation shapes (#31 item 2) ----
+static Layer rotationLayer(Shape shape) {
+  Layer l;l.type=LayerType::Shape;l.shape=shape;l.x=120;l.y=120;l.hasStroke=true;l.stroke=0xf800;l.strokeWidth=1;
+  return l;
+}
+static Layer arcLayer(int radius,int start,int sweep,int strokeWidth) {
+  Layer l=rotationLayer(Shape::Arc);l.radius=radius;l.angle=start;l.sweep=sweep;l.strokeWidth=strokeWidth;return l;
+}
+static Layer handLayer(int length,int tail,int angle,int strokeWidth) {
+  Layer l=rotationLayer(Shape::Hand);l.length=length;l.tail=tail;l.angle=angle;l.strokeWidth=strokeWidth;return l;
+}
+static Layer ticksLayer(int radius,int count,int length,int strokeWidth) {
+  Layer l=rotationLayer(Shape::Ticks);l.radius=radius;l.count=count;l.length=length;l.strokeWidth=strokeWidth;return l;
+}
+static void renderOne(const Layer& layer,Pixels& d) {
+  Theme theme;theme.spec=2;theme.background=0;theme.layers={layer};
+  Engine e;Images assets;e.setTheme(theme,0);
+  assert(render(e,e.update(0,nullptr),assets,d));
+}
+static bool ink(const Pixels& d,int x,int y) { return d.data[y*240+x]!=0; }
+// True if any pixel within one of (x, y) is drawn: the shapes are within a pixel of the ideal ones.
+static bool inkNear(const Pixels& d,int x,int y) {
+  for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx) if(ink(d,x+dx,y+dy)) return true;
+  return false;
+}
+static void testRotationShapes() {
+  static Pixels d;
+  // Hand: 0 is 12 o'clock and angles grow clockwise; the tail reaches behind the pivot.
+  renderOne(handLayer(50,10,0,3),d);
+  assert(ink(d,120,120)&&ink(d,120,70)&&ink(d,120,95)&&ink(d,120,130));
+  assert(!ink(d,120,66)&&!ink(d,120,135)&&!ink(d,140,100)&&!ink(d,100,100));
+  renderOne(handLayer(50,10,90,3),d);
+  assert(ink(d,170,120)&&ink(d,110,120)&&!ink(d,120,100)&&!ink(d,120,140)&&!ink(d,176,120));
+  renderOne(handLayer(50,0,180,3),d);
+  assert(ink(d,120,170)&&!ink(d,120,110));
+  renderOne(handLayer(50,0,270,3),d);
+  assert(ink(d,70,120)&&!ink(d,130,120));
+  renderOne(handLayer(50,0,-90,3),d);       // negative angles wrap
+  assert(ink(d,70,120));
+  renderOne(handLayer(50,0,360,3),d);
+  assert(ink(d,120,70)&&!ink(d,170,120));
+  // Every degree lands within a pixel of the exact direction, and its ink stays inside its box.
+  for(int angle=0;angle<360;++angle) {
+    Theme theme;theme.spec=2;theme.layers={handLayer(100,20,angle,3)};
+    Engine e;Images assets;e.setTheme(theme,0);auto dirty=e.update(0,nullptr);assert(render(e,dirty,assets,d));
+    const double a=angle*3.14159265358979/180;
+    assert(inkNear(d,int(120+100*std::sin(a)+0.5),int(120-100*std::cos(a)+0.5)));
+    assert(inkNear(d,int(120-20*std::sin(a)+0.5),int(120+20*std::cos(a)+0.5)));
+    const Rect box=e.states()[0].bounds;
+    for(int y=0;y<240;++y) for(int x=0;x<240;++x) if(ink(d,x,y)) assert(x>=box.x&&x<box.x+box.w&&y>=box.y&&y<box.y+box.h);
+  }
+  // Arc: a ring of strokeWidth inside `radius`, from `start` clockwise over `sweep`.
+  renderOne(arcLayer(50,0,90,4),d);
+  assert(ink(d,155,85)&&ink(d,120,70)&&ink(d,170,120)&&ink(d,121,71));
+  assert(!ink(d,85,85)&&!ink(d,155,155)&&!ink(d,85,155)&&!ink(d,120,120)&&!ink(d,150,90)&&!ink(d,120,50));
+  renderOne(arcLayer(50,0,-90,4),d);        // negative sweep runs counter-clockwise
+  assert(ink(d,85,85)&&!ink(d,155,85)&&!ink(d,155,155));
+  renderOne(arcLayer(50,270,180,4),d);      // 9 o'clock over the top to 3 o'clock
+  assert(ink(d,120,70)&&ink(d,70,120)&&ink(d,170,120)&&!ink(d,120,170));
+  renderOne(arcLayer(50,350,20,4),d);       // across the 12 o'clock seam
+  assert(ink(d,120,70)&&ink(d,115,71)&&ink(d,125,71)&&!ink(d,170,120)&&!ink(d,70,120));
+  renderOne(arcLayer(50,-10,20,4),d);       // a negative start wraps the same way
+  assert(ink(d,120,70)&&!ink(d,170,120));
+  renderOne(arcLayer(50,0,360,4),d);
+  assert(ink(d,120,70)&&ink(d,170,120)&&ink(d,120,170)&&ink(d,70,120)&&!ink(d,120,120)&&!ink(d,120,100));
+  renderOne(arcLayer(50,90,-360,4),d);
+  assert(ink(d,120,70)&&ink(d,70,120));
+  renderOne(arcLayer(50,0,0,4),d);          // sweep 0 draws nothing
+  for(int i=0;i<240*240;++i) assert(d.data[i]==0);
+  renderOne(arcLayer(10,0,180,10),d);       // strokeWidth >= radius is a filled wedge
+  assert(ink(d,120,120)&&ink(d,125,120)&&!ink(d,115,120));
+  // Ticks: `count` marks from 12 o'clock, each `length` long, ending on `radius`.
+  renderOne(ticksLayer(50,4,10,1),d);
+  assert(ink(d,120,70)&&ink(d,120,75)&&ink(d,170,120)&&ink(d,165,120)&&ink(d,120,170)&&ink(d,70,120));
+  assert(!ink(d,120,120)&&!ink(d,120,85)&&!ink(d,155,85)&&!ink(d,85,85)&&!ink(d,120,64));
+  renderOne(ticksLayer(50,12,10,1),d);
+  assert(inkNear(d,int(120+45*0.5+0.5),int(120-45*0.866+0.5))&&inkNear(d,int(120+45*0.866+0.5),int(120-45*0.5+0.5)));
+  renderOne(ticksLayer(50,1,10,1),d);       // one tick, at 12 o'clock
+  assert(ink(d,120,70)&&!ink(d,170,120)&&!ink(d,120,170));
+  renderOne(ticksLayer(50,60,6,1),d);       // the densest dial still draws every mark
+  for(int k=0;k<60;++k) {
+    const double a=k*6*3.14159265358979/180;
+    assert(inkNear(d,int(120+47*std::sin(a)+0.5),int(120-47*std::cos(a)+0.5)));
+  }
+  renderOne(ticksLayer(30,12,100,2),d);     // a length beyond the radius reaches the center
+  assert(ink(d,120,92));
+}
+// Changing a hand's angle or an arc's sweep repaints only the old and new boxes, and
+// every incremental frame equals the same frame drawn from scratch.
+static void testRotationRedraw() {
+  static Pixels incremental, scratch;
+  Theme theme;theme.spec=2;theme.background=0x0010;
+  Layer bg;bg.type=LayerType::Shape;bg.shape=Shape::Rectangle;bg.width=240;bg.height=240;bg.hasFill=true;bg.fill=0x0010;
+  Layer arc=arcLayer(100,-90,0,10),hand=handLayer(90,25,0,5),minute=handLayer(60,0,0,3),ticks=ticksLayer(112,12,10,3);
+  arc.stroke=0x07e0;minute.stroke=0xffff;ticks.stroke=0x8410;
+  Binding sweep;sweep.property=BoundProperty::Sweep;sweep.source="d.sweep";sweep.numeric.input0=0;sweep.numeric.input1=100;sweep.numeric.output0=0;sweep.numeric.output1=360;
+  Binding angle;angle.property=BoundProperty::Angle;angle.source="d.angle";angle.numeric.input0=0;angle.numeric.input1=360;angle.numeric.output0=0;angle.numeric.output1=360;
+  Binding angle2=angle;angle2.source="d.minute";
+  Binding radius;radius.property=BoundProperty::Radius;radius.source="d.radius";radius.numeric.input0=0;radius.numeric.input1=100;radius.numeric.output0=0;radius.numeric.output1=100;
+  arc.bindings={sweep,radius};hand.bindings={angle};minute.bindings={angle2};
+  Layer text;text.type=LayerType::Text;text.value="{d.angle}";text.size=16;text.x=100;text.y=110;
+  theme.layers={bg,arc,ticks,hand,minute,text};
+  Engine e;Images assets;
+  e.setTheme(theme,0);e.setValues({{"d.sweep","0"},{"d.angle","0"},{"d.minute","0"},{"d.radius","100"}});
+  assert(render(e,e.update(0,nullptr),assets,incremental));
+  uint32_t seed=12345;
+  auto next=[&](int n) { seed=seed*1103515245u+12345u;return int((seed>>16)%n); };
+  std::vector<ThemeValue> values={{"d.sweep","0"},{"d.angle","0"},{"d.minute","0"},{"d.radius","100"}};
+  for(int step=0;step<400;++step) {
+    // Move one value at a time as often as several, including onto an unchanged one.
+    const int mode=next(5);
+    if(mode==0||mode>=4) values[0].value=std::to_string(next(101));
+    if(mode==1||mode>=4) values[1].value=std::to_string(next(361));
+    if(mode==2||mode>=4) values[2].value=std::to_string(next(361));
+    if(mode==3||mode>=4) values[3].value=std::to_string(next(101));
+    e.setValues(values);
+    auto dirty=e.update(step,nullptr);
+    assert(render(e,dirty,assets,incremental));
+    Engine fresh;fresh.setTheme(theme,0);fresh.setValues(values);
+    assert(render(fresh,fresh.update(0,nullptr),assets,scratch));
+    for(int i=0;i<240*240;++i) if(incremental.data[i]!=scratch.data[i]) {
+      std::cerr<<"step "<<step<<": pixel ("<<i%240<<","<<i/240<<") differs\n";assert(false);
+    }
+  }
+  // Only the hand moves: the repaint is its old and new boxes, nothing else, and an
+  // unchanged value repaints nothing.
+  theme.layers={bg,arc,ticks,hand,minute};
+  e.setTheme(theme,0);e.setValues({{"d.sweep","50"},{"d.angle","0"},{"d.minute","0"},{"d.radius","100"}});
+  e.update(0,nullptr);
+  const Rect before=e.states()[3].bounds;
+  e.setValues({{"d.sweep","50"},{"d.angle","30"},{"d.minute","0"},{"d.radius","100"}});
+  auto dirty=e.update(1,nullptr);
+  const Rect after=e.states()[3].bounds;
+  assert(before.w*before.h<240*240/4&&after.w*after.h<240*240/4);
+  long area=0;
+  for(const Rect& r:dirty) area+=r.w*r.h;
+  const Rect both=unite(before,after);
+  assert(!dirty.empty()&&area<=both.w*both.h&&area<240*240/4);
+  e.setValues({{"d.sweep","50"},{"d.angle","30"},{"d.minute","0"},{"d.radius","100"}});
+  assert(e.update(2,nullptr).empty());
+  // Only the sweep moves: the repaint is the arc's old and new boxes, not the whole ring.
+  e.setValues({{"d.sweep","55"},{"d.angle","30"},{"d.minute","0"},{"d.radius","100"}});
+  dirty=e.update(3,nullptr);
+  area=0;
+  for(const Rect& r:dirty) area+=r.w*r.h;
+  assert(!dirty.empty()&&area<240*240/2);
+}
 int main() {
  testScrollRendering();
+ testRotationShapes();
+ testRotationRedraw();
  testRoundedRectRendering();
  Theme theme;theme.background=0x001f;
  Layer bg;bg.type=LayerType::Shape;bg.shape=Shape::Rectangle;bg.width=240;bg.height=240;bg.hasFill=true;bg.fill=0x001f;
