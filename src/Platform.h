@@ -164,7 +164,7 @@ void platformOnTimeSync(void (*cb)());
 // kept until platformCrashRecordClear() or a power cycle; no flash is written.
 // The ESP32 targets keep no record: platformCrashRecordGet() returns false.
 struct PlatformCrashRecord {
-  char     reason[20];     // "Exception", "Software watchdog", "Hardware watchdog"
+  char     reason[24];     // see crashReasonLabel() in CrashRecord.h
   char     fw[16];         // FW_VERSION of the image that crashed
   uint32_t exccause;       // Xtensa EXCCAUSE
   uint32_t epc1;           // faulting PC, for addr2line
