@@ -29,15 +29,19 @@ class Package : public Assets {
     uint32_t hash = 0, offset = 0, length = 0;
     uint16_t width = 0, height = 0;
     uint8_t pathLength = 0, stride = 0;
+    bool compressed = false;   // STI2: rows as runs (see row())
+    uint8_t palette = 0;       // STI2 palette size, 0 for direct colours
   };
   Source& source_;
   // In blocks: in one vector, a package with many frames needed a block of
   // several KiB.
   BlockList<Entry> entries_;
   bool samePath(const Entry& entry, const std::string& path) const;
+  bool checkRows(const Entry& entry) const;
   size_t indexOf(const std::string& path) const;
   const Entry* find(const std::string& path) const;
   bool readIndex(std::string& error);
+  bool checkSpec(const Theme& theme, std::string& error) const;
   bool checkAssets(Theme& theme, std::string& error) const;
 };
 }

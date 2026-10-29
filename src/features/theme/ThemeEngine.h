@@ -33,7 +33,9 @@ bool validPath(const std::string& path);
 using Coord = int16_t;
 
 enum class LayerType : uint8_t { Text, Image, Animation, Shape };
-enum class Shape : uint8_t { Rectangle, Circle, Line };
+// Arc, Hand and Ticks are spec 2 (#31). Angles are whole degrees, 0 at 12 o'clock
+// and growing clockwise.
+enum class Shape : uint8_t { Rectangle, Circle, Line, Arc, Hand, Ticks };
 enum class ScrollMode : uint8_t { Loop, Bounce };
 
 // Declared on a text layer to scroll content wider than its viewport. `width`
@@ -49,7 +51,7 @@ struct Scroll {
 // type is enforced by `applicable()` in the .cpp, not by this enum.
 enum class BoundProperty : uint8_t {
   X, Y, Width, Height, Radius, CornerRadius, X2, Y2, Size, StrokeWidth,
-  ScrollWidth, ScrollSpeed, Color, Fill, Stroke
+  ScrollWidth, ScrollSpeed, Color, Fill, Stroke, Angle, Sweep
 };
 
 // Linear map from a fetched number to an integer property. See
@@ -100,6 +102,10 @@ struct Layer {
   LayerType type = LayerType::Text;
   Shape shape = Shape::Rectangle;
   Coord x = 0, y = 0, width = 0, height = 0, x2 = 0, y2 = 0, radius = 0;
+  // The rotation shapes (spec 2) reuse fields rather than add their own, since
+  // every running layer carries a Layer and a LayerState: arc is radius, x2 =
+  // start, y2 = sweep; hand is radius = length, cornerRadius = tail, x2 = angle;
+  // ticks is radius, x2 = count, y2 = length. A binding writes the resolved x2/y2.
   Coord size = 16, strokeWidth = 1, cornerRadius = 0;
   uint8_t anchorX = 0, anchorY = 0;
   uint16_t color = 0xffff, fill = 0, stroke = 0;
@@ -129,6 +135,7 @@ inline bool operator==(const ThemeValue& a, const ThemeValue& b) { return a.key 
 // The immutable parsed manifest. Engine::setTheme() takes this by value and
 // never mutates it afterward; fetched values only ever affect LayerState.
 struct Theme {
+  uint8_t spec = 1;   // manifest version; 2 allows STI2 images (#31)
   std::string id, name, author, version;
   uint16_t background = 0;
   BlockList<Layer> layers;

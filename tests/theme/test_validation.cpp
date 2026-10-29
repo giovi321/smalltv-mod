@@ -41,6 +41,14 @@ void rectangle(JsonObject layer) {
   layer["id"]="rectangle";layer["type"]="shape";layer["shape"]="rectangle";
   layer["x"]=0;layer["y"]=0;layer["width"]=100;layer["height"]=20;layer["fill"]="#ffffff";
 }
+static std::string lastError;
+// Parses a one-layer spec `spec` theme whose layer is {"id","type":"shape","x":120,"y":120,<layer>}.
+bool rot(int spec,const std::string& layer,Theme* out=nullptr,const char* data="") {
+  std::string m="{\"spec\":"+std::to_string(spec)+",\"theme\":{\"id\":\"t\",\"name\":\"T\",\"author\":\"A\",\"version\":\"1\"},\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},"+data+"\"layers\":[{\"id\":\"s\",\"type\":\"shape\",\"x\":120,\"y\":120,"+layer+"}]}";
+  Theme parsed;bool ok=parseTheme(m,parsed,lastError);
+  if(out&&ok) *out=std::move(parsed);
+  return ok;
+}
 int main() {
   JsonDocument d;
   for(const char* token:{"{foo}","{HH+1}","{HH", "HH}", "{js:alert(1)}", "\n", "\x01"}) {deserializeJson(d,base);d["layers"][0]["value"]=token;rejected(d);}
@@ -48,7 +56,16 @@ int main() {
   for(const char* path:{"../x","/x","a//b","a/./b","a/../b","a\\b","http://x","a/"}) assert(!validPath(path));
   assert(validPath("animations/cat/000.png.sti"));
   deserializeJson(d,base);d["spec|theme"]=0;rejected(d);
-  deserializeJson(d,base);d["spec"]=2;rejected(d);
+  // Spec 2 (#31) is accepted and kept in the theme; it allows STI2 images
+  // (see Package::load()). Other versions are refused.
+  {
+    std::string json,error;Theme t;
+    assert(parseTheme(base,t,error) && t.spec==1);
+    deserializeJson(d,base);d["spec"]=2;serializeJson(d,json);
+    assert(parseTheme(json,t,error) && t.spec==2);
+  }
+  for(int spec:{0,3,-1}) {deserializeJson(d,base);d["spec"]=spec;rejected(d);}
+  deserializeJson(d,base);d["spec"]=1.5;rejected(d);
   deserializeJson(d,base);d["display"]["width"]=320;rejected(d);
   deserializeJson(d,base);d["layers"][0]["x"]="50%";rejected(d);
   deserializeJson(d,base);d["layers"][0]["x"]=100000;rejected(d);
@@ -205,6 +222,64 @@ int main() {
   json=base;json.insert(json.find("\"size\":48"),"\"deep\":"+std::string(5,'[')+std::string(5,']')+",");
   assert(!parseTheme(json,theme,error));assert(error=="layers[0].deep: unknown field");
 
+  // Rotation shapes (#31 item 2) exist only under spec 2, with closed schemas and fixed limits.
+  {
+    const std::string arc="\"shape\":\"arc\",\"radius\":100,\"start\":0,\"sweep\":90,\"stroke\":\"#ffffff\"";
+    const std::string hand="\"shape\":\"hand\",\"length\":90,\"tail\":10,\"angle\":45,\"stroke\":\"#ffffff\",\"strokeWidth\":3";
+    const std::string ticks="\"shape\":\"ticks\",\"radius\":110,\"count\":12,\"length\":10,\"stroke\":\"#ffffff\"";
+    Theme t2;
+    // Spec 1 refuses all three, with a reason that names the spec.
+    for(const std::string& s:{arc,hand,ticks}) {assert(!rot(1,s));assert(lastError.find("need \"spec\": 2")!=std::string::npos);}
+    // Spec 2 accepts them and keeps every field.
+    assert(rot(2,arc,&t2));assert(t2.layers[0].shape==Shape::Arc&&t2.layers[0].radius==100&&t2.layers[0].x2==0&&t2.layers[0].y2==90&&t2.layers[0].strokeWidth==1);
+    assert(rot(2,hand,&t2));assert(t2.layers[0].shape==Shape::Hand&&t2.layers[0].radius==90&&t2.layers[0].cornerRadius==10&&t2.layers[0].x2==45&&t2.layers[0].strokeWidth==3);
+    assert(rot(2,ticks,&t2));assert(t2.layers[0].shape==Shape::Ticks&&t2.layers[0].radius==110&&t2.layers[0].x2==12&&t2.layers[0].y2==10);
+    // A hand's tail is optional and defaults to 0; the other fields are required.
+    assert(rot(2,"\"shape\":\"hand\",\"length\":50,\"angle\":0,\"stroke\":\"#ffffff\"",&t2)&&t2.layers[0].cornerRadius==0);
+    assert(!rot(2,"\"shape\":\"hand\",\"angle\":0,\"stroke\":\"#ffffff\""));
+    assert(!rot(2,"\"shape\":\"hand\",\"length\":50,\"stroke\":\"#ffffff\""));
+    assert(!rot(2,"\"shape\":\"arc\",\"radius\":50,\"sweep\":10,\"stroke\":\"#ffffff\""));
+    assert(!rot(2,"\"shape\":\"arc\",\"radius\":50,\"start\":10,\"stroke\":\"#ffffff\""));
+    assert(!rot(2,"\"shape\":\"ticks\",\"radius\":50,\"count\":4,\"stroke\":\"#ffffff\""));
+    assert(!rot(2,"\"shape\":\"arc\",\"radius\":50,\"start\":0,\"sweep\":10"));
+    assert(rot(2,"\"shape\":\"rectangle\",\"width\":4,\"height\":4,\"fill\":\"#ffffff\""));
+    // Fixed limits: radius 1-240, start/sweep/angle -360..360, count 1-60, length 1-240, strokeWidth 1-32.
+    auto with=[&](const std::string& base,const char* key,const std::string& value) {
+      size_t at=base.find(std::string("\"")+key+"\":");size_t end=base.find(',',at);if(end==std::string::npos) end=base.size();
+      return base.substr(0,at)+"\""+key+"\":"+value+base.substr(end);
+    };
+    assert(rot(2,with(arc,"radius","240"))&&!rot(2,with(arc,"radius","241"))&&!rot(2,with(arc,"radius","0")));
+    assert(rot(2,with(arc,"start","-360"))&&!rot(2,with(arc,"start","-361"))&&!rot(2,with(arc,"start","361")));
+    assert(rot(2,with(arc,"sweep","360"))&&!rot(2,with(arc,"sweep","361"))&&rot(2,with(arc,"sweep","-360")));
+    assert(!rot(2,with(arc,"sweep","12.5"))&&!rot(2,with(arc,"sweep","\"90\"")));
+    assert(rot(2,with(hand,"angle","360"))&&!rot(2,with(hand,"angle","361")));
+    assert(rot(2,with(hand,"length","240"))&&!rot(2,with(hand,"length","241"))&&!rot(2,with(hand,"length","0")));
+    assert(rot(2,with(hand,"tail","240"))&&!rot(2,with(hand,"tail","241"))&&!rot(2,with(hand,"tail","-1")));
+    assert(rot(2,with(ticks,"count","60"))&&!rot(2,with(ticks,"count","61"))&&!rot(2,with(ticks,"count","0")));
+    assert(rot(2,with(ticks,"length","240"))&&!rot(2,with(ticks,"length","241"))&&!rot(2,with(ticks,"length","0")));
+    assert(rot(2,with(hand,"strokeWidth","32"))&&!rot(2,with(hand,"strokeWidth","33"))&&!rot(2,with(hand,"strokeWidth","0")));
+    // Closed schema: keys of another shape, a fill, scroll and unknown keys are refused.
+    assert(!rot(2,arc+",\"length\":5")&&!rot(2,hand+",\"radius\":5")&&!rot(2,ticks+",\"sweep\":5"));
+    assert(!rot(2,arc+",\"fill\":\"#ffffff\"")&&!rot(2,ticks+",\"scroll\":{}")&&!rot(2,hand+",\"x2\":5"));
+    assert(!rot(2,"\"shape\":\"dial\",\"stroke\":\"#ffffff\"")&&lastError.find("arc, hand or ticks")!=std::string::npos);
+    // Bindings: sweep on arc, angle on hand, radius on arc/ticks; nowhere else.
+    const char* data="\"data\":[{\"id\":\"d\",\"url\":\"http://example.test/d.json\",\"interval\":60,\"fields\":[{\"id\":\"v\",\"path\":\"v\"}]}],";
+    auto bind3=[&](const std::string& shape,const char* property,const char* output) {
+      return rot(2,shape+",\"bind\":{\""+property+"\":{\"source\":\"d.v\",\"input\":[0,60],\"output\":"+output+"}}",&t2,data);
+    };
+    auto bind=[&](const std::string& shape,const char* property) {return bind3(shape,property,"[0,360]");};
+    assert(bind(arc,"sweep")&&t2.layers[0].bindings[0].property==BoundProperty::Sweep);
+    assert(bind(hand,"angle")&&t2.layers[0].bindings[0].property==BoundProperty::Angle);
+    assert(!bind(arc,"angle")&&!bind(hand,"sweep")&&!bind(ticks,"sweep")&&!bind(ticks,"angle"));
+    assert(!bind(arc,"x2")&&!bind(hand,"radius")&&!bind3(hand,"x2","[0,9]")&&!bind3(ticks,"width","[0,9]"));
+    assert(bind3(ticks,"strokeWidth","[1,10]")&&bind(hand,"x")&&bind(arc,"y"));
+    // The output range of the new properties is -360..360.
+    assert(!rot(2,arc+",\"bind\":{\"sweep\":{\"source\":\"d.v\",\"input\":[0,60],\"output\":[0,361]}}",&t2,data));
+    assert(rot(2,arc+",\"bind\":{\"stroke\":{\"source\":\"d.v\",\"stops\":[{\"at\":0,\"value\":\"#ff0000\"}]}}",&t2,data));
+    // Existing shapes keep refusing the new properties.
+    assert(!rot(2,"\"shape\":\"line\",\"x2\":5,\"y2\":5,\"stroke\":\"#ffffff\",\"bind\":{\"sweep\":{\"source\":\"d.v\",\"input\":[0,60],\"output\":[0,90]}}",&t2,data));
+    assert(!rot(2,"\"shape\":\"circle\",\"radius\":5,\"stroke\":\"#ffffff\",\"bind\":{\"angle\":{\"source\":\"d.v\",\"input\":[0,60],\"output\":[0,90]}}",&t2,data));
+  }
   // Rounded corners are rectangle-only, integral, and bounded.
   deserializeJson(d,base);d["layers"][0]["cornerRadius"]=8;rejected(d);
   dataDocument(d);rectangle(d["layers"][0]);d["layers"][0]["cornerRadius"]="8";rejected(d);

@@ -658,7 +658,8 @@ static bool numericProperty(const std::string& name, BoundProperty& property) {
     {"cornerRadius", BoundProperty::CornerRadius}, {"x2", BoundProperty::X2},
     {"y2", BoundProperty::Y2}, {"size", BoundProperty::Size},
     {"strokeWidth", BoundProperty::StrokeWidth}, {"scroll.width", BoundProperty::ScrollWidth},
-    {"scroll.speed", BoundProperty::ScrollSpeed}
+    {"scroll.speed", BoundProperty::ScrollSpeed}, {"angle", BoundProperty::Angle},
+    {"sweep", BoundProperty::Sweep}
   };
   for (const auto& item : names) if (name == item.name) {
     property = item.property;
@@ -713,6 +714,10 @@ static bool propertyRange(BoundProperty property, int& lo, int& hi) {
       lo = 1;
       hi = 240;
       return true;
+    case BoundProperty::Angle: case BoundProperty::Sweep:
+      lo = -360;
+      hi = 360;
+      return true;
     default:
       return false;
   }
@@ -737,6 +742,9 @@ static bool applicable(const Layer& layer, BoundProperty property, bool color) {
   if (layer.shape == Shape::Rectangle)
     return property == BoundProperty::Width || property == BoundProperty::Height || property == BoundProperty::CornerRadius;
   if (layer.shape == Shape::Circle) return property == BoundProperty::Radius;
+  if (layer.shape == Shape::Arc) return property == BoundProperty::Radius || property == BoundProperty::Sweep;
+  if (layer.shape == Shape::Hand) return property == BoundProperty::Angle;
+  if (layer.shape == Shape::Ticks) return property == BoundProperty::Radius;
   return property == BoundProperty::X2 || property == BoundProperty::Y2;
 }
 static bool declaredSource(const Theme& theme, const std::string& source) {
@@ -884,8 +892,11 @@ __attribute__((noinline)) static bool parseHeader(JsonObjectConst root, const Ma
     }
   }
   Fields r(root, "", error);
+  // Spec 2 (#31) also allows STI2 images. Firmware up to 3.1.0 refuses it:
+  // here, or already at the first STI2 image (readIndex() runs first).
   int spec = 0;
-  if (!r.number("spec", 1, 1, spec)) return false;
+  if (!r.number("spec", 1, 2, spec)) return false;
+  t.spec = static_cast<uint8_t>(spec);
   // ---- theme metadata ----
   auto meta = root["theme"].as<JsonObjectConst>();
   Fields m(meta, "theme", error);
@@ -1057,15 +1068,34 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
     l.type = LayerType::Shape;
     std::string shape;
     if (!f.text("shape", shape, 16)) return false;
-    if (shape != "rectangle" && shape != "circle" && shape != "line") return f.fail("shape", "expected rectangle, circle or line");
+    const bool rotation = shape == "arc" || shape == "hand" || shape == "ticks";
+    if (rotation && t.spec < 2) return f.fail("shape", "arc, hand and ticks need \"spec\": 2");
+    if (shape != "rectangle" && shape != "circle" && shape != "line" && !rotation)
+      return f.fail("shape", t.spec < 2 ? "expected rectangle, circle or line" : "expected rectangle, circle, line, arc, hand or ticks");
     const char* allowed = shape == "rectangle" ? "|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|cornerRadius|scroll|bind|" :
-      shape == "circle" ? "|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|" : "|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|";
+      shape == "circle" ? "|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|" :
+      shape == "arc" ? "|id|type|shape|x|y|radius|start|sweep|stroke|strokeWidth|bind|" :
+      shape == "hand" ? "|id|type|shape|x|y|length|tail|angle|stroke|strokeWidth|bind|" :
+      shape == "ticks" ? "|id|type|shape|x|y|radius|count|length|stroke|strokeWidth|bind|" :
+      "|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|";
     if (!f.keys(allowed)) return false;
     l.hasFill = !o["fill"].isNull();
     l.hasStroke = !o["stroke"].isNull();
-    if (!l.hasFill && !l.hasStroke) return f.fail(shape == "line" ? "stroke" : "fill", "provide a fill or stroke color");
+    if (!l.hasFill && !l.hasStroke) return f.fail(shape == "line" || rotation ? "stroke" : "fill", "provide a fill or stroke color");
     if ((l.hasFill && !f.color("fill", l.fill)) || (l.hasStroke && !f.color("stroke", l.stroke)) || !f.number("strokeWidth", 1, 32, l.strokeWidth, false)) return false;
-    if (shape == "rectangle") {
+    if (rotation) {
+      // Every pixel of an arc, hand or tick is `stroke`; `fill` is not a key.
+      if (shape == "arc") {
+        l.shape = Shape::Arc;
+        if (!f.number("radius", 1, 240, l.radius) || !f.number("start", -360, 360, l.x2) || !f.number("sweep", -360, 360, l.y2)) return false;
+      } else if (shape == "hand") {
+        l.shape = Shape::Hand;
+        if (!f.number("length", 1, 240, l.radius) || !f.number("tail", 0, 240, l.cornerRadius, false) || !f.number("angle", -360, 360, l.x2)) return false;
+      } else {
+        l.shape = Shape::Ticks;
+        if (!f.number("radius", 1, 240, l.radius) || !f.number("count", 1, 60, l.x2) || !f.number("length", 1, 240, l.y2)) return false;
+      }
+    } else if (shape == "rectangle") {
       if (!f.number("width", 1, 240, l.width) || !f.number("height", 1, 240, l.height)) return false;
       if (f.has("cornerRadius") && !f.number("cornerRadius", 0, 120, l.cornerRadius)) return false;
     } else if (shape == "circle") {
@@ -1202,6 +1232,8 @@ void Engine::resolveLayer(size_t index) {
       case BoundProperty::StrokeWidth: resolved.strokeWidth = number; break;
       case BoundProperty::ScrollWidth: resolved.scrollWidth = number; break;
       case BoundProperty::ScrollSpeed: resolved.scrollSpeed = number; break;
+      case BoundProperty::Angle: resolved.x2 = number; break;
+      case BoundProperty::Sweep: resolved.y2 = number; break;
       default: break;
     }
   }
@@ -1319,6 +1351,108 @@ static bool sameColors(const ResolvedLayer& a, const ResolvedLayer& b) {
 static int textPixelWidth(int size, size_t length) {
   return static_cast<int>(length) * ((size * 6 + 7) / 8);
 }
+// ---- Rotation shapes (spec 2, #31) ----
+// Angles are kept in sixteenths of a degree, 0 at 12 o'clock, growing
+// clockwise. There is no sine table and no floating point: sin comes from
+// Bhaskara I's rational approximation (error under 0.002) and a pixel's angle
+// from a quadratic arctangent (error under 0.2 degrees), which keeps both
+// within about a pixel at the edge of the canvas.
+constexpr int Turn16 = 5760;
+static int wrap16(int a) {
+  a %= Turn16;
+  return a < 0 ? a + Turn16 : a;
+}
+// sin(a / 16 degrees) in Q14. 10368000 is 40500 * 256, the approximation's
+// denominator for angles in sixteenths.
+static int sinQ14(int a) {
+  a = wrap16(a);
+  const bool negative = a >= Turn16 / 2;
+  if (negative) a -= Turn16 / 2;
+  const int64_t k = int64_t(a) * (Turn16 / 2 - a), den = 10368000 - k;
+  const int v = int((4 * k * 16384 + den / 2) / den);
+  return negative ? -v : v;
+}
+// Unit vector of a clockwise-from-12-o'clock angle in screen coordinates.
+static void direction(int a, int& dx, int& dy) {
+  dx = sinQ14(a);
+  dy = -sinQ14(a + Turn16 / 4);
+}
+static int roundQ14(int v) {
+  return v >= 0 ? (v + 8192) >> 14 : -((8192 - v) >> 14);
+}
+// atan(a / b) in sixteenths of a degree for 0 <= a <= b, b > 0.
+static int arctan16(int a, int b) {
+  const int r = a * 1024 / b;
+  return (r * (737280 + 250 * (1024 - r))) >> 20;
+}
+// The angle of the pixel (dx, dy) from a center, same convention as above.
+static int pixelAngle16(int dx, int dy) {
+  const int u = abs(dx), v = abs(dy);
+  if (!u && !v) return 0;
+  const int base = u <= v ? arctan16(u, v) : Turn16 / 4 - arctan16(v, u);
+  if (dx >= 0) return dy <= 0 ? base : Turn16 / 2 - base;
+  return dy > 0 ? Turn16 / 2 + base : Turn16 - base;
+}
+struct Segment {
+  int x0, y0, x1, y1;
+};
+// A hand runs from `tail` behind the pivot to `length` in front of it. The
+// renderer and bounds() both come here, so the box always holds the ink.
+static Segment handSegment(const Layer& l, const ResolvedLayer& r) {
+  int dx, dy;
+  direction(r.x2 * 16, dx, dy);
+  return Segment{r.x - roundQ14(dx * l.cornerRadius), r.y - roundQ14(dy * l.cornerRadius),
+    r.x + roundQ14(dx * l.radius), r.y + roundQ14(dy * l.radius)};
+}
+// Tick `k` of `count`: a radial segment from radius - length to radius.
+static Segment tickSegment(const Layer& l, const ResolvedLayer& r, int k) {
+  int dx, dy;
+  direction((k * Turn16 + l.x2 / 2) / l.x2, dx, dy);
+  const int inner = std::max(0, r.radius - l.y2);
+  return Segment{r.x + roundQ14(dx * inner), r.y + roundQ14(dy * inner),
+    r.x + roundQ14(dx * r.radius), r.y + roundQ14(dy * r.radius)};
+}
+// An arc's start in [0, Turn16) and its sweep, always clockwise from there
+// (a negative sweep is the same arc started at its far end).
+static void arcRange(const ResolvedLayer& r, int& start, int& sweep) {
+  start = r.x2 * 16;
+  sweep = r.y2 * 16;
+  if (sweep < 0) {
+    start += sweep;
+    sweep = -sweep;
+  }
+  start = wrap16(start);
+}
+// The box of an arc: its ends (inner and outer), the compass points inside
+// its sweep and, in the pad, the approximations' error. Only this box turns
+// dirty when the sweep changes.
+static Rect arcBounds(const ResolvedLayer& r) {
+  if (r.radius <= 0 || r.y2 == 0) return Rect(r.x, r.y, 0, 0);
+  int start, sweep;
+  arcRange(r, start, sweep);
+  int x0 = r.x - r.radius, x1 = r.x + r.radius, y0 = r.y - r.radius, y1 = r.y + r.radius;
+  if (sweep < Turn16) {
+    x0 = x1 = r.x;
+    y0 = y1 = r.y;
+    const int inner = std::max(0, r.radius - r.strokeWidth);
+    auto grow = [&](int radius, int angle) {
+      int dx, dy;
+      direction(angle, dx, dy);
+      const int x = r.x + roundQ14(dx * radius), y = r.y + roundQ14(dy * radius);
+      x0 = std::min(x0, x);
+      x1 = std::max(x1, x);
+      y0 = std::min(y0, y);
+      y1 = std::max(y1, y);
+    };
+    for (int angle : {start, start + sweep}) {
+      grow(r.radius, angle);
+      grow(inner, angle);
+    }
+    for (int compass = 0; compass < 4; ++compass)
+      if (wrap16(compass * (Turn16 / 4) - start) <= sweep) grow(r.radius, compass * (Turn16 / 4));
+  }
+  return Rect(x0 - 2, y0 - 2, x1 - x0 + 5, y1 - y0 + 5);
+}
 // The rectangle render() (and Engine::update's dirty-region union) treats as
 // this layer's footprint. For scrolling text this is the fixed viewport, not
 // the full (possibly much wider) expanded text -- render() maps viewport-
@@ -1336,6 +1470,18 @@ static Rect bounds(const Layer& l, const ResolvedLayer& resolved, const std::str
     int pad = (resolved.strokeWidth + 1) / 2;
     return Rect(std::min(resolved.x, resolved.x2) - pad, std::min(resolved.y, resolved.y2) - pad,
       abs(resolved.x - resolved.x2) + 2 * pad + 1, abs(resolved.y - resolved.y2) + 2 * pad + 1);
+  }
+  if (l.type == LayerType::Shape && l.shape == Shape::Arc) return arcBounds(resolved);
+  if (l.type == LayerType::Shape && l.shape == Shape::Hand) {
+    const Segment h = handSegment(l, resolved);
+    const int pad = (resolved.strokeWidth + 1) / 2;
+    return Rect(std::min(h.x0, h.x1) - pad, std::min(h.y0, h.y1) - pad,
+      abs(h.x0 - h.x1) + 2 * pad + 1, abs(h.y0 - h.y1) + 2 * pad + 1);
+  }
+  if (l.type == LayerType::Shape && l.shape == Shape::Ticks) {
+    if (resolved.radius <= 0) return Rect(resolved.x, resolved.y, 0, 0);
+    const int reach = resolved.radius + (resolved.strokeWidth + 1) / 2 + 1;
+    return Rect(resolved.x - reach, resolved.y - reach, 2 * reach + 1, 2 * reach + 1);
   }
   return Rect(resolved.x, resolved.y, resolved.width, resolved.height);
 }
@@ -1446,7 +1592,14 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     // The dirty region is the union of this layer's old and new footprint, so
     // moving/shrinking/hiding a layer also erases wherever it used to be.
     Rect next = bounds(l, s.resolved, s.text);
-    if (changed && !full_) addDirty(dirty, unite(s.bounds, next));
+    // A rotation shape sweeps a thin diagonal: its old and new boxes are
+    // repainted apart, since their union would also cover everything between.
+    if (changed && !full_) {
+      if (l.type == LayerType::Shape && l.shape >= Shape::Arc) {
+        addDirty(dirty, s.bounds);
+        addDirty(dirty, next);
+      } else addDirty(dirty, unite(s.bounds, next));
+    }
     s.bounds = next;
   }
   if (full_) {
@@ -1569,6 +1722,12 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
           for (int x = 0; x < r.w; ++x) pixels[r.x - region.x + x] = blend(pixels[r.x - region.x + x], colors[x], alpha[x]);
           continue;
         }
+        // The rotation shapes' per-row setup: one sine for a whole row of
+        // pixels instead of one per pixel.
+        int arcStart = 0, arcSweep = 0, tickIndex = -1;
+        Segment hand{}, tick{};
+        if (l.type == LayerType::Shape && l.shape == Shape::Arc) arcRange(s.resolved, arcStart, arcSweep);
+        if (l.type == LayerType::Shape && l.shape == Shape::Hand) hand = handSegment(l, s.resolved);
         for (int x = r.x; x < r.x + r.w; ++x) {
           uint16_t c = 0;
           bool draw = false;
@@ -1590,6 +1749,29 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
                 (display.glyphColumn(s.text[charIndex], col) & (1 << row));
               c = s.resolved.color;
             }
+          } else if (l.shape >= Shape::Arc) {
+            const int dx = x - s.resolved.x, dy = y - s.resolved.y, dist = dx * dx + dy * dy;
+            if (l.shape == Shape::Arc) {
+              const int outer = s.resolved.radius, inner = std::max(0, outer - s.resolved.strokeWidth);
+              draw = s.resolved.y2 != 0 && dist <= outer * outer && (inner == 0 || dist > inner * inner) &&
+                (arcSweep >= Turn16 || wrap16(pixelAngle16(dx, dy) - arcStart) <= arcSweep);
+            } else if (l.shape == Shape::Hand) {
+              draw = linePixel(hand.x0, hand.y0, hand.x1, hand.y1, s.resolved.strokeWidth, x, y);
+            } else {
+              // Only the tick nearest in angle can reach this pixel: the
+              // distance to a radial line grows with the angle away from it.
+              const int pad = (s.resolved.strokeWidth + 1) / 2 + 1, near = std::max(0, s.resolved.radius - l.y2 - pad),
+                far = s.resolved.radius + pad;
+              if (dist <= far * far && dist >= near * near) {
+                const int k = ((pixelAngle16(dx, dy) * l.x2 + Turn16 / 2) / Turn16) % l.x2;
+                if (k != tickIndex) {
+                  tickIndex = k;
+                  tick = tickSegment(l, s.resolved, k);
+                }
+                draw = linePixel(tick.x0, tick.y0, tick.x1, tick.y1, s.resolved.strokeWidth, x, y);
+              }
+            }
+            c = s.resolved.stroke;
           } else {
             bool inside = false, edge = false;
             if (l.shape == Shape::Rectangle) {
