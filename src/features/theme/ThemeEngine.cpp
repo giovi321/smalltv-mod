@@ -1530,7 +1530,9 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     }
     bool textChanged = false;
     if (l.type == LayerType::Text && (timeChanged || valuesChanged_)) {
-      std::string text = expandText(l.value, time, values_, device_);
+      // Only spec 2 reads device.* values: a spec 1 `device` data source with
+      // no fetched value shows "--", never what the firmware supplies.
+      std::string text = theme_.spec >= 2 ? expandText(l.value, time, values_, device_) : expandText(l.value, time, values_);
       if (text != s.text) {
         s.text = std::move(text);
         changed = true;

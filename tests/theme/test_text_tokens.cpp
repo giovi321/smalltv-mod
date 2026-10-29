@@ -64,6 +64,9 @@ static void testSpecs() {
   e.setDeviceValues({{"device.temperature", "99"}});         // a fetched field wins in spec 1
   tm t = clockAt(0, 1); e.update(0, &t);
   assert(e.states()[0].text == "7");
+  e.setValues({});                                           // not fetched: "--", never the firmware's value
+  e.update(1, &t);
+  assert(e.states()[0].text == "--");
 }
 
 static void testDevice() {
