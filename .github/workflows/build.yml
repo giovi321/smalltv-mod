@@ -127,6 +127,11 @@ jobs:
             tests/test_storage.cpp -o /tmp/smalltv-storage-tests
           /tmp/smalltv-storage-tests
 
+      - name: Test crash record labels and boot decisions
+        run: |
+          c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc tests/test_crash_record.cpp -o /tmp/smalltv-crash-tests
+          /tmp/smalltv-crash-tests
+
       # One app image per target (web-UI OTA + GitHub self-update), the merged
       # factory images for first-time USB flashing of the ESP32 boards, and the
       # minimal loader used to install onto a SmallTV-ultra. Two boards get a

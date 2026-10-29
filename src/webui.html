@@ -751,6 +751,7 @@ function loadStatus(){j('/api/status').then(function(s){
   (s.wifiFail?kv('Last join failure',s.wifiFail):'')+
   kv('Free heap',s.heap+' B'+(s.maxblk?' ('+s.maxblk+' B largest block)':''))+
   kv('Uptime',fmtUp(s.uptime))+kv('Last reset',s.reset||'-')+
+  (s.lastCrash?kv('Last crash',crashLine(s.lastCrash)+' <a href="#" onclick="clearCrash();return false">clear</a>'):'')+
   ((s.wg&&s.wg.compiledIn)?kv('VPN',s.wg.held?'held':(s.wg.up?'up':(s.wg.enabled?'connecting':'off'))):'')+
   (s.radar?kv('Radar',radarLine(s.radar)):'');
  var wgs=$('wgStatus'); if(wgs)wgs.textContent=wgLine(s.wg);
@@ -765,6 +766,8 @@ function loadStatus(){j('/api/status').then(function(s){
   h+='<div class="kv"><b style="color:'+c+'">'+t.symbol+'</b><span>'+st+'</span></div>';});
  tb.innerHTML=h||'<span class="muted">No tickers configured</span>';}
 })}
+function crashLine(x){return x.reason+', cause '+x.exccause+', epc '+x.epc+', addr '+x.addr+', fw '+x.fw+(x.uptime!=null?', up '+fmtUp(x.uptime):'')}
+function clearCrash(){j('/api/crash/clear',{method:'POST'}).then(function(){toast('Crash record cleared');loadStatus()}).catch(function(e){toast(e.message)})}
 function kv(k,v){return '<div class="kv"><span class="muted">'+k+'</span><b>'+v+'</b></div>'}
 // WireGuard: one line that names the failure rather than just saying "down".
 // The handshake age is measured against the browser's clock, which is the one

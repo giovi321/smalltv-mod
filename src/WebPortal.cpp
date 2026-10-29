@@ -133,6 +133,17 @@ static void handleStatus() {
   o["contstk"] = platformFreeContStack();   // primary stack headroom (ESP8266)
   o["uptime"] = millis() / 1000;
   o["reset"] = appResetReason();
+  { PlatformCrashRecord cr;   // last crash, kept in RTC memory until cleared or power-cycled
+    if (platformCrashRecordGet(cr)) {
+      JsonObject c = o["lastCrash"].to<JsonObject>();
+      char h[16];
+      c["reason"] = cr.reason;
+      c["fw"] = cr.fw;
+      snprintf(h, sizeof(h), "0x%x", (unsigned)cr.exccause);  c["exccause"] = h;
+      snprintf(h, sizeof(h), "0x%08x", (unsigned)cr.epc1);     c["epc"] = h;
+      snprintf(h, sizeof(h), "0x%08x", (unsigned)cr.excvaddr); c["addr"] = h;
+      if (cr.uptimeKnown) c["uptime"] = cr.uptimeS;
+    } }
   o["synced"] = clockSynced();
   { String ts = clockTimeStr(); if (ts.length()) o["time"] = ts; }
   o["tz"]        = S->clock.tz;
@@ -292,6 +303,12 @@ static void handleReboot() {
   if (!requireAuth()) return;
   server.send(200, "application/json", "{\"ok\":true}");
   scheduleReboot(400);
+}
+
+static void handleCrashClear() {
+  if (!requireAuth()) return;
+  platformCrashRecordClear();
+  server.send(200, "application/json", "{\"ok\":true}");
 }
 
 static void handleFactory() {
@@ -526,6 +543,7 @@ void webPortalBegin(Settings& settings) {
   server.on("/api/scan", HTTP_GET, handleScan);
   server.on("/api/reboot", HTTP_POST, handleReboot);
   server.on("/api/factory", HTTP_POST, handleFactory);
+  server.on("/api/crash/clear", HTTP_POST, handleCrashClear);
   server.on("/api/refresh", HTTP_POST, handleRefresh);
   server.on("/api/export", HTTP_GET, handleExport);
   server.on("/api/import", HTTP_POST, handleImport);

@@ -298,6 +298,7 @@ void setup() {
   // ESP8266 we also keep the crash PC (epc1) for addr2line decoding; the
   // ESP32-C2 (RISC-V) doesn't expose it, so epc/addr come back empty there.
   PlatformReset pr = platformResetInfo();
+  platformCrashRecordBegin();   // keep the registers/uptime of an abnormal reset in RTC memory
   Serial.print("[boot] reset reason: ");
   Serial.println(pr.reason);
 
