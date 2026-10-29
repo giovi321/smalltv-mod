@@ -41,6 +41,25 @@ class PackTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 pack.build(root)
 
+    def test_localized_text_only_for_spec_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            manifest = {'spec': 2, 'theme': {'id': 'test', 'name': 'Test', 'author': 'Me', 'version': '1'},
+                        'display': {'width': 240, 'height': 240, 'background': '#000000'},
+                        'layers': [{'id': 'day', 'type': 'text', 'x': 0, 'y': 0, 'size': 16, 'color': '#ffffff',
+                                    'value': {'en': '{WEEKDAY}', 'pt': 'Hoje: {WEEKDAY}'}}]}
+            (root/'theme.json').write_text(json.dumps(manifest))
+            self.assertIn(b'Hoje: {WEEKDAY}', pack.build(root))
+            manifest['layers'][0]['value'] = {'pt': 'so portugues'}   # no English to fall back to
+            (root/'theme.json').write_text(json.dumps(manifest))
+            with self.assertRaises(ValueError):
+                pack.build(root)
+            manifest['layers'][0]['value'] = {'en': 'Day', 'pt': 'Dia'}
+            manifest['spec'] = 1
+            (root/'theme.json').write_text(json.dumps(manifest))
+            with self.assertRaises(ValueError):
+                pack.build(root)
+
     def test_rejects_oversized_image(self):
         with self.assertRaises(ValueError):
             pack.encode_image(Image.new('RGB', (241, 240)))

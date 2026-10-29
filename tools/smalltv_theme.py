@@ -40,6 +40,8 @@ def main():
     preview.add_argument('--time', help='Local wall time, e.g. 2026-09-18T10:24:00 (default: computer time)')
     preview.add_argument('--data', action='append', default=[], metavar='KEY=VALUE',
                          help='Inject a declared data value into every preview frame')
+    preview.add_argument('--lang', choices=['en', 'pt', 'es', 'fr', 'de', 'it'],
+                         help='Device language for month and weekday names and localized text (default: en)')
     args = parser.parse_args()
     try:
         with tempfile.TemporaryDirectory() as scratch:
@@ -57,7 +59,7 @@ def main():
                 print(f'Valid: {metadata["name"]} ({metadata["id"]})')
             else:
                 values = parse_data_values(args.data)
-                write_preview(package, args.output, args.seconds, args.fps, args.time, values=values)
+                write_preview(package, args.output, args.seconds, args.fps, args.time, values=values, language=args.lang)
                 print(f'Preview: {args.output.resolve()}')
     except (OSError, ValueError, TypeError) as error:
         parser.exit(1, f'Theme {args.command} failed: {error}\n')

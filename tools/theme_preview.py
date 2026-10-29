@@ -15,7 +15,7 @@ except ImportError:
     from theme_native import run, validate_package
 
 
-def write_preview(package, output, seconds=10, fps=15, start=None, values=None):
+def write_preview(package, output, seconds=10, fps=15, start=None, values=None, language=None):
     if not (1 <= seconds <= 60 and 1 <= fps <= 15):
         raise ValueError('Preview requires 1..60 seconds and 1..15 FPS')
     values = values or {}
@@ -35,7 +35,8 @@ def write_preview(package, output, seconds=10, fps=15, start=None, values=None):
     images, frames, seen = [], [], {}
     with tempfile.TemporaryDirectory() as scratch:
         raw = Path(scratch)/'frames.rgb'
-        run('preview', package, raw, epoch, fps, seconds*fps, *(f'{k}={v}' for k, v in values.items()))
+        run('preview', package, raw, epoch, fps, seconds*fps, *(['@lang=' + language] if language else []),
+            *(f'{k}={v}' for k, v in values.items()))
         with raw.open('rb') as source:
             expected = b'STP1'+struct.pack('<HHHH', 240, 240, fps, seconds*fps)
             if source.read(12) != expected:

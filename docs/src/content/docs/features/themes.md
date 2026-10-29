@@ -269,7 +269,9 @@ Anchors position the complete text cell rectangle:
 V1 uses the built-in ASCII bitmap font. `size` is the exact cell height in pixels,
 8–96; cell width is `ceil(size × 6 / 8)`. No wrapping or multiline text. Sizes
 8, 16, 24, etc. give uniform pixel scaling. Text is transparent over lower layers.
-Month and weekday names are English; the device's configured timezone applies.
+Month and weekday names are English in a `"spec": 1` theme; the device's configured
+timezone applies. In a `"spec": 2` theme they follow the device language
+(see [Localized text](#localized-text)).
 
 | Token | Value |
 | --- | --- |
@@ -281,6 +283,40 @@ Month and weekday names are English; the device's configured timezone applies.
 | `{MON}` / `{MONTH}` | Abbreviated / full month |
 | `{WD}` / `{WEEKDAY}` | Abbreviated / full weekday |
 | `{YYYY}` | Year |
+
+#### Localized text
+
+The device has a language setting (Settings, Clock & night mode, Language;
+`clock.lang` in the settings file). It takes `en`, `pt`, `es`, `fr`, `de` or `it`
+and defaults to `en`. In a `"spec": 2` theme:
+
+- `{MON}`, `{MONTH}`, `{WD}` and `{WEEKDAY}` come out in that language. The names
+  are plain ASCII, because the built-in font is (Portuguese `Marco`, `Terca-feira`,
+  Spanish `Miercoles`, French `Fevrier`, German `Marz`), and the abbreviations come
+  from tables, not from cutting the name (French `Juin` and `Juil`, `Sept`;
+  Portuguese `Set`; German `Son`, `Mon`). A `"spec": 1` theme keeps English names, whatever the
+  device language.
+- A text layer's `value` may be an object with one string per language instead
+  of a single string:
+
+```json
+{"id": "greeting", "type": "text", "x": 120, "y": 60, "anchor": "center", "size": 16, "color": "#ffffff",
+ "value": {"en": "Today is {WEEKDAY}", "pt": "Hoje e {WEEKDAY}", "es": "Hoy es {WEEKDAY}"}}
+```
+
+`en` is required and is shown for any language the object does not list, so a
+theme never shows an empty layer. The other keys are the codes above, in lower
+case; any other key is an error. Every string follows the rules of a plain `value`
+(1–128 printable ASCII bytes, only declared variables), is checked when the package
+is installed, and may use any variable. The object has at most six entries, one
+per language, and the non-English texts of a whole theme share 1,024 bytes (the
+English ones are not counted). In a `"spec": 1` theme an object is refused with the layer named, so
+the package never installs half-working. Changing the device language redraws
+the text at once.
+
+`smalltv_theme.py preview` takes `--lang CODE` to preview a language (default `en`).
+Text on a layer whose size or position depends on the language is up to the author:
+leave room for the longest string.
 
 #### Scrolling text
 
@@ -499,6 +535,7 @@ preview it with the `--data` workflow documented above.
 | IDs | 1–48 ASCII letters, digits, `_`, `-` |
 | Theme name / author / version | 96 / 96 / 32 bytes |
 | Text template | 1–128 printable ASCII bytes |
+| Localized text | Up to 6 languages, 1–128 printable ASCII bytes each, `en` required; 1,024 bytes of non-English text per theme; spec 2 only |
 | Coordinates | −240 through 479, clipped to the canvas |
 | Rectangle/image/frame dimensions | 1–240 pixels |
 | Circle radius | 1–240 pixels |

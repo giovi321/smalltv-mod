@@ -179,6 +179,7 @@ void ThemeMode::service(const Settings& s) {
   tm t{};
   bool valid = clockNow(t);
   Panel panel;
+  engine_.setLanguage(smalltv::languageFromCode(s.clock.lang.c_str()));
   auto dirty = engine_.update(millis(), valid ? &t : nullptr);
   // A render failure (a corrupt or truncated asset read mid-frame) is treated
   // like a load failure: drop the package and show an error rather than

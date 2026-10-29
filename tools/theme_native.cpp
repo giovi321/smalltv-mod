@@ -97,11 +97,18 @@ int main(int argc,char** argv) {
     uint64_t epoch=integer(argv[4],253402300739ULL);
     unsigned fps=integer(argv[5],15),frames=integer(argv[6],900);
     if(!fps||!frames||frames>60*fps)throw std::runtime_error("Preview is limited to 1..15 FPS and 60 seconds");
-    std::vector<smalltv::ThemeValue> values=injectedValues(theme,argv+7,argc-7);
+    // "@lang=CODE" sets the device language, as the settings do.
+    uint8_t language=0;int first=7;
+    if(argc>7&&std::string(argv[7]).compare(0,6,"@lang=")==0) {
+      std::string code=std::string(argv[7]).substr(6);int index=smalltv::languageIndex(code.c_str(),code.size());
+      if(index<0)throw std::runtime_error("Unknown language: "+code);
+      language=uint8_t(index);first=8;
+    }
+    std::vector<smalltv::ThemeValue> values=injectedValues(theme,argv+first,argc-first);
     std::ofstream out(argv[3],std::ios::binary);
     if(!out)throw std::runtime_error("Cannot create preview frames");
     out.write("STP1",4);u16(out,240);u16(out,240);u16(out,fps);u16(out,frames);
-    smalltv::Engine engine;engine.setTheme(std::move(theme),0);engine.setValues(std::move(values));Screen screen;
+    smalltv::Engine engine;engine.setTheme(std::move(theme),0);engine.setValues(std::move(values));engine.setLanguage(language);Screen screen;
     for(unsigned i=0;i<frames;++i) {
       // Sample at the first whole millisecond on/after the frame deadline.
       // Flooring 1000/15 would repeatedly sample before a 15 FPS frame is due.

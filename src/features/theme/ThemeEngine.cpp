@@ -12,6 +12,12 @@
 #include <cstring>
 #include <memory>
 #include <utility>
+#ifdef ARDUINO
+#include <pgmspace.h>   // PROGMEM, memcpy_P (both cores ship it)
+#else
+#define PROGMEM
+#define memcpy_P memcpy
+#endif
 
 namespace smalltv {
 // Dirty-rectangle primitives: intersect() clips a region to the canvas or to
@@ -1006,6 +1012,42 @@ bool parseTheme(ManifestSource& json, Theme& out, std::string& error) {
   error.clear();
   return true;
 }
+// A text layer's `value`: a string, or under spec 2 an object of strings by
+// language code. `en` is required, so there is always a text to fall back to;
+// every code must be a known one, at most once, and every string passes the
+// same checks as a plain value.
+__attribute__((noinline)) static bool parseTextValue(JsonObjectConst o, Theme& t, const Fields& f, Layer& l) {
+  JsonObjectConst languages = o["value"].as<JsonObjectConst>();
+  if (languages.isNull()) {
+    if (!f.text("value", l.value, 128)) return false;
+    return validText(l.value, t) || f.fail("value", "use printable ASCII and declared clock/data variables only");
+  }
+  if (t.spec < 2) return f.fail("value", "a text per language needs spec 2");
+  bool english = false;
+  for (JsonPairConst p : languages) {
+    int index = languageIndex(p.key().c_str(), p.key().size());
+    if (index < 0) return f.fail("value", "unknown language " + printableKey(p.key().c_str(), p.key().size()) + ", expected en, pt, es, fr, de or it");
+    if (!p.value().is<const char*>()) return f.fail("value", "each language needs a string");
+    JsonString s = p.value().as<JsonString>();
+    std::string text(s.c_str(), s.size());
+    if (text.empty() || text.size() > 128) return f.fail("value", "each language expects 1 to 128 bytes");
+    if (!validText(text, t)) return f.fail("value", "use printable ASCII and declared clock/data variables only");
+    if (index == 0) {
+      english = true;
+      l.value = std::move(text);
+    } else {
+      if (t.translationBytes + text.size() > MaxTranslationBytes)
+        return f.fail("value", "the translations of a theme share " + std::to_string(MaxTranslationBytes) + " bytes");
+      t.translationBytes = static_cast<uint16_t>(t.translationBytes + text.size());
+      if (!l.translationCount) l.firstTranslation = static_cast<uint16_t>(t.translations.size());
+      ++l.translationCount;
+      LocalizedText& item = t.translations.emplace_back();
+      item.language = static_cast<uint8_t>(index);
+      item.text = std::move(text);
+    }
+  }
+  return english || f.fail("value", "the en text is required");
+}
 // Parses one element of the root `layers` array and appends it to `t`, whose
 // data sources it is checked against; `ids` holds the earlier layers' IDs.
 // The layer is built in place in the list rather than in a local copy: a
@@ -1025,8 +1067,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
   if (!f.text("type", type, 16) || !f.number("x", -240, 479, l.x) || !f.number("y", -240, 479, l.y)) return false;
   if (type == "text") {
     l.type = LayerType::Text;
-    if (!f.keys("|id|type|x|y|anchor|value|size|color|scroll|bind|") || !f.text("value", l.value, 128)) return false;
-    if (!validText(l.value, t)) return f.fail("value", "use printable ASCII and declared clock/data variables only");
+    if (!f.keys("|id|type|x|y|anchor|value|size|color|scroll|bind|") || !parseTextValue(o, t, f, l)) return false;
     if (!f.number("size", 8, 96, l.size) || !f.color("color", l.color)) return false;
     std::string anchor = "top-left";
     if (!f.text("anchor", anchor, 20, false)) return false;
@@ -1093,13 +1134,62 @@ std::string expandText(const std::string& value, const tm* t) {
   static const std::vector<ThemeValue> empty;
   return expandText(value, t, empty);
 }
+// Month and weekday names, one fixed-width NUL-padded slot each, in flash
+// (PROGMEM on the ESP8266): the full names and, separately, the abbreviations,
+// so none is cut from the full name. ASCII only, because the built-in font is.
+// Only the slot being expanded is copied out, into a small stack buffer.
+constexpr size_t MonthSlot = 11, DaySlot = 14, ShortSlot = 5;
+static const char monthNames[kLanguageCount][12][MonthSlot] PROGMEM = {
+  {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"},
+  {"Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"},
+  {"Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"},
+  {"Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"},
+  {"Januar", "Februar", "Marz", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"},
+  {"Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"}};
+static const char monthShort[kLanguageCount][12][ShortSlot] PROGMEM = {
+  {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"},
+  {"Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"},
+  {"Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"},
+  {"Janv", "Fevr", "Mars", "Avr", "Mai", "Juin", "Juil", "Aout", "Sept", "Oct", "Nov", "Dec"},
+  {"Jan", "Feb", "Mar", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"},
+  {"Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"}};
+static const char dayNames[kLanguageCount][7][DaySlot] PROGMEM = {
+  {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"},
+  {"Domingo", "Segunda-feira", "Terca-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sabado"},
+  {"Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"},
+  {"Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"},
+  {"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"},
+  {"Domenica", "Lunedi", "Martedi", "Mercoledi", "Giovedi", "Venerdi", "Sabato"}};
+static const char dayShort[kLanguageCount][7][ShortSlot] PROGMEM = {
+  {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"},
+  {"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"},
+  {"Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"},
+  {"Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"},
+  {"Son", "Mon", "Die", "Mit", "Don", "Fre", "Sam"},
+  {"Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"}};
+// The name held in a flash slot of `width` bytes.
+static std::string localName(const char* slot, size_t width) {
+  char b[DaySlot];
+  memcpy_P(b, slot, width);
+  b[width - 1] = 0;
+  return std::string(b);
+}
+// The text of a layer in `language`: its translation, else the English value.
+// A reference into the theme, so a re-expansion copies nothing.
+const std::string& layerText(const Theme& theme, const Layer& l, uint8_t language) {
+  if (language)
+    for (size_t i = 0; i < l.translationCount; ++i) {
+      const LocalizedText& item = theme.translations[l.firstTranslation + i];
+      if (item.language == language) return item.text;
+    }
+  return l.value;
+}
 // Substitutes every {token} in a validated text template: clock/date tokens
 // first (only when `t` is non-null and the field is in range), then a
 // matching fetched value, and "--" if neither resolves -- the same fallback
 // an unsynchronized clock or a field that has never been fetched produces.
-std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values) {
-  static const char* months[] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
-  static const char* days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, uint8_t language) {
+  if (language >= kLanguageCount) language = 0;
   std::string out;
   for (size_t i = 0; i < value.size();) {
     if (value[i] != '{') {
@@ -1125,11 +1215,9 @@ std::string expandText(const std::string& value, const tm* t, const std::vector<
         snprintf(b, sizeof(b), key == "YYYY" ? "%04d" : "%02d", n);
         v = b;
       } else if ((key == "MON" || key == "MONTH") && t->tm_mon >= 0 && t->tm_mon < 12) {
-        v = months[t->tm_mon];
-        if (key == "MON") v.resize(3);
+        v = key == "MON" ? localName(monthShort[language][t->tm_mon], ShortSlot) : localName(monthNames[language][t->tm_mon], MonthSlot);
       } else if ((key == "WD" || key == "WEEKDAY") && t->tm_wday >= 0 && t->tm_wday < 7) {
-        v = days[t->tm_wday];
-        if (key == "WD") v.resize(3);
+        v = key == "WD" ? localName(dayShort[language][t->tm_wday], ShortSlot) : localName(dayNames[language][t->tm_wday], DaySlot);
       }
     }
     if (v == "--") for (const auto& item : values) if (item.key == key) {
@@ -1354,6 +1442,14 @@ void Engine::setTheme(Theme theme, uint32_t now) {
   }
   full_ = true;
 }
+// The device language for {MON}, {WD} and the text of localized layers; the
+// next update() re-expands every text layer when it changed.
+void Engine::setLanguage(uint8_t language) {
+  if (language >= kLanguageCount) language = 0;
+  if (language == language_) return;
+  language_ = language;
+  languageChanged_ = true;
+}
 // Records the latest fetched values for the next update() to resolve
 // bindings against. Reinstalling an identical set is a deliberate no-op
 // (including for scroll's "reinstalling the same values must not restart the
@@ -1406,8 +1502,10 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
       changed = changed || !sameGeometry(previous, s.resolved) || !sameColors(previous, s.resolved);
     }
     bool textChanged = false;
-    if (l.type == LayerType::Text && (timeChanged || valuesChanged_)) {
-      std::string text = expandText(l.value, time, values_);
+    if (l.type == LayerType::Text && (timeChanged || valuesChanged_ || languageChanged_)) {
+      // Only a spec 2 theme follows the device language; spec 1 stays English.
+      const uint8_t language = theme_.spec >= 2 ? language_ : 0;
+      std::string text = expandText(layerText(theme_, l, language), time, values_, language);
       if (text != s.text) {
         s.text = std::move(text);
         changed = true;
@@ -1457,6 +1555,7 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     full_ = false;
   }
   valuesChanged_ = false;
+  languageChanged_ = false;
   return dirty;
 }
 // Alpha-composites an RGB565 foreground pixel over a background one, blending

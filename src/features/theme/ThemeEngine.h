@@ -1,6 +1,7 @@
 #pragma once
 // Portable, declarative V1 model. No Arduino, filesystem, or notification policy.
 #include "BlockList.h"
+#include "Languages.h"
 #include <cstdint>
 #include <ctime>
 #include <string>
@@ -12,6 +13,8 @@ constexpr size_t MaxManifest = 16384;
 constexpr size_t MaxLayers = 32;
 constexpr size_t MaxDataSources = 4;
 constexpr size_t MaxDataFields = 8;
+// All non-English texts of one theme together (spec 2 localized text).
+constexpr size_t MaxTranslationBytes = 1024;
 
 // Integer pixel rectangle. w/h <= 0 means empty, not "invalid" -- callers rely
 // on that to skip drawing without a separate validity flag.
@@ -104,9 +107,18 @@ struct Layer {
   uint8_t anchorX = 0, anchorY = 0;
   uint16_t color = 0xffff, fill = 0, stroke = 0;
   bool hasFill = false, hasStroke = false, loop = true;
+  // Spec 2: this layer's other languages are Theme::translations[firstTranslation]
+  // and the translationCount - 1 after it; 0 for a layer with a single text.
+  uint16_t firstTranslation = 0;
+  uint8_t translationCount = 0;
   uint16_t frames = 1, fps = 1;
   Scroll scroll;
   std::vector<Binding> bindings;
+};
+// One language's text of a localized text layer.
+struct LocalizedText {
+  uint8_t language = 0;   // index of Languages.h, never 0 (English is `value`)
+  std::string text;
 };
 struct ThemeDataField {
   std::string id, path;
@@ -133,6 +145,11 @@ struct Theme {
   std::string id, name, author, version;
   uint16_t background = 0;
   BlockList<Layer> layers;
+  // The non-English texts of localized layers, each its own small allocation
+  // in blocks (issue #30), at most MaxTranslationBytes in all; `value` holds
+  // the English one.
+  BlockList<LocalizedText> translations;
+  uint16_t translationBytes = 0;
   std::vector<ThemeDataSource> data;
 };
 // Random-access bytes of a manifest. parseTheme() reads it forward in small
@@ -147,7 +164,10 @@ class ManifestSource {
 bool parseTheme(const std::string& json, Theme& out, std::string& error);
 bool parseTheme(ManifestSource& json, Theme& out, std::string& error);
 std::string expandText(const std::string& value, const tm* time);
-std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values);
+// `language` picks the month and weekday names ({MON}, {WD}, ...); 0 is English.
+std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values, uint8_t language = 0);
+// The text of a layer in `language`: its translation, else the English value.
+const std::string& layerText(const Theme& theme, const Layer& layer, uint8_t language);
 std::string assetPath(const Layer& layer, uint16_t frame);
 
 // Per-layer runtime state: the current resolved geometry/color, the expanded
@@ -175,6 +195,8 @@ class Engine {
  public:
   void setTheme(Theme theme, uint32_t now);
   void setValues(std::vector<ThemeValue> values);
+  // The device language (an index of Languages.h). Only a spec 2 theme follows it.
+  void setLanguage(uint8_t language);
   // Forces the next update() to report a full-canvas dirty rectangle, e.g.
   // after a notification overlay restores the theme. It never resets scroll
   // progress, only what gets repainted.
@@ -187,7 +209,8 @@ class Engine {
   Theme theme_;
   BlockList<LayerState> states_;
   std::vector<ThemeValue> values_;
-  bool full_ = true, hadTime_ = false, valuesChanged_ = false;
+  bool full_ = true, hadTime_ = false, valuesChanged_ = false, languageChanged_ = false;
+  uint8_t language_ = 0;
   tm lastTime_{};
 };
 

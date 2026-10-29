@@ -296,10 +296,59 @@ static void testThemeIndex() {
   assert(sixteen <= one && largest <= LargestBlockBudget);
 }
 
+// A spec 2 theme with localized text: six text layers in five languages each
+// (30 characters a language, 720 bytes of translations in all). Parsing it
+// must stay inside the load budget with no large block, and a running one
+// inside the running budget -- the translations are small separate
+// allocations in blocks, not one string that doubles as it grows.
+static std::string localizedManifest(int layers, int characters) {
+  const std::string text(characters, 'x');
+  std::string json = "{\"spec\":2,\"theme\":{\"id\":\"loc\",\"name\":\"Loc\",\"author\":\"A\",\"version\":\"1\"},"
+    "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},\"layers\":[";
+  for (int i = 0; i < layers; ++i) {
+    if (i) json += ",";
+    json += "{\"id\":\"t" + std::to_string(i) + "\",\"type\":\"text\",\"x\":0,\"y\":" + std::to_string(i * 20) + ",\"size\":16,\"color\":\"#ffffff\","
+      "\"value\":{\"en\":\"" + text + " {WEEKDAY}\",\"pt\":\"" + text + "\",\"es\":\"" + text + "\",\"fr\":\"" + text + "\",\"de\":\"" + text + "\"}}";
+  }
+  return json + "]}";
+}
+static void testLocalizedTheme() {
+  const std::string json = localizedManifest(6, 30);
+  Theme theme;
+  std::string error;
+  live = peak = largest = 0;
+  counting = true;
+  {
+    bool ok = parseTheme(json, theme, error);
+    if (!ok) std::cerr << error << '\n';
+    assert(ok);
+  }
+  const size_t loadPeak = peak, loadLargest = largest;
+  assert(theme.translations.size() == 24 && theme.translationBytes == 720);
+  live = peak = largest = 0;
+  size_t running = 0;
+  {
+    Engine engine;
+    engine.setTheme(std::move(theme), 0);
+    engine.setLanguage(4);
+    tm time{};
+    time.tm_year = 126; time.tm_mon = 9; time.tm_mday = 23; time.tm_wday = 5;
+    engine.update(1000, &time);
+    running = live;
+  }
+  printf("localized theme (6 layers x 5 languages): load peak %zu B, largest block %zu B, running %zu B\n", loadPeak, loadLargest, running);
+  counting = false;
+  assert(loadPeak <= LoadPeakBudget && loadLargest <= LargestBlockBudget && running <= RunningBudget);
+  // The most the translations may take in all, spread over 32 layers.
+  Theme full;
+  assert(!parseTheme(localizedManifest(32, 30), full, error) && error.find("1024") != std::string::npos);
+}
+
 int main(int argc, char** argv) {
   testBlockList();
   testManyEntries();
   testThemeIndex();
+  testLocalizedTheme();
   const char* examples[] = {"examples/themes/pixel-room.stheme", "examples/themes/live-status.stheme",
                             "examples/themes/terminal-ops.stheme"};
   bool report = argc > 1;
