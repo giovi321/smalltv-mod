@@ -1,5 +1,5 @@
 // Deterministic mutation fuzzer for the parsers that take untrusted bytes:
-// .stheme packages (STH1 container + STI1 images), theme manifests, theme
+// .stheme packages (STH1 container + STI1/STI2 images), theme manifests, theme
 // metadata sidecars and the settings JSON accepted by /api/import.
 //
 // Built by tests/fuzz/run.sh with -m32 and ASan+UBSan, with
@@ -375,7 +375,7 @@ Bytes mutatePackage(const Bytes& seed, Rng& rng) {
   std::vector<Record> records;
   if (!rng.chance(3) && splitPackage(seed, records) && !records.empty()) {
     Record& r = records[rng.below(records.size())];
-    switch (rng.below(6)) {
+    switch (rng.below(7)) {
       case 0:   // manifest through the JSON mutator
         for (auto& rec : records)
           if (rec.path == "theme.json") {
@@ -399,6 +399,19 @@ Bytes mutatePackage(const Bytes& seed, Rng& rng) {
       case 4:   // drop or duplicate a record
         if (rng.chance(2)) records.erase(records.begin() + rng.below(records.size()));
         else records.insert(records.begin() + rng.below(records.size()), records[rng.below(records.size())]);
+        break;
+      case 5:   // one byte of an STI2 image's runs, past its header, palette
+                // and row table: most such images still load and get drawn
+        if (r.payload.size() >= 12 && r.payload.compare(0, 4, "STI2") == 0) {
+          size_t rows = 12 + uint8_t(r.payload[9]) * (r.payload[8] ? 3 : 2) +
+                        4 * (uint8_t(r.payload[6]) | (uint8_t(r.payload[7]) << 8));
+          if (rows < r.payload.size()) {
+            size_t at = rows + rng.below(r.payload.size() - rows);
+            r.payload[at] = rng.chance(2) ? char(rng.next()) : char(r.payload[at] ^ (1 << rng.below(8)));
+            break;
+          }
+        }
+        mutateBytes(r.payload, rng);
         break;
       default:
         mutateBytes(r.payload, rng);
@@ -451,6 +464,14 @@ Bytes smallPackage() {
   std::vector<Record> records;
   records.push_back({"theme.json", R"({"spec":1,"theme":{"id":"seed","name":"Seed","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"layers":[{"id":"bg","type":"image","x":0,"y":0,"source":"images/bg.png"},{"id":"t","type":"text","x":4,"y":4,"text":"{time}"}]})"});
   records.push_back({"images/bg.png.sti", image});
+  return joinPackage(records);
+}
+
+// A spec 2 package that shows one image, for the STI2 files in tests/theme/sti.
+Bytes imagePackage(const Bytes& image) {
+  std::vector<Record> records;
+  records.push_back({"theme.json", R"({"spec":2,"theme":{"id":"seed","name":"Seed","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"layers":[{"id":"img","type":"image","x":0,"y":0,"source":"images/img.png"}]})"});
+  records.push_back({"images/img.png.sti", image});
   return joinPackage(records);
 }
 
@@ -522,6 +543,10 @@ int main(int argc, char** argv) {
     if (p.size() > 7 && p.compare(p.size() - 7, 7, ".stheme") == 0 && readFile(p, data)) corpus[PackageTarget].push_back(data);
     if (readFile(p + "/theme.json", data)) corpus[ManifestTarget].push_back(data);
   }
+  // The bundled themes are spec 1 (STI1 only); STI2 rows and palettes are
+  // reached through the shared test files, one package each.
+  for (const auto& p : listDir(root + "/tests/theme/sti"))
+    if (readFile(p, data) && data.compare(0, 4, "STI2") == 0) corpus[PackageTarget].push_back(imagePackage(data));
   for (const auto& p : listDir(root + "/tests/fuzz/corpus/meta"))
     if (readFile(p, data)) corpus[MetaTarget].push_back(data);
   for (const auto& p : listDir(root + "/tests/fuzz/corpus/import"))
