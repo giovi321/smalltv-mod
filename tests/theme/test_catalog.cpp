@@ -1,10 +1,12 @@
 #include "ThemeCatalog.h"
+#include "BlockList.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <fstream>
 #include <cstring>
 #include <iostream>
+#include <vector>
 using namespace smalltv;
 struct Memory : Source {
   std::string data;
@@ -111,6 +113,48 @@ int main() {
     Memory none;Text first;assert(copyThemeIndex(none,first,"pixel-room",&good)&&first.data==a);
     Text full;full.room=a.size()+5;assert(!copyThemeIndex(from,full,"other-theme",&newer));
     Text tiny;tiny.room=5;assert(!copyThemeIndex(from,tiny,"nothing",nullptr));
+  }
+  // The list reply (issue #63): every package held as a ListedTheme, the
+  // reply written from them in pieces of the writer's size, every piece but
+  // the last one full. Together the pieces are exactly what 3.2.0 sent, the
+  // same fields as one document through serializeJson(), escapes included.
+  struct Pieces : Sink {
+    std::vector<std::string> got;
+    bool write(const char* p,size_t n) override {got.emplace_back(p,n);return true;}
+    std::string joined() const {std::string s;for(const std::string& g:got)s+=g;return s;}
+  };
+  {
+    std::string odd;for(int c=1;c<128;++c)odd+=char(c);odd+="\xc3\xa9\xe2\x82\xac";
+    BlockList<ListedTheme> themes;themes.reserve(16);
+    JsonDocument doc;doc["selected"]="theme-3";doc["error"]=odd;doc["freeBytes"]=786432;
+    JsonArray list=doc["themes"].to<JsonArray>();
+    for(int i=0;i<16;++i){
+      std::string id="theme-"+std::to_string(i),name=i==2?odd:"Name \"q\" \\ "+std::to_string(i),author=i%3?"":"a\tb";
+      std::string version="1."+std::to_string(i),error=i%2?"Invalid package":"";
+      ListedTheme& t=themes.emplace_back();t.set(id.c_str(),name.c_str(),author.c_str(),version.c_str(),error.c_str());
+      t.bytes=i==5?4294967295u:40000+i;t.valid=i%2==0;
+      JsonObject o=list.add<JsonObject>();o["id"]=id;o["name"]=name;o["author"]=author;o["version"]=version;
+      o["bytes"]=t.bytes;o["valid"]=t.valid;o["error"]=error;
+    }
+    std::string whole;serializeJson(doc,whole);
+    Pieces p16,p128;writeThemeList<16>("theme-3",odd.c_str(),786432,themes,p16);writeThemeList<128>("theme-3",odd.c_str(),786432,themes,p128);
+    for(auto t:{std::make_pair(&p16,size_t(16)),std::make_pair(&p128,size_t(128))}){
+      assert(t.first->joined()==whole);
+      assert(t.first->got.size()==(whole.size()+t.second-1)/t.second);
+      for(size_t i=0;i+1<t.first->got.size();++i)assert(t.first->got[i].size()==t.second);
+    }
+    BlockList<ListedTheme> none;Pieces empty;writeThemeList<16>("","",0,none,empty);
+    assert(empty.joined()=="{\"selected\":\"\",\"error\":\"\",\"freeBytes\":0,\"themes\":[]}");
+  }
+  // A ListedTheme keeps its five fields apart, also when set from its own
+  // fields; a field ends at a 0 byte, as the document's copy of c_str() did.
+  {
+    ListedTheme t;t.set("a","","c","d","");
+    assert(t.id()==std::string("a")&&!*t.name()&&t.author()==std::string("c")&&t.version()==std::string("d")&&!*t.error());
+    t.set(t.id(),"Name",t.author(),t.version(),"e");
+    assert(t.id()==std::string("a")&&t.name()==std::string("Name")&&t.author()==std::string("c")&&t.version()==std::string("d")&&t.error()==std::string("e"));
+    const std::string cut("x\0y",3);t.set(cut.c_str(),"n","","","");
+    assert(t.id()==std::string("x")&&t.name()==std::string("n"));
   }
   source.data.resize(10);
   auto truncated=inspectInstalledTheme(source,"pixel-room");assert(!truncated.valid&&!truncated.error.empty());

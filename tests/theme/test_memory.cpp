@@ -296,10 +296,94 @@ static void testThemeIndex() {
   assert(sixteen <= one && largest <= LargestBlockBudget);
 }
 
+// The list (GET /api/themes) of 16 themes. 3.2.0 held it in one document
+// (about 3.2 KB on the device with 16 short entries) and built the reply in
+// one string next to it; the device ran out of heap there after a row of
+// installs (issue #63). Held as ListedThemes the list takes at most half of
+// that document with short fields like the device's, less than it with the
+// longest fields the limits allow, and never a block over 512 B; writing the
+// reply in pieces takes no heap. Every field differs between the themes, as
+// on a device: the document keeps only one copy of equal strings.
+struct CountingSink : Sink {
+  size_t bytes = 0;
+  bool write(const char*, size_t count) override {
+    bytes += count;
+    return true;
+  }
+};
+struct ListUsage { size_t document, held, heldLargest, writing, writingLargest, bytes; };
+static ListUsage listUsage(size_t idLength, size_t nameLength, size_t versionLength, size_t errorLength) {
+  // Made before counting starts: only the list's own allocations count.
+  auto field = [](char c, size_t length, int i) {
+    std::string s = std::to_string(10 + i);
+    return std::string(length > 2 ? length - 2 : 0, c) + s;
+  };
+  std::vector<std::string> ids, names, authors, versions, errors;
+  for (int i = 0; i < 16; ++i) {
+    ids.push_back(field('x', idLength, i));
+    names.push_back(field('"', nameLength, i));
+    authors.push_back(field('\\', nameLength, i));
+    versions.push_back(field('"', versionLength, i));
+    errors.push_back(errorLength ? field('e', errorLength, i) : "");
+  }
+  ListUsage u{};
+  live = peak = largest = 0;
+  counting = true;
+  {
+    JsonDocument doc;
+    JsonArray list = doc["themes"].to<JsonArray>();
+    for (int i = 0; i < 16; ++i) {
+      JsonObject o = list.add<JsonObject>();
+      o["id"] = ids[i];
+      o["name"] = names[i];
+      o["author"] = authors[i];
+      o["version"] = versions[i];
+      o["bytes"] = 4294967295u;
+      o["valid"] = false;
+      o["error"] = errors[i];
+    }
+  }
+  counting = false;
+  u.document = peak;
+  BlockList<ListedTheme> themes;
+  live = peak = largest = 0;
+  counting = true;
+  themes.reserve(16);
+  for (int i = 0; i < 16; ++i) {
+    ListedTheme& t = themes.emplace_back();
+    t.set(ids[i].c_str(), names[i].c_str(), authors[i].c_str(), versions[i].c_str(), errors[i].c_str());
+    t.bytes = 4294967295u;
+  }
+  counting = false;
+  u.held = peak;
+  u.heldLargest = largest;
+  CountingSink sink;
+  live = peak = largest = 0;
+  counting = true;
+  writeThemeList<128>(ids[0].c_str(), errors[0].c_str(), 786432, themes, sink);
+  counting = false;
+  u.writing = peak;
+  u.writingLargest = largest;
+  u.bytes = sink.bytes;
+  return u;
+}
+static void testListReply() {
+  const ListUsage small = listUsage(7, 7, 5, 0), longest = listUsage(48, 96, 32, 96);
+  for (const ListUsage* u : {&small, &longest})
+    if (u->heldLargest > 512 || u->writing || u->writingLargest)
+      fprintf(stderr, "list: document %zu B; held %zu B, largest block %zu B; writing %zu B, largest block %zu B\n",
+              u->document, u->held, u->heldLargest, u->writing, u->writingLargest);
+  assert(small.held * 2 <= small.document && longest.held < longest.document);
+  assert(small.heldLargest <= 512 && longest.heldLargest <= 512);
+  assert(!small.writing && !longest.writing && !small.writingLargest && !longest.writingLargest);
+  assert(longest.bytes > 16 * (48 + 2 * 96 + 2 * 32 + 96));
+}
+
 int main(int argc, char** argv) {
   testBlockList();
   testManyEntries();
   testThemeIndex();
+  testListReply();
   const char* examples[] = {"examples/themes/pixel-room.stheme", "examples/themes/live-status.stheme",
                             "examples/themes/terminal-ops.stheme"};
   bool report = argc > 1;

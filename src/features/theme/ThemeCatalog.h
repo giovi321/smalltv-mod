@@ -1,10 +1,22 @@
 #pragma once
+#include "BlockList.h"
 #include "ThemePackage.h"
 #include <ArduinoJson.h>
 #include <algorithm>
 #include <cstring>
 #include <initializer_list>
 #include <utility>
+// The list reply's fixed text stays in flash on the ESP8266, where string
+// constants otherwise take RAM for good. Elsewhere PSTR() and the _P
+// functions are the plain ones.
+#if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
+#include <pgmspace.h>
+#endif
+#ifndef PSTR
+#define PSTR(s) (s)
+#define strlen_P strlen
+#define memcpy_P memcpy
+#endif
 
 namespace smalltv {
 // One row of GET /api/themes: metadata for an installed package regardless
@@ -181,6 +193,122 @@ class Sink {
   virtual ~Sink() = default;
   virtual bool write(const char* data, size_t count) = 0;
 };
+// Collects what serializeJson() writes in a buffer of `Piece` bytes and
+// hands it to a Sink each time the buffer is full, and once more at the end.
+template <size_t Piece> class PieceWriter {
+ public:
+  explicit PieceWriter(Sink& to) : to_(to) {}
+  size_t write(uint8_t c) { return write(&c, 1); }
+  size_t write(const uint8_t* data, size_t count) {
+    put(data, count, memcpy);
+    return count;
+  }
+  // Text kept in flash (PSTR).
+  void writeFlash(const char* text) { put(text, strlen_P(text), memcpy_P); }
+  void flush() {
+    if (used_) to_.write(buffer_, used_);
+    used_ = 0;
+  }
+ private:
+  void put(const void* data, size_t count, void* (*copy)(void*, const void*, size_t)) {
+    const char* from = static_cast<const char*>(data);
+    for (size_t done = 0; done < count;) {
+      if (used_ == Piece) flush();
+      const size_t n = std::min(Piece - used_, count - done);
+      copy(buffer_ + used_, from + done, n);
+      used_ += n;
+      done += n;
+    }
+  }
+  Sink& to_;
+  size_t used_ = 0;
+  char buffer_[Piece];
+};
+// One package of GET /api/themes while the list is put together. Its five
+// text fields are packed into one string, each ended by a 0 byte: 32 bytes
+// and one short string per package. 3.2.0 held the list in one JSON
+// document, about 3.2 KB with 16 themes, and with the reply built next to it
+// the ESP8266 ran out of heap after a row of installs (issue #63).
+class ListedTheme {
+ public:
+  uint32_t bytes = 0;
+  bool valid = false;
+  // A field ends at its first 0 byte. The fields may be this package's own:
+  // the new text is put together before the old one goes.
+  void set(const char* id, const char* name, const char* author, const char* version, const char* error) {
+    std::string text;
+    text.reserve(strlen(id) + strlen(name) + strlen(author) + strlen(version) + strlen(error) + 5);
+    for (const char* field : {id, name, author, version, error}) text.append(field, strlen(field) + 1);
+    text_.swap(text);
+  }
+  const char* id() const { return field(0); }
+  const char* name() const { return field(1); }
+  const char* author() const { return field(2); }
+  const char* version() const { return field(3); }
+  const char* error() const { return field(4); }
+ private:
+  const char* field(int n) const {
+    const char* p = text_.c_str();
+    if (text_.empty()) return p;
+    while (n--) p += strlen(p) + 1;
+    return p;
+  }
+  std::string text_;
+};
+namespace listing {
+// Fixed text, given as PSTR().
+template <class Out> void raw(Out& out, const char* text) { out.writeFlash(text); }
+// A string value as ArduinoJson writes it, escapes and all. The document
+// only points at the text, so it takes no heap.
+template <class Out> void text(Out& out, const char* value) {
+  JsonDocument doc;
+  doc.set(JsonString(value, true));
+  serializeJson(doc, out);
+}
+// Written digit by digit from the end: no format string in RAM.
+template <class Out> void number(Out& out, uint32_t value) {
+  char digits[10];
+  size_t n = 0;
+  do {
+    digits[sizeof(digits) - ++n] = char('0' + value % 10);
+    value /= 10;
+  } while (value);
+  out.write(reinterpret_cast<const uint8_t*>(digits + sizeof(digits) - n), n);
+}
+}
+// The reply of GET /api/themes, written straight to `to` in pieces of
+// `Piece` bytes (the last one shorter), never whole in one block of heap:
+// the same bytes as 3.2.0's document, fields in the same order.
+template <size_t Piece>
+void writeThemeList(const char* selected, const char* error, uint32_t freeBytes, const BlockList<ListedTheme>& themes, Sink& to) {
+  PieceWriter<Piece> out(to);
+  listing::raw(out, PSTR("{\"selected\":"));
+  listing::text(out, selected);
+  listing::raw(out, PSTR(",\"error\":"));
+  listing::text(out, error);
+  listing::raw(out, PSTR(",\"freeBytes\":"));
+  listing::number(out, freeBytes);
+  listing::raw(out, PSTR(",\"themes\":["));
+  bool first = true;
+  for (const ListedTheme& t : themes) {
+    listing::raw(out, first ? PSTR("{\"id\":") : PSTR(",{\"id\":"));
+    first = false;
+    listing::text(out, t.id());
+    listing::raw(out, PSTR(",\"name\":"));
+    listing::text(out, t.name());
+    listing::raw(out, PSTR(",\"author\":"));
+    listing::text(out, t.author());
+    listing::raw(out, PSTR(",\"version\":"));
+    listing::text(out, t.version());
+    listing::raw(out, PSTR(",\"bytes\":"));
+    listing::number(out, t.bytes);
+    listing::raw(out, t.valid ? PSTR(",\"valid\":true,\"error\":") : PSTR(",\"valid\":false,\"error\":"));
+    listing::text(out, t.error());
+    listing::raw(out, PSTR("}"));
+  }
+  listing::raw(out, PSTR("]}"));
+  out.flush();
+}
 // Install and delete rewrite the index through a copy: every usable entry
 // except the one for `id`, then `added` if given. False if a write fails.
 inline bool copyThemeIndex(Source& from, Sink& to, const std::string& id, const InstalledTheme* added) {

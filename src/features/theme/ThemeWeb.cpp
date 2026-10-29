@@ -288,7 +288,8 @@ bool requestId(String& id) {
 // The index, read once: a usable line fills the listed package with the
 // same id and size. Returns those packages as bits (MaxThemes fits) and sets
 // `rewrite` when a line matches no package.
-__attribute__((noinline)) uint32_t fillFromIndex(JsonArray list, unsigned count, bool& rewrite) {
+using Listing = smalltv::BlockList<smalltv::ListedTheme>;
+__attribute__((noinline)) uint32_t fillFromIndex(Listing& list, bool& rewrite) {
   uint32_t listed = 0;
   ThemeFile file;
   if (!file.open(indexPath)) return 0;
@@ -296,61 +297,83 @@ __attribute__((noinline)) uint32_t fillFromIndex(JsonArray list, unsigned count,
   smalltv::InstalledTheme line;
   for (smalltv::IndexEntry kind; (kind = index.next(line)) != smalltv::IndexEntry::End;) {
     int match = -1;
-    for (unsigned i = 0; kind == smalltv::IndexEntry::Usable && match < 0 && i < count; ++i) {
-      JsonObjectConst o = list[i];
-      if (!(listed & (1u << i)) && line.id == o["id"].as<const char*>() && line.bytes == o["bytes"].as<uint32_t>()) match = i;
+    for (unsigned i = 0; kind == smalltv::IndexEntry::Usable && match < 0 && i < list.size(); ++i) {
+      if (!(listed & (1u << i)) && line.id == list[i].id() && line.bytes == list[i].bytes) match = i;
     }
     if (match < 0) {
       rewrite = true;
       continue;
     }
-    JsonObject o = list[match];
-    o["name"] = line.name.c_str();
-    o["author"] = line.author.c_str();
-    o["version"] = line.version.c_str();
-    o["valid"] = true;
+    smalltv::ListedTheme& t = list[match];
+    t.set(t.id(), line.name.c_str(), line.author.c_str(), line.version.c_str(), t.error());
+    t.valid = true;
     listed |= 1u << match;
   }
   return listed;
 }
 // Fills a listed package from the package itself, the way a selection
 // checks it. True when it is valid.
-__attribute__((noinline)) bool inspectInto(JsonObject o) {
-  String id = o["id"].as<const char*>();
+__attribute__((noinline)) bool inspectInto(smalltv::ListedTheme& t) {
+  String id = t.id();
   smalltv::InstalledTheme info;
   {
     ThemeFile file;
     file.open("/themes/" + id + ".stheme");
     info = smalltv::inspectInstalledTheme(file, id.c_str());
   }
-  o["name"] = info.name.c_str();
-  o["author"] = info.author.c_str();
-  o["version"] = info.version.c_str();
-  o["valid"] = info.valid;
-  o["error"] = info.error.c_str();
+  t.set(id.c_str(), info.name.c_str(), info.author.c_str(), info.version.c_str(), info.error.c_str());
+  t.valid = info.valid;
   return info.valid;
 }
 // The index from a listing: one line per valid package.
-__attribute__((noinline)) void writeIndex(JsonArrayConst list) {
+__attribute__((noinline)) void writeIndex(const Listing& list) {
   bool written;
   {
     File to = LittleFS.open(indexNext, "w");
     FileSink sink(to);
     written = bool(to);
-    for (JsonObjectConst o : list) {
+    for (const smalltv::ListedTheme& t : list) {
       if (!written) break;
-      if (!o["valid"].as<bool>()) continue;
+      if (!t.valid) continue;
       smalltv::InstalledTheme entry;
-      entry.id = o["id"].as<const char*>();
-      entry.name = o["name"].as<const char*>();
-      entry.author = o["author"].as<const char*>();
-      entry.version = o["version"].as<const char*>();
-      entry.bytes = o["bytes"].as<uint32_t>();
+      entry.id = t.id();
+      entry.name = t.name();
+      entry.author = t.author();
+      entry.version = t.version();
+      entry.bytes = t.bytes;
       std::string line = smalltv::themeIndexLine(entry);
       written = sink.write(line.data(), line.size());
     }
   }
   publishIndex(written);
+}
+// The body of the current reply, piece by piece, with a pause after each
+// (CONTRIBUTING: a loop over input-sized data yields).
+struct ReplySink : smalltv::Sink {
+  bool write(const char* data, size_t count) override {
+    server->sendContent(data, count);
+    yield();
+    return true;
+  }
+};
+struct CountSink : smalltv::Sink {
+  size_t bytes = 0;
+  bool write(const char*, size_t count) override {
+    bytes += count;
+    return true;
+  }
+};
+// The reply, written twice the same way: once only to count its bytes for
+// the Content-Length, then straight to the client in 128-byte pieces, never
+// whole in one block of heap (#63). A step of its own like the three above,
+// so its buffer is on the loop stack only while it sends.
+__attribute__((noinline)) void sendList(const Listing& list, const String& error, size_t storage) {
+  CountSink count;
+  smalltv::writeThemeList<128>(settings->themeId.c_str(), error.c_str(), storage, list, count);
+  server->setContentLength(count.bytes);
+  server->send(200, "application/json", "");
+  ReplySink sink;
+  smalltv::writeThemeList<128>(settings->themeId.c_str(), error.c_str(), storage, list, sink);
 }
 // GET /api/themes: every installed package's metadata and validity, without
 // requiring any of them to be the currently active theme. A package with a
@@ -362,43 +385,36 @@ __attribute__((noinline)) void writeIndex(JsonArrayConst list) {
 // is written again, so a package is only inspected once.
 void listThemes() {
   if (!auth()) return;
-  JsonDocument doc;
-  doc["selected"] = settings->themeId;
-  doc["error"] = g_themeMode.error();
-  doc["freeBytes"] = freeBytes();
-  JsonArray list = doc["themes"].to<JsonArray>();
+  // The running theme's error and the free storage as the list starts.
+  const String error = g_themeMode.error();
+  const size_t storage = freeBytes();
+  Listing list;
+  list.reserve(MaxThemes);
   // First each package's id and size, from the directory alone; the other
   // fields as inspectInstalledTheme() gives them for a package that does not
   // load, until something better is known.
   File dir = LittleFS.open("/themes", "r");
-  unsigned count = 0;
-  for (File entry = dir.openNextFile(); entry && count < MaxThemes; entry = dir.openNextFile()) {
+  for (File entry = dir.openNextFile(); entry && list.size() < MaxThemes; entry = dir.openNextFile()) {
     String name = entry.name();
     if (entry.isDirectory() || !name.endsWith(".stheme")) continue;
     int slash = name.lastIndexOf('/');
     if (slash >= 0) name = name.substring(slash + 1);
     String id = name.substring(0, name.length() - 7);
     if (!smalltv::validId(id.c_str())) continue;
-    JsonObject o = list.add<JsonObject>();
-    o["id"] = id;
-    o["name"] = id;
-    o["author"] = "";
-    o["version"] = "";
-    o["bytes"] = entry.size();
-    o["valid"] = false;
-    o["error"] = "";
-    ++count;
+    smalltv::ListedTheme& t = list.emplace_back();
+    t.set(id.c_str(), id.c_str(), "", "", "");
+    t.bytes = entry.size();
     yield();
   }
   dir.close();
   // Then the index; any package it does not cover is inspected. Inspecting
   // a package parses it; before the first one that needs it, free the
   // running theme if the heap is short (issue #30). Its error is already
-  // copied into the reply above.
+  // copied above.
   bool rewrite = false;  // the index needs writing again
-  const uint32_t listed = fillFromIndex(list, count, rewrite);
+  const uint32_t listed = fillFromIndex(list, rewrite);
   bool released = false;
-  for (unsigned i = 0; i < count; ++i) {
+  for (unsigned i = 0; i < list.size(); ++i) {
     if (listed & (1u << i)) continue;
     if (!released) {
       g_themeMode.release();
@@ -408,9 +424,7 @@ void listThemes() {
     yield();
   }
   if (rewrite) writeIndex(list);
-  String json;
-  serializeJson(doc, json);
-  server->send(200, "application/json", json);
+  sendList(list, error, storage);
 }
 // POST /api/themes/select: re-validates the package before committing to it,
 // so a corrupt or invalid installed theme can never become the active
