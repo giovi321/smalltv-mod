@@ -132,7 +132,7 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
   return pos == size;
 }
 // STI2 images need a spec 2 manifest (#31), so a package says which
-// firmware it needs. (Firmware up to 3.1.0 refuses any STI2 image, with
+// firmware it needs. (Firmware up to 3.1.1 refuses any STI2 image, with
 // "Invalid or truncated .stheme package", before it reads the manifest.)
 // Every image counts, also one that no layer uses.
 bool Package::checkSpec(const Theme& theme, std::string& error) const {
@@ -205,6 +205,23 @@ class Reader {
     alpha = a;
     return true;
   }
+  bool offset(uint32_t& out) {
+    uint8_t b[4];
+    for (uint8_t& x : b) if (!byte(x)) return false;
+    out = u32(b);
+    return true;
+  }
+  // Where the next byte comes from in the package.
+  uint32_t position() const { return at_ - len_ + pos_; }
+  // Moves on to `to`, keeping what the window holds when `to` is in it.
+  void skipTo(uint32_t to) {
+    if (to >= at_ - len_ && to <= at_) {
+      pos_ = static_cast<uint8_t>(to - (at_ - len_));
+    } else {
+      at_ = to;
+      len_ = pos_ = 0;
+    }
+  }
  private:
   Source& source_;
   uint32_t at_, end_;
@@ -264,24 +281,29 @@ bool walkRow(Reader& reader, uint8_t stride, uint8_t palette, int width, const u
 // into the row data without going backwards; rows with equal offsets share
 // data. Each distinct row must cover the width exactly without reading past
 // the next larger offset (or the end), so row() can trust what it reads.
-// Read in small pieces: this also runs when a package is listed.
+// This runs at install and at every boot (on the ESP8266 with the watchdog
+// on), and also when a package is listed: the table and the rows are each
+// read front to back through a 64-byte window, and every 16 rows the check
+// pauses for the device. One read per row offset was ~61,000 reads for a
+// package of 256 images (#53 review).
 bool Package::checkRows(const Entry& e) const {
   const uint32_t table = 12 + uint32_t(e.palette) * e.stride, rows = table + 4u * e.height;
   if (e.length < rows + 1) return false;
   const uint32_t data = e.length - rows;
+  Reader offsets(source_, e.offset + table, e.offset + rows);
+  Reader runs(source_, e.offset + rows, e.offset + e.length);
   uint32_t start = 0;
   for (uint32_t y = 0; y <= e.height; ++y) {
+    if (y % 16 == 0 && y > 0) source_.pause();
     uint32_t at = data;   // after the last row: its limit is the end
     if (y < e.height) {
-      uint8_t b[4];
-      if (!source_.read(e.offset + table + 4 * y, b, 4)) return false;
-      at = u32(b);
-      if (at >= data || at < start) return false;
+      if (!offsets.offset(at) || at >= data || at < start) return false;
       if (y > 0 && at == start) continue;   // shares the row above
     }
     if (y > 0) {
-      Reader reader(source_, e.offset + rows + start, e.offset + rows + at);
-      if (!walkRow(reader, e.stride, e.palette, e.width, nullptr, nullptr, 0, e.width, nullptr, nullptr)) return false;
+      runs.skipTo(e.offset + rows + start);
+      if (!walkRow(runs, e.stride, e.palette, e.width, nullptr, nullptr, 0, e.width, nullptr, nullptr) ||
+          runs.position() > e.offset + rows + at) return false;
     }
     start = at;
   }

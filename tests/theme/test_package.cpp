@@ -115,6 +115,9 @@ int main() {
     packed.data=package(image);assert(!rle.load(theme,error));
     image=sti2(rows,3);image[12+4*1]=0;image[12+4*2]=char(rows[0].size());  // rows may share data (1 reads row 0's),
     packed.data=package(image);assert(rle.load(theme,error));
+    std::string padded[3]={rows[0]+std::string(1,char(0x3f)),rows[1],rows[2]};  // a row may end before the next
+    packed.data=package(sti2(padded,3));                                   // offset; the byte left over is
+    assert(rle.load(theme,error) && rle.row("images/bg.png.sti",1,0,5,c,a) && c[0]==0xffff&&c[4]==0xffff);  // not read
     image=sti2(rows,3);image[12+4*2]=0;image[12+4*1]=char(rows[0].size()+1);// but offsets never go backwards
     packed.data=package(image);assert(!rle.load(theme,error));
     image=sti2(rows,3);image.resize(12+4*2);                               // table cut short,
@@ -123,6 +126,41 @@ int main() {
     entry(packed.data,"theme.json",json2);entry(packed.data,"images/bg.png.sti",image);  // so reading on would work
     entry(packed.data,"images/other.png.sti",sti2(rows,3));
     assert(!rle.load(theme,error));
+  }
+
+  // Loading checks every STI2 row, and on the ESP8266 that runs at install
+  // and at every boot (#53 review): the row table and the runs are read in
+  // 64-byte pieces, not one read per row, and the check pauses (a yield() on
+  // the device) every 16 rows, so a large package cannot trip the watchdog.
+  {
+    struct Counting : Memory {
+      unsigned reads=0,pauses=0;
+      bool read(uint32_t offset,void* dest,size_t count) override {++reads;return Memory::read(offset,dest,count);}
+      void pause() override {++pauses;}
+    };
+    // An opaque image `height` rows high, each row 4 repeats of 60 pixels in
+    // its own colours, so no two rows share data.
+    auto image=[](unsigned height){
+      std::string s="STI2";u16(s,240);u16(s,height);s+=char(0);s.append(3,'\0');
+      std::string runs;
+      for(unsigned y=0;y<height;++y){u32(s,runs.size());for(unsigned r=0;r<4;++r){runs+=char(0x40|59);u16(runs,y*4+r);}}
+      return s+runs;
+    };
+    auto load=[&](unsigned height,unsigned& reads,unsigned& pauses){
+      Counting counted;counted.data="STH1";u16(counted.data,2);u16(counted.data,0);
+      entry(counted.data,"theme.json",json2);entry(counted.data,"images/bg.png.sti",image(height));
+      Package big(counted);Theme theme;
+      assert(big.load(theme,error));
+      reads=counted.reads;pauses=counted.pauses;
+    };
+    unsigned baseReads,basePauses,reads,pauses;
+    load(1,baseReads,basePauses);
+    load(240,reads,pauses);
+    // 239 more rows: their offsets are 956 bytes (15 pieces), their runs
+    // 239 x 12 = 2,868 bytes (45 pieces); one more piece each where a row
+    // starts at a piece's edge.
+    if(reads-baseReads>62||pauses<15) std::cerr<<"240 rows: "<<reads-baseReads<<" more reads than 1 row, "<<pauses<<" pauses\n";
+    assert(reads-baseReads<=62&&pauses>=15);
   }
 
   // STI2 with a palette (byte 9 holds its size, 1-16): the entries (RGB565,

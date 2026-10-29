@@ -8,11 +8,19 @@ class Source {
   virtual ~Source() = default;
   virtual uint32_t size() const = 0;
   virtual bool read(uint32_t offset, void* dest, size_t count) = 0;
+  // Called between stretches of a long check (every few rows of an STI2
+  // image at load): on the device a yield(), so WiFi and the watchdog are
+  // served while a large package is checked.
+  virtual void pause() {}
 };
 // Container: STH1, u16 count, u16 zero; records: u16 path length,
 // u32 payload length, ASCII path, payload. All integers little-endian.
-// Image: STI1, u16 width, u16 height, u8 alpha flag, 3 zero bytes,
-// row-major little-endian RGB565 pixels (plus alpha8 when flag=1).
+// Images start with a 12-byte header: "STI1" or "STI2", u16 width, u16
+// height, u8 alpha flag, then 3 zero bytes, except that STI2 keeps its
+// palette size (0-16) in the first.
+// STI1: row-major RGB565 pixels (plus alpha8 when flag=1).
+// STI2 (spec 2 only): the palette, one u32 offset per row into the row
+// data, then each row as runs (see walkRow() in ThemePackage.cpp).
 class Package : public Assets {
  public:
   explicit Package(Source& source) : source_(source) {}

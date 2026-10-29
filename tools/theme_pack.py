@@ -159,7 +159,7 @@ def build(directory):
     validate_manifest(manifest_path)
     if type(manifest.get('spec')) is not int or manifest['spec'] not in (1, 2):
         raise ValueError('Expected spec: 1 or 2')
-    # STI2 images only for spec 2 (#31): firmware up to 3.1.0 reads only
+    # STI2 images only for spec 2 (#31): firmware up to 3.1.1 reads only
     # STI1 and refuses spec 2.
     sti2 = manifest['spec'] == 2
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,48}', manifest.get('theme', {}).get('id', '')):
