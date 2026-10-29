@@ -10,7 +10,7 @@ undefined behaviour aborts the run.
 |---|---|---|
 | `package` | `Package::load()`, `row()`, `resolve()` (STH1 container, STI1 and STI2 images), then the engine and `render()` on whatever loads; `inspectInstalledTheme()` | `examples/themes/*.stheme`, a small built-in package, each STI2 file in `tests/theme/sti/` in a spec 2 package |
 | `manifest` | `parseTheme()` on a string and through the streaming `ManifestSource`, then the engine | `examples/themes/*/theme.json` |
-| `meta` | `readThemeMeta()` (the `<id>.meta` sidecar) | `corpus/meta/` |
+| `meta` | `ThemeIndexReader` (the theme index, `/themes/.index`), then `copyThemeIndex()` as an install or delete runs it, whose output must read back as usable lines | `corpus/meta/` |
 | `import` | `deserializeJson()` + `settingsApplyJson()` as in `handleImport()`, then `settingsToJson()` and a second apply | `corpus/import/`, the device's own default export |
 
 `src/Settings.cpp` is compiled as it is, as the ESP8266 target, against the

@@ -1,6 +1,7 @@
 // Deterministic mutation fuzzer for the parsers that take untrusted bytes:
 // .stheme packages (STH1 container + STI1/STI2 images), theme manifests, theme
-// metadata sidecars and the settings JSON accepted by /api/import.
+// index (the listing fields of every installed theme) and the settings JSON
+// accepted by /api/import.
 //
 // Built by tests/fuzz/run.sh with -m32 and ASan+UBSan, with
 // -fno-sanitize-recover, so the first memory error or undefined behaviour
@@ -177,12 +178,50 @@ void fuzzManifest(const Bytes& input, uint64_t seed) {
   parseTheme(stream, second, error);
 }
 
+struct TextSink : Sink {
+  Bytes data;
+  size_t room = 0xffffffffu;
+  bool write(const char* p, size_t n) override {
+    if (n > room - data.size()) return false;
+    data.append(p, n);
+    return true;
+  }
+};
+
 void fuzzMeta(const Bytes& input, uint64_t seed) {
   Rng rng(seed);
-  MemorySource meta;
-  meta.data = input;
+  MemorySource index;
+  index.data = input;
+  if (rng.chance(8)) index.failAfter = rng.below(40);
+  {
+    ThemeIndexReader reader(index);
+    InstalledTheme entry;
+    IndexEntry kind;
+    bool usable = false;
+    for (unsigned n = 0; (kind = reader.next(entry)) != IndexEntry::End; ++n) {
+      if (n > input.size()) abort();   // every line takes at least one byte
+      usable |= kind == IndexEntry::Usable;
+    }
+    if (usable) ++accepted[2];
+  }
+  // An install or a delete copies the index; a copy that succeeds must read
+  // back as usable lines only.
+  index.reads = 0;
+  TextSink out;
+  if (rng.chance(8)) out.room = rng.below(512);
+  InstalledTheme added;
+  added.id = "pixel-room";
+  added.name = rng.chance(2) ? "Pixel \"Room\"" : Bytes(96, '\\');
+  added.author = "Example";
+  added.version = "1.0";
+  added.bytes = rng.next();
+  if (!copyThemeIndex(index, out, rng.chance(2) ? "pixel-room" : "other", rng.chance(2) ? &added : nullptr)) return;
+  MemorySource copy;
+  copy.data = out.data;
+  ThemeIndexReader again(copy);
   InstalledTheme entry;
-  if (readThemeMeta(meta, rng.chance(8) ? "Bad Id" : "pixel-room", rng.chance(2) ? 1234 : rng.next(), entry)) ++accepted[2];
+  for (IndexEntry kind; (kind = again.next(entry)) != IndexEntry::End;)
+    if (kind != IndexEntry::Usable) abort();
 }
 
 void fuzzImport(const Bytes& input, uint64_t) {

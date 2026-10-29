@@ -4,6 +4,7 @@
 // the device's sizes. The device has roughly 6.5 KiB free while a theme runs,
 // and listing or installing a theme loads a second one next to it.
 #include "BlockList.h"
+#include "ThemeCatalog.h"
 #include "ThemePackage.h"
 #include <cassert>
 #include <cstdio>
@@ -257,9 +258,48 @@ static void testBlockList() {
   counting = false;
 }
 
+// The listing reads the theme index one entry at a time, next to the running
+// theme and the reply it builds: reading 16 entries and an over-long line
+// must take no more heap than reading one entry, and no large block.
+static size_t indexPeak(const std::string& text) {
+  FileSource index("/dev/null");
+  index.bytes = text;
+  live = peak = largest = 0;
+  counting = true;
+  {
+    ThemeIndexReader reader(index);
+    InstalledTheme entry;
+    while (reader.next(entry) != IndexEntry::End) {}
+  }
+  counting = false;
+  return peak;
+}
+static void testThemeIndex() {
+  InstalledTheme longest;
+  longest.id = std::string(48, 'x');
+  longest.name = std::string(96, '"');
+  longest.author = std::string(96, '\\');
+  longest.version = std::string(32, '"');
+  longest.bytes = 4294967295u;
+  longest.valid = true;
+  const std::string line = themeIndexLine(longest);
+  const size_t one = indexPeak(line);
+  // A line far over MaxIndexLine and its strings over 96 bytes, then 16 of
+  // the longest entries; the whole stays within MaxIndexBytes, or nothing
+  // would be read at all.
+  std::string many = "{\"revision\":1,\"id\":\"" + std::string(2000, 'n') + "\"}\n";
+  for (int i = 0; i < 16; ++i) many += line;
+  assert(many.size() <= MaxIndexBytes);
+  const size_t sixteen = indexPeak(many);
+  if (sixteen > one || largest > LargestBlockBudget)
+    fprintf(stderr, "theme index: peak %zu B for one entry, %zu B for 16 and a long line, largest block %zu B\n", one, sixteen, largest);
+  assert(sixteen <= one && largest <= LargestBlockBudget);
+}
+
 int main(int argc, char** argv) {
   testBlockList();
   testManyEntries();
+  testThemeIndex();
   const char* examples[] = {"examples/themes/pixel-room.stheme", "examples/themes/live-status.stheme",
                             "examples/themes/terminal-ops.stheme"};
   bool report = argc > 1;

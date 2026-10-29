@@ -48,18 +48,62 @@ size_t freeBytes() {
   return cachedFree;
 }
 void forgetFreeBytes() { cachedFreeValid = false; }
-String metaPath(const String& id) { return "/themes/" + id + ".meta"; }
-// Writes the listing sidecar for a package that just passed Package::load()
-// (see readThemeMeta()). A failed write only costs a full inspection the next
-// time the package is listed.
-void writeMeta(const String& id, const smalltv::InstalledTheme& entry) {
-  std::string json = smalltv::themeMetaJson(entry);
-  File meta = LittleFS.open(metaPath(id), "w");
-  if (meta && meta.write(reinterpret_cast<const uint8_t*>(json.data()), json.size()) != json.size()) {
-    meta.close();
-    LittleFS.remove(metaPath(id));
+// The listing fields of every installed theme (see ThemeIndexReader). It is
+// rewritten through `.index.new`, which replaces it only once complete.
+const char* indexPath = "/themes/.index";
+const char* indexNext = "/themes/.index.new";
+struct FileSink : smalltv::Sink {
+  File& file;
+  explicit FileSink(File& f) : file(f) {}
+  bool write(const char* data, size_t count) override {
+    return file.write(reinterpret_cast<const uint8_t*>(data), count) == count;
   }
+};
+// Puts `.index.new` in place of the index. The old index is removed first, as
+// a rename onto an existing file is not the same on every core. Whatever
+// fails, no index is left that could be out of date: a missing one only
+// costs a full inspection of each package at the next list, which writes it
+// again.
+void publishIndex(bool written) {
+  LittleFS.remove(indexPath);
+  if (!written || !LittleFS.rename(indexNext, indexPath)) LittleFS.remove(indexNext);
   forgetFreeBytes();
+}
+// After an install or a delete: the index without `id`'s old line, plus
+// `added` if given.
+void updateIndex(const String& id, const smalltv::InstalledTheme* added) {
+  bool written;
+  {
+    ThemeFile from;
+    from.open(indexPath);   // none yet: copies nothing
+    File to = LittleFS.open(indexNext, "w");
+    FileSink sink(to);
+    written = to && smalltv::copyThemeIndex(from, sink, id.c_str(), added);
+  }
+  publishIndex(written);
+}
+// Firmware 3.1.0 and 3.1.1 kept one `<id>.meta` file per theme, each in an
+// 8 KB block of storage; the index replaces them. Removed at boot, a few
+// names per pass, so the directory is never changed while it is read.
+void removeSidecars() {
+  for (int pass = 0; pass < 64; ++pass) {
+    String names[4];
+    unsigned found = 0;
+#if defined(SMALLTV_ESP8266)
+    Dir dir = LittleFS.openDir("/themes");
+    while (found < 4 && dir.next()) if (dir.fileName().endsWith(".meta")) names[found++] = dir.fileName();
+#else
+    File dir = LittleFS.open("/themes", "r");
+    for (File f = dir.openNextFile(); found < 4 && f; f = dir.openNextFile()) {
+      String name = f.name();
+      if (name.endsWith(".meta")) names[found++] = name.substring(name.lastIndexOf('/') + 1);
+    }
+    dir.close();
+#endif
+    bool removed = false;
+    for (unsigned i = 0; i < found; ++i) removed |= LittleFS.remove("/themes/" + names[i]);
+    if (found < 4 || !removed) break;
+  }
 }
 unsigned installedCount() {
   unsigned count = 0;
@@ -209,7 +253,7 @@ void finishUpload() {
   entry.version = theme.version;
   entry.bytes = uploaded;
   entry.valid = true;
-  writeMeta(theme.id.c_str(), entry);
+  updateIndex(theme.id.c_str(), &entry);
   reply(201, theme.id.c_str());
   resetUpload();
 }
@@ -234,13 +278,87 @@ bool requestId(String& id) {
   }
   return true;
 }
+// The three steps of a list after the directory walk each run in a function
+// of their own, called one after another: kept out of listThemes() (no
+// inlining), their locals are on the loop stack only while that step runs.
+// Inlined, they made listThemes()'s own frame 576 B; on 3.1.0 the sidecar
+// code did the same, and the list lost 160 B of stack (#41).
+
+// The index, read once: a usable line fills the listed package with the
+// same id and size. Returns those packages as bits (MaxThemes fits) and sets
+// `rewrite` when a line matches no package.
+__attribute__((noinline)) uint32_t fillFromIndex(JsonArray list, unsigned count, bool& rewrite) {
+  uint32_t listed = 0;
+  ThemeFile file;
+  if (!file.open(indexPath)) return 0;
+  smalltv::ThemeIndexReader index(file);
+  smalltv::InstalledTheme line;
+  for (smalltv::IndexEntry kind; (kind = index.next(line)) != smalltv::IndexEntry::End;) {
+    int match = -1;
+    for (unsigned i = 0; kind == smalltv::IndexEntry::Usable && match < 0 && i < count; ++i) {
+      JsonObjectConst o = list[i];
+      if (!(listed & (1u << i)) && line.id == o["id"].as<const char*>() && line.bytes == o["bytes"].as<uint32_t>()) match = i;
+    }
+    if (match < 0) {
+      rewrite = true;
+      continue;
+    }
+    JsonObject o = list[match];
+    o["name"] = line.name.c_str();
+    o["author"] = line.author.c_str();
+    o["version"] = line.version.c_str();
+    o["valid"] = true;
+    listed |= 1u << match;
+  }
+  return listed;
+}
+// Fills a listed package from the package itself, the way a selection
+// checks it. True when it is valid.
+__attribute__((noinline)) bool inspectInto(JsonObject o) {
+  String id = o["id"].as<const char*>();
+  smalltv::InstalledTheme info;
+  {
+    ThemeFile file;
+    file.open("/themes/" + id + ".stheme");
+    info = smalltv::inspectInstalledTheme(file, id.c_str());
+  }
+  o["name"] = info.name.c_str();
+  o["author"] = info.author.c_str();
+  o["version"] = info.version.c_str();
+  o["valid"] = info.valid;
+  o["error"] = info.error.c_str();
+  return info.valid;
+}
+// The index from a listing: one line per valid package.
+__attribute__((noinline)) void writeIndex(JsonArrayConst list) {
+  bool written;
+  {
+    File to = LittleFS.open(indexNext, "w");
+    FileSink sink(to);
+    written = bool(to);
+    for (JsonObjectConst o : list) {
+      if (!written) break;
+      if (!o["valid"].as<bool>()) continue;
+      smalltv::InstalledTheme entry;
+      entry.id = o["id"].as<const char*>();
+      entry.name = o["name"].as<const char*>();
+      entry.author = o["author"].as<const char*>();
+      entry.version = o["version"].as<const char*>();
+      entry.bytes = o["bytes"].as<uint32_t>();
+      std::string line = smalltv::themeIndexLine(entry);
+      written = sink.write(line.data(), line.size());
+    }
+  }
+  publishIndex(written);
+}
 // GET /api/themes: every installed package's metadata and validity, without
 // requiring any of them to be the currently active theme. A package with a
-// matching `.meta` sidecar (written at install, see readThemeMeta()) is listed
-// from it; any other one goes through inspectInstalledTheme(), the same
-// validator a selection would use, so an invalid or corrupt package still gets
-// listed (with its error), just not selectable. A valid one then gets its
-// sidecar, so it is only inspected once.
+// matching line in the index (written at install, see ThemeIndexReader) is
+// listed from it; any other one goes through inspectInstalledTheme(), the
+// same validator a selection would use, so an invalid or corrupt package
+// still gets listed (with its error), just not selectable. When that finds a
+// valid package, or the index has a line that matches no package, the index
+// is written again, so a package is only inspected once.
 void listThemes() {
   if (!auth()) return;
   JsonDocument doc;
@@ -248,11 +366,9 @@ void listThemes() {
   doc["error"] = g_themeMode.error();
   doc["freeBytes"] = freeBytes();
   JsonArray list = doc["themes"].to<JsonArray>();
-  // Inspecting a package parses it; before the first one that needs it, free
-  // the running theme if the heap is short (issue #30). Its error is already
-  // copied into the reply above.
-  bool released = false;
-  uint32_t needMeta = 0;  // bit i: list[i] was inspected and is valid
+  // First each package's id and size, from the directory alone; the other
+  // fields as inspectInstalledTheme() gives them for a package that does not
+  // load, until something better is known.
   File dir = LittleFS.open("/themes", "r");
   unsigned count = 0;
   for (File entry = dir.openNextFile(); entry && count < MaxThemes; entry = dir.openNextFile()) {
@@ -262,46 +378,35 @@ void listThemes() {
     if (slash >= 0) name = name.substring(slash + 1);
     String id = name.substring(0, name.length() - 7);
     if (!smalltv::validId(id.c_str())) continue;
-    smalltv::InstalledTheme info;
-    bool fromMeta = false;
-    {
-      ThemeFile meta;
-      fromMeta = meta.open(metaPath(id)) && smalltv::readThemeMeta(meta, id.c_str(), entry.size(), info);
-    }
-    if (!fromMeta) {
-      if (!released) {
-        g_themeMode.release();
-        released = true;
-      }
-      ThemeFile file;
-      file.open("/themes/" + name);
-      info = smalltv::inspectInstalledTheme(file, id.c_str());
-      if (info.valid) needMeta |= 1u << count;
-    }
     JsonObject o = list.add<JsonObject>();
-    o["id"] = info.id.c_str();
-    o["name"] = info.name.c_str();
-    o["author"] = info.author.c_str();
-    o["version"] = info.version.c_str();
+    o["id"] = id;
+    o["name"] = id;
+    o["author"] = "";
+    o["version"] = "";
     o["bytes"] = entry.size();
-    o["valid"] = info.valid;
-    o["error"] = info.error.c_str();
+    o["valid"] = false;
+    o["error"] = "";
     ++count;
     yield();
   }
   dir.close();
-  // Sidecars are written after the directory walk, not during it, so new files
-  // in /themes cannot disturb the iteration. MaxThemes fits in the bit mask.
+  // Then the index; any package it does not cover is inspected. Inspecting
+  // a package parses it; before the first one that needs it, free the
+  // running theme if the heap is short (issue #30). Its error is already
+  // copied into the reply above.
+  bool rewrite = false;  // the index needs writing again
+  const uint32_t listed = fillFromIndex(list, count, rewrite);
+  bool released = false;
   for (unsigned i = 0; i < count; ++i) {
-    if (!(needMeta & (1u << i))) continue;
-    JsonObjectConst o = list[i];
-    smalltv::InstalledTheme entry;
-    entry.name = o["name"].as<const char*>();
-    entry.author = o["author"].as<const char*>();
-    entry.version = o["version"].as<const char*>();
-    entry.bytes = o["bytes"].as<uint32_t>();
-    writeMeta(o["id"].as<const char*>(), entry);
+    if (listed & (1u << i)) continue;
+    if (!released) {
+      g_themeMode.release();
+      released = true;
+    }
+    if (inspectInto(list[i])) rewrite = true;
+    yield();
   }
+  if (rewrite) writeIndex(list);
   String json;
   serializeJson(doc, json);
   server->send(200, "application/json", json);
@@ -385,8 +490,7 @@ void deleteTheme() {
     reply(404, "Theme not found or could not be removed");
     return;
   }
-  LittleFS.remove(metaPath(id));
-  forgetFreeBytes();
+  updateIndex(id, nullptr);
   reply(200, id);
 }
 }
@@ -401,6 +505,7 @@ void themeWebBegin(WebServerClass& web, Settings& s, bool (*requireAuth)()) {
   web.on("/api/themes/install", HTTP_POST, finishUpload, receiveUpload);
   web.on("/api/themes/select", HTTP_POST, selectTheme);
   web.on("/api/themes/delete", HTTP_POST, deleteTheme);
+  removeSidecars();
 #if defined(SMALLTV_ESP8266)
   // The web server reserves its 2 KB upload buffer before the first call to
   // receiveUpload(), so the release there comes too late: beside a running

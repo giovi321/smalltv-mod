@@ -69,14 +69,16 @@ Up to 16 packages can coexist, subject to available filesystem space. Firmware
 updates do not require reinstalling packages. Settings export contains the selected
 ID, not the package files; keep your source themes and `.stheme` files separately.
 
-Installing a package also writes a small `<id>.meta` file next to it in
-`/themes` with its name, author, version and size. The list reads that file
-instead of validating every package again, so it never needs to free the
-running theme. A package without a matching `.meta` (installed by an older
-firmware, or changed since) is validated once, the next time the list is
-opened, like any other package parse; a package that fails is listed with its
-error and checked again each time. Selecting a theme always runs the full
-validation.
+Installing a package also records its name, author, version and size in one
+index file for all themes, `/themes/.index` (one line per theme; one file,
+since every file takes at least one 8 KB block of storage on the ESP8266).
+The list reads that index instead of validating every package again, so it
+never needs to free the running theme. A package without a matching line
+(installed by an older firmware, or changed since) is validated once, the
+next time the list is opened, like any other package parse; a package that
+fails is listed with its error and checked again each time. Selecting a theme
+always runs the full validation. The `<id>.meta` files that firmware 3.1.0
+and 3.1.1 wrote, one per theme, are removed when the device starts.
 
 ## Create a source theme
 
@@ -515,7 +517,7 @@ short, and a save that still runs out of memory fails with "not enough
 memory" and keeps the old settings.
 
 Installing, selecting and removing a theme, and listing a package that has no
-`.meta` yet, each check a package by loading it. When the free heap is short of what that needs (on the ESP8266,
+line in the theme index yet, each check a package by loading it. When the free heap is short of what that needs (on the ESP8266,
 not on the ESP32 boards), the running theme is released first and loaded
 again afterwards, so only one theme is in RAM at a time. It then redraws once
 and its animations restart; its fetched values stay, and no data source is
