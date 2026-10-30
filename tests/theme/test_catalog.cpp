@@ -138,7 +138,8 @@ int main() {
     }
     std::string whole;serializeJson(doc,whole);
     Pieces p16,p128;writeThemeList<16>("theme-3",odd.c_str(),786432,themes,p16);writeThemeList<128>("theme-3",odd.c_str(),786432,themes,p128);
-    for(auto t:{std::make_pair(&p16,size_t(16)),std::make_pair(&p128,size_t(128))}){
+    const std::pair<Pieces*,size_t> runs[]={{&p16,16},{&p128,128}};
+    for(const auto& t:runs){
       assert(t.first->joined()==whole);
       assert(t.first->got.size()==(whole.size()+t.second-1)/t.second);
       for(size_t i=0;i+1<t.first->got.size();++i)assert(t.first->got[i].size()==t.second);
