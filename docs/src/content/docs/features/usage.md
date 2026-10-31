@@ -23,6 +23,13 @@ Plans without a 5-hour limit can drop that card: tick **Hide the 5-hour usage ca
 - the reset countdown
 - an "Even pace" line with that share, in amber once your usage runs 5 points or more ahead of it
 
+Even pace is how much of the weekly limit you would have used by now if you spread it evenly over the 7 days. The device works it out from the reset countdown: (7 days minus the time until reset) divided by 7 days. Read the bar against the marker:
+
+- fill ends before the marker: you are below an even spread and have room left
+- fill goes past the marker: you are using faster than an even spread, and at this rate you will hit the limit before the reset
+
+For example, 2 days into the week the marker sits at 29%. With usage at 45% the fill runs past it and the "Even pace 29%" line turns amber. The marker and the line appear only in this single-card layout, not on the two-card screen.
+
 With the card hidden, the idle animation's mood follows the 7-day figure instead of the 5-hour one. The setting is stored as `usage.hide5h` in the device config and is off by default.
 
 ## Setup
