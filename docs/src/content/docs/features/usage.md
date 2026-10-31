@@ -14,6 +14,17 @@ The screen has two states.
 - **Stats**, when data is flowing: a small mascot, your 5-hour and 7-day utilization as big percentages with fill bars that shade green to amber to red as you approach the cap, and reset countdowns.
 - **Idle animation**, when data stops: if the PC sleeps, the daemon stops, or the network drops, the screen plays an animated pixel mascot. Its mood, from calm to working to dancing, reflects how fast your session is burning. It snaps back to the stats as soon as data returns.
 
+### Hiding the 5-hour card
+
+Plans without a 5-hour limit can drop that card: tick **Hide the 5-hour usage card** in the **Clawdmeter** tab and save. The stats screen then shows one tall 7-day card instead of two:
+
+- the 7-day percentage, larger than in the two-card layout
+- a thicker fill bar with a white marker at the even pace, the share of the week already elapsed
+- the reset countdown
+- an "Even pace" line with that share, in amber once your usage runs 5 points or more ahead of it
+
+With the card hidden, the idle animation's mood follows the 7-day figure instead of the 5-hour one. The setting is stored as `usage.hide5h` in the device config and is off by default.
+
 ## Setup
 
 The PC-side daemon is a separate project, [clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon). It reads the OAuth token Claude Code already stored and sends your usage to the device. The token never leaves your machine; the device only ever receives a few percentages over your LAN.

@@ -94,13 +94,64 @@ static void drawMeter(Arduino_GFX* gfx, int top, const char* label,
   gfx->print(line);
 }
 
+// The 7-day window length in minutes, for the even-pace marker.
+#define WEEK_MIN 10080
+
+// Single-card layout for plans without a 5-hour limit: one tall card holding
+// the 7-day figure. The percentage gets the extra room, the bar is thicker and
+// carries an even-pace marker (where usage would be if spread evenly over the
+// week), and a pace line under the countdown says whether you are ahead of it.
+// The card spans y=52..232 and repaints its whole area, like drawMeter().
+static void drawWeekly(Arduino_GFX* gfx, float pct, int resetMins) {
+  const int x = 8, top = 52, w = 224, h = 180;
+  gfx->fillRoundRect(x, top, w, h, 10, C_PANEL);
+  pct = constrain(pct, 0.0f, 100.0f);
+
+  gfx->setTextSize(2);
+  gfx->setTextColor(C_DIM);
+  gfx->setCursor(x + 14, top + 14);
+  gfx->print("7-DAY USAGE");
+
+  char pc[8];
+  snprintf(pc, sizeof(pc), "%d%%", (int)lroundf(pct));
+  uint8_t sz = gfxFitSize(pc, w - 28, 7);
+  gfxDrawCentered(pc, top + 44, sz, C_WHITE);
+
+  const int bx = x + 14, by = top + 110, bw = w - 28, bh = 18;
+  gfx->fillRoundRect(bx, by, bw, bh, bh / 2, C_BARBG);
+  int fw = (int)(bw * pct / 100.0f);
+  if (fw >= bh)     gfx->fillRoundRect(bx, by, fw, bh, bh / 2, barColor(pct));
+  else if (fw > 0)  gfx->fillRect(bx, by, fw, bh, barColor(pct));
+
+  // Even pace: the share of the week already elapsed. Only meaningful while the
+  // countdown is inside one week.
+  bool havePace = resetMins > 0 && resetMins <= WEEK_MIN;
+  float pace = havePace ? 100.0f * (WEEK_MIN - resetMins) / WEEK_MIN : 0;
+  if (havePace) {
+    int px = bx + (int)(bw * pace / 100.0f);
+    px = constrain(px, bx + 1, bx + bw - 3);
+    gfx->fillRect(px, by - 5, 2, bh + 10, C_WHITE);
+  }
+
+  char rs[16], line[28];
+  fmtReset(resetMins, rs, sizeof(rs));
+  snprintf(line, sizeof(line), "Resets in %s", rs);
+  gfxDrawCentered(line, top + 140, 2, C_DIM);
+
+  if (havePace) {
+    snprintf(line, sizeof(line), "Even pace %d%%", (int)lroundf(pace));
+    // Amber once usage runs 5 points or more ahead of an even burn.
+    gfxDrawCentered(line, top + 160, 2, pct >= pace + 5 ? C_ACCENT : C_DIM);
+  }
+}
+
 // Last-drawn state of the accent flag, so a routine update can toggle just the
 // dot instead of a full-screen clear.
 static bool s_flagShown = false;
 
 // `fullRepaint` clears the static layout only on a real transition — cards and
 // the flag dot always repaint their own area, so routine updates skip it.
-static void drawUsage(const UsageData& u, bool fullRepaint) {
+static void drawUsage(const UsageData& u, bool fullRepaint, bool hide5h) {
   Arduino_GFX* gfx = gfxDev();
   if (!gfx) return;
 
@@ -136,8 +187,14 @@ static void drawUsage(const UsageData& u, bool fullRepaint) {
     s_flagShown = showFlag;
   }
 
-  drawMeter(gfx, 50,  "5h", u.sessionPct, u.sessionResetMin);
-  drawMeter(gfx, 138, "7d", u.weeklyPct,  u.weeklyResetMin);
+  // Plans without a 5-hour limit can hide that card; the 7-day figure then gets
+  // its own full-height layout.
+  if (hide5h) {
+    drawWeekly(gfx, u.weeklyPct, u.weeklyResetMin);
+  } else {
+    drawMeter(gfx, 50,  "5h", u.sessionPct, u.sessionResetMin);
+    drawMeter(gfx, 138, "7d", u.weeklyPct,  u.weeklyResetMin);
+  }
 }
 
 // Idle animation: full-screen mascot, diffed cell-by-cell for a flicker-free draw.
@@ -224,7 +281,9 @@ void UsageMode::service(const Settings& s) {
   // Feed the burn-rate tracker once per fresh reading (drives the mascot's mood).
   if (u.valid && u.lastOkMs != usageSampled_) {
     usageSampled_ = u.lastOkMs;
-    mascotSample(u.sessionPct);
+    // With the 5h card hidden the session window may no longer exist, so the
+    // mood follows the 7-day figure instead.
+    mascotSample(s.usage.hide5h ? u.weeklyPct : u.sessionPct);
   }
 
   // Considered stale after ~2 missed polls (plus a grace) — then show the animation.
@@ -242,7 +301,7 @@ void UsageMode::service(const Settings& s) {
       }
     }
     if (needRender_) {
-      drawUsage(u, fullRepaint);
+      drawUsage(u, fullRepaint, s.usage.hide5h);
       layoutPrimed_ = true;
       needRender_ = false;
     }

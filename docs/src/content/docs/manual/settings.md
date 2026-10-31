@@ -53,7 +53,9 @@ Networks must be 2.4 GHz. If you cannot see your network in the scan, see [Troub
 
 ## Clawdmeter
 
-Two fields: the address of the daemon running on your PC, the small program that reads your Claude usage and sends it to the device, and how often the device re-checks it. Leave it blank if that program is pushing to the device; fill it in with the PC's address if the device should instead pull from it. Full setup for that PC-side program is in [Claude usage meter](/smalltv-mod/features/usage/), a separate download from a separate project.
+Two fields: the address of the daemon running on your PC, the small program that reads your Claude usage and sends it to the device, and how often the device re-checks it. Leave it blank if that program is pushing to the device; fill it in with the PC's address if the device should instead pull from it.
+
+**Hide the 5-hour usage card**: for plans without a 5-hour limit. The screen then shows only the 7-day usage, in a larger single-card layout with an even-pace marker; see [Hiding the 5-hour card](/smalltv-mod/features/usage/#hiding-the-5-hour-card). Full setup for that PC-side program is in [Claude usage meter](/smalltv-mod/features/usage/), a separate download from a separate project.
 
 ## Radar
 

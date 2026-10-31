@@ -66,6 +66,7 @@ struct TickerSettings {
 struct UsageSettings {
   String   usageUrl;      // daemon HTTP endpoint, e.g. http://192.168.1.10:8787/
   uint16_t pollSec;       // refresh period
+  bool     hide5h;        // drop the 5-hour card, show only the 7-day one
 
   void setDefaults();
   void toJson(JsonObject o) const;

@@ -29,7 +29,7 @@ If you filled in a quantity and a purchase price for a symbol, that symbol's pag
 
 This mode only shows numbers while a program on your PC is sending them. See [Claude usage meter](/smalltv-mod/features/usage/) for that part.
 
-- With data flowing: a small mascot, your 5-hour and 7-day usage as percentages with bars that go from green through amber to red, and how long until each window resets.
+- With data flowing: a small mascot, your 5-hour and 7-day usage as percentages with bars that go from green through amber to red, and how long until each window resets. On a plan without a 5-hour limit, the Clawdmeter tab can hide the 5-hour card, leaving one larger 7-day card.
 - Without data: an animated mascot, and `waiting...` or `daemon error` on the first run. This is the normal state when your PC is asleep or the program is not running. It flips back to the numbers by itself when data returns.
 
 ## Reading the radar screen

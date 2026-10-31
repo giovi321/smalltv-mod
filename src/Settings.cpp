@@ -130,16 +130,19 @@ void TickerSettings::fromJson(JsonObjectConst o) {
 void UsageSettings::setDefaults() {
   usageUrl = "";
   pollSec = DEFAULT_POLL_SEC;
+  hide5h = false;
 }
 
 void UsageSettings::toJson(JsonObject o) const {
   o["usageUrl"] = usageUrl;
   o["pollSec"]  = pollSec;
+  o["hide5h"]   = hide5h;
 }
 
 void UsageSettings::fromJson(JsonObjectConst o) {
   if (o["usageUrl"].is<const char*>()) usageUrl = o["usageUrl"].as<String>();
   if (o["pollSec"].is<int>())          pollSec = constrain((int)o["pollSec"], 10, 3600);
+  if (o["hide5h"].is<bool>())          hide5h = o["hide5h"];
 }
 
 // ===========================================================================
