@@ -91,6 +91,13 @@ jobs:
       - name: Check release asset names
         run: python3 tools/ci_checks.py assets
 
+      # The firmware serves src/webui.h, not webui.html. A commit that edits
+      # the HTML without regenerating the header ships the old page.
+      - name: Check webui.h matches webui.html
+        run: |
+          python3 tools/gzip_webui.py
+          git diff --exit-code -- src/webui.h
+
       - name: Build firmware (all targets)
         run: pio run -e smalltv -e smalltv_lean -e smalltv_c2 -e smalltv_esp32 -e smalltv_esp32_wg -e smalltv_esp32_8mb -e smalltv_loader
 

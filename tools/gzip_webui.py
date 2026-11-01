@@ -32,7 +32,8 @@ static const uint8_t WEBUI_HTML_GZ[] PROGMEM = {
 
 
 def main() -> None:
-    raw = SRC.read_bytes()
+    # The repo stores LF; a Windows checkout with core.autocrlf has CRLF.
+    raw = SRC.read_bytes().replace(b"\r\n", b"\n")
     blob = gzip.compress(raw, compresslevel=9, mtime=0)
 
     lines = [HEADER]
