@@ -1,6 +1,8 @@
 // Built-in binding sources (#31 item 1): time.* and device.*, spec 2 only.
 #include "ThemeEngine.h"
 #include <cassert>
+#include <cstdio>
+#include <fstream>
 #include <iostream>
 using namespace smalltv;
 
@@ -92,7 +94,7 @@ static void testSpecRules() {
   // ... and in spec 2 the name belongs to the built-ins.
   assert(!parse(manifest(2, layer, data), theme, error) && error.find("data[0].id") != std::string::npos);
   // Unknown names are refused.
-  for (const char* bad : {"time.", "time.Second", "time.seconds", "time.moon", "time.second.x", "device.", "device.unknown", "device.Streak"}) {
+  for (const char* bad : {"time.", "time.Second", "time.seconds", "time.Moon", "time.moons", "time.second.x", "device.", "device.unknown", "device.Streak"}) {
     assert(!parse(manifest(2, bar("b", 10, bad, 0, 59, 0, 59)), theme, error));
     assert(error.find("source") != std::string::npos);
   }
@@ -162,10 +164,129 @@ static void testDevice() {
   e.update(6, &t); assert(widthOf(e) == 200);
 }
 
+// ---- time.moon: the moon's age in whole days, 0-29 -------------------------
+static tm utcAt(int y, int mo, int d, int h, int mi, int s) {
+  tm t{}; t.tm_year = y - 1900; t.tm_mon = mo - 1; t.tm_mday = d; t.tm_hour = h; t.tm_min = mi; t.tm_sec = s; return t;
+}
+static int moonAge(const tm& t) { return static_cast<int>(timeValue(BuiltIn::TimeMoon, t)); }
+static int moonAt(int y, int mo, int d, int h, int mi, int s) { return moonAge(utcAt(y, mo, d, h, mi, s)); }
+
+// The age at 150 new and full moons from the US Naval Observatory (UTC), 2020
+// to 2030. The formula is off by -0.75 to +0.40 days (measured), so a new moon
+// reads 28, 29 or 0, and a full moon 14 or 15.
+static void testMoonAgainstUsno() {
+  std::ifstream in("tests/theme/moon_phases.txt");
+  assert(in.good());                                       // a missing file must not pass as "no rows"
+  std::string line;
+  int newMoons = 0, fullMoons = 0, seen29 = 0, seen0 = 0, seen14 = 0, seen15 = 0;
+  while (std::getline(in, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    int y, mo, d, h, mi; char kind;
+    assert(sscanf(line.c_str(), "%d-%d-%d %d:%d %c", &y, &mo, &d, &h, &mi, &kind) == 6);
+    const int age = moonAt(y, mo, d, h, mi, 0);
+    if (kind == 'N') {
+      ++newMoons;
+      assert(age == 28 || age == 29 || age == 0);
+      (age == 0 ? seen0 : seen29)++;
+    } else {
+      ++fullMoons;
+      assert(age == 14 || age == 15);
+      (age == 14 ? seen14 : seen15)++;
+    }
+  }
+  assert(newMoons == 75 && fullMoons == 75);
+  assert(seen29 > 0 && seen0 > 0 && seen14 > 0 && seen15 > 0);   // the error really goes both ways
+}
+
+// Day by day: the age goes up by one, and falls from 29 to 0 once per month.
+static void testMoonWalk() {
+  static const int monthDays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  int y = 2026, mo = 1, d = 1;
+  int last = moonAt(y, mo, d, 0, 30, 0), wraps = 0, steps = 0;
+  for (int day = 0; day < 400; ++day) {
+    for (int h = 0; h < 24; ++h) {                        // every hour of 400 days
+      const int age = moonAt(y, mo, d, h, 30, 0);
+      assert(age >= 0 && age <= 29);
+      if (age == last) continue;
+      assert(age == last + 1 || (last == 29 && age == 0));   // one step at a time, never a jump
+      if (age == 0) ++wraps;
+      ++steps; last = age;
+    }
+    if (++d > monthDays[mo - 1]) { d = 1; if (++mo > 12) { mo = 1; ++y; } }
+  }
+  assert(wraps >= 13 && wraps <= 14);                     // 400 days hold 13.5 months
+  assert(steps >= 13 * 29);
+}
+
+// The reference new moon, the month length, and what lies before the epoch.
+static void testMoonEpoch() {
+  assert(moonAt(2000, 1, 6, 18, 14, 0) == 0);             // the reference new moon, to the second
+  assert(moonAt(2000, 1, 6, 18, 13, 59) == 29);           // one second before it: the end of the last month
+  assert(moonAt(2000, 1, 7, 18, 13, 59) == 0);
+  assert(moonAt(2000, 1, 7, 18, 14, 0) == 1);
+  assert(moonAt(2000, 1, 6, 0, 0, 0) == 28);              // 18 h 14 min earlier: 28.77 days into the last month
+  // One month later: 29 d 12 h 44 min 3 s (29.530588 days, to the second).
+  assert(moonAt(2000, 2, 5, 6, 58, 2) == 29);
+  assert(moonAt(2000, 2, 5, 6, 58, 3) == 0);
+  // The same month boundary before the reference (negative side of the modulo).
+  assert(moonAt(1999, 12, 8, 5, 29, 57) == 0);
+  assert(moonAt(1999, 12, 8, 5, 29, 56) == 29);
+  assert(moonAt(2000, 1, 5, 5, 29, 57) == 28);            // a day boundary on that side: 28 days into the month
+  assert(moonAt(2000, 1, 5, 5, 29, 56) == 27);
+  // A leap day and a century that is not a leap year change nothing but the date.
+  assert(moonAt(2000, 2, 29, 12, 0, 0) == moonAt(2000, 2, 28, 12, 0, 0) + 1);
+  assert(moonAt(2100, 3, 1, 12, 0, 0) == moonAt(2100, 2, 28, 12, 0, 0) + 1);   // 2100 has no Feb 29
+  // Before 2000, and the clock a device shows before it is set (1970): still 0-29.
+  assert(moonAt(1970, 1, 1, 0, 0, 0) == 22);              // 6.9 days before the 1970-01-07 new moon
+  assert(moonAt(1970, 1, 7, 20, 35, 0) == 29);            // that new moon (formula is 0.4 days late)
+  assert(moonAt(1999, 12, 22, 2, 0, 0) == 13);            // full moon was 1999-12-22 17:31 UTC
+  assert(moonAt(1900, 1, 1, 0, 0, 0) >= 0 && moonAt(1900, 1, 1, 0, 0, 0) <= 29);
+  // Far ahead: the 32-bit year 2038 and the year 2100 stay in range.
+  assert(moonAt(2038, 1, 19, 3, 14, 7) == 12);
+  assert(moonAt(2100, 3, 1, 0, 0, 0) == 19);
+  // The weekday and the other fields of tm are not read.
+  tm t = utcAt(2026, 5, 1, 12, 0, 0);
+  const int age = moonAge(t);
+  t.tm_wday = 6; t.tm_yday = 200; t.tm_isdst = 1;
+  assert(moonAge(t) == age);
+}
+
+static void testMoonBinding() {
+  Theme theme; std::string error;
+  assert(parse(manifest(2, bar("m", 10, "time.moon", 0, 29, 0, 87)), theme, error));   // 3 pixels a day
+  assert(theme.layers[0].timeBound && theme.layers[0].bindings[0].builtin == BuiltIn::TimeMoon);
+  assert(!parse(manifest(1, bar("m", 10, "time.moon", 0, 29, 0, 87)), theme, error) && error.find("need \"spec\": 2") != std::string::npos);
+  Engine e; e.setTheme(theme, 0);
+  tm t = utcAt(2000, 1, 6, 18, 14, 0);
+  e.update(0, &t); assert(widthOf(e) == 0);
+  t = utcAt(2000, 1, 8, 1, 0, 0);                         // age 1.27 days -> 1
+  assert(e.update(1, &t).size() == 1 && widthOf(e) == 3);
+  t.tm_hour = 17;                                         // still age 1: nothing repaints
+  assert(e.update(2, &t).empty());
+  t = utcAt(2000, 1, 8, 18, 14, 0);                       // age 2.0 -> 2
+  assert(e.update(3, &t).size() == 1 && widthOf(e) == 6);
+  t = utcAt(2000, 1, 6, 18, 13, 59);                      // 29 -> full width
+  e.update(4, &t); assert(widthOf(e) == 87);
+  // No clock yet: the static value, as for the other time.* sources.
+  Engine none; none.setTheme(theme, 0); none.update(0, nullptr);
+  assert(widthOf(none) == 7);
+  // A frame is picked with color stops too, e.g. a different color at the full moon.
+  const std::string colors = "{\"id\":\"c\",\"type\":\"shape\",\"shape\":\"rectangle\",\"x\":0,\"y\":0,\"width\":5,\"height\":5,\"fill\":\"#ffffff\","
+    "\"bind\":{\"fill\":{\"source\":\"time.moon\",\"stops\":[{\"at\":0,\"value\":\"#0000ff\"},{\"at\":15,\"value\":\"#ffff00\"}]}}}";
+  assert(parse(manifest(2, colors), theme, error));
+  Engine c; c.setTheme(theme, 0);
+  tm full = utcAt(2000, 1, 21, 18, 14, 0);                // 15 days after the new moon
+  c.update(0, &full); assert(c.states()[0].resolved.fill == 0xffe0);
+}
+
 int main() {
   testValues();
   testSpecRules();
   testRedraw();
   testDevice();
+  testMoonAgainstUsno();
+  testMoonWalk();
+  testMoonEpoch();
+  testMoonBinding();
   std::cout << "builtin source tests passed\n";
 }

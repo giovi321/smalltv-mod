@@ -751,7 +751,7 @@ static bool applicable(const Layer& layer, BoundProperty property, bool color) {
 // the ones a firmware may provide (docs/features/themes.md).
 // The tables and the messages sit in flash on the ESP8266, where a string
 // literal would otherwise take RAM; the host tests see plain arrays.
-static const char timeNames[8][12] PROGMEM = {"second", "minute", "hour", "hour12", "secondOfDay", "day", "month", "weekday"};
+static const char timeNames[9][12] PROGMEM = {"second", "minute", "hour", "hour12", "secondOfDay", "day", "month", "weekday", "moon"};
 static const char deviceNames[5][12] PROGMEM = {"focusToday", "focusGoal", "streak", "humidity", "temperature"};
 static const char needSpec2[] PROGMEM = "time.* and device.* sources need \"spec\": 2";
 static const char unknownBuiltIn[] PROGMEM = "unknown time.* or device.* name";
@@ -763,12 +763,32 @@ static std::string fromFlash(const char* text) {
 }
 BuiltIn builtInSource(const std::string& source) {
   if (source.compare(0, 5, "time.") == 0) {
-    for (size_t i = 0; i < 8; ++i)
+    for (size_t i = 0; i < 9; ++i)
       if (strcmp_P(source.c_str() + 5, timeNames[i]) == 0) return static_cast<BuiltIn>(static_cast<int>(BuiltIn::TimeSecond) + i);
   } else if (source.compare(0, 7, "device.") == 0) {
     for (size_t i = 0; i < 5; ++i) if (strcmp_P(source.c_str() + 7, deviceNames[i]) == 0) return BuiltIn::Device;
   }
   return BuiltIn::None;
+}
+// Age of the moon in whole days, 0-29: the time since the reference new moon
+// (2000-01-06 18:14 UTC) modulo the mean synodic month (29.530588 d, rounded to
+// 2551443 s). Integers only, no floating point. The clock's fields are read as
+// UTC; the configured timezone's offset adds to the error (docs/features/themes.md).
+static int moonAge(const tm& t) {
+  // Days since 1970-01-01 of the proleptic Gregorian date (Howard Hinnant's algorithm).
+  int32_t y = t.tm_year + 1900;
+  const int32_t m = t.tm_mon + 1;
+  if (m <= 2) --y;
+  const int32_t era = (y >= 0 ? y : y - 399) / 400;
+  const int32_t yoe = y - era * 400;
+  const int32_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + t.tm_mday - 1;
+  const int32_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  const int32_t days = era * 146097 + doe - 719468;
+  const int64_t seconds = static_cast<int64_t>(days) * 86400 + t.tm_hour * 3600 + t.tm_min * 60 + t.tm_sec;
+  const int64_t sinceNewMoon = seconds - 947182440;     // 2000-01-06 18:14:00 UTC
+  int32_t into = static_cast<int32_t>(sinceNewMoon % 2551443);
+  if (into < 0) into += 2551443;                        // before the reference: count back from it
+  return into / 86400;
 }
 double timeValue(BuiltIn which, const tm& time) {
   switch (which) {
@@ -780,6 +800,7 @@ double timeValue(BuiltIn which, const tm& time) {
     case BuiltIn::TimeDay: return time.tm_mday;
     case BuiltIn::TimeMonth: return time.tm_mon + 1;
     case BuiltIn::TimeWeekday: return time.tm_wday;
+    case BuiltIn::TimeMoon: return moonAge(time);
     default: return 0;
   }
 }
