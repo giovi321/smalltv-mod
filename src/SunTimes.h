@@ -57,3 +57,37 @@ enum SunOverlap : uint8_t {
 // in the same 0..255 steps.
 uint8_t sunCombine(SunOverlap mode, bool nightActive, uint8_t nightSteps,
                    uint8_t sunSteps);
+
+// ---- wiring helpers (pure, so the native tests can run them) ----------------
+
+// Percent 0..100 to backlight steps 0..255 (what gfxSetBrightness always did).
+uint8_t brightnessSteps(uint8_t pct);
+
+// Sun times for a local day, recomputed only when the day, the location or
+// the UTC offset changes (a daylight saving switch changes the offset).
+struct SunCache {
+  bool valid;
+  int32_t day;       // year * 512 + month * 32 + day of month
+  float lat, lon;
+  int16_t offset;
+  SunTimes times;
+  uint16_t computed; // how many times sunTimes() ran (for tests)
+};
+const SunTimes& sunCacheGet(SunCache& c, float lat, float lon, int year,
+                            int month, int day, int utcOffsetMin);
+
+// Everything that decides the backlight, in the order that applies.
+struct BrightnessInputs {
+  bool wake;           // button press: lift the screen to the slider level
+  uint8_t sliderPct;   // the brightness slider
+  bool nightActive;    // night mode window is on
+  uint8_t nightPct;    // night mode level
+  bool sunValid;       // sun schedule is on, has a location and a clock
+  uint8_t sunSteps;    // its level, in steps
+  uint8_t overlap;     // SunOverlap, when night mode and the sun both apply
+  bool ldrOn;          // light sensor in use
+  uint8_t ldrPct;      // its reading
+};
+// Backlight steps. Order: button wake, then sun (combined with night mode by
+// the overlap choice) or night mode alone, then the light sensor, then the slider.
+uint8_t resolveBrightness(const BrightnessInputs& in);

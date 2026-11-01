@@ -143,3 +143,35 @@ uint8_t sunCombine(SunOverlap mode, bool nightActive, uint8_t nightSteps,
   if (mode == SUN_OVERLAP_NIGHT_FIRST) return nightSteps;
   return nightSteps < sunSteps ? nightSteps : sunSteps;
 }
+
+// ---- wiring helpers ---------------------------------------------------------
+uint8_t brightnessSteps(uint8_t pct) {
+  if (pct > 100) pct = 100;
+  return (uint8_t)((int)pct * 255 / 100);
+}
+
+const SunTimes& sunCacheGet(SunCache& c, float lat, float lon, int year,
+                            int month, int day, int utcOffsetMin) {
+  const int32_t key = (int32_t)year * 512 + month * 32 + day;
+  if (!c.valid || c.day != key || c.lat != lat || c.lon != lon ||
+      c.offset != utcOffsetMin) {
+    c.times = sunTimes(lat, lon, year, month, day, utcOffsetMin);
+    c.day = key;
+    c.lat = lat;
+    c.lon = lon;
+    c.offset = (int16_t)utcOffsetMin;
+    c.valid = true;
+    c.computed++;
+  }
+  return c.times;
+}
+
+uint8_t resolveBrightness(const BrightnessInputs& in) {
+  if (in.wake) return brightnessSteps(in.sliderPct);
+  if (in.sunValid)
+    return sunCombine((SunOverlap)in.overlap, in.nightActive,
+                      brightnessSteps(in.nightPct), in.sunSteps);
+  if (in.nightActive) return brightnessSteps(in.nightPct);
+  if (in.ldrOn) return brightnessSteps(in.ldrPct);
+  return brightnessSteps(in.sliderPct);
+}

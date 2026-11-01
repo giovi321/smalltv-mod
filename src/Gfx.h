@@ -29,6 +29,7 @@ uint16_t gfxTint(uint16_t rgb565);
 // ---- Device lifecycle -----------------------------------------------------
 void         gfxBegin(const Settings& s);
 void         gfxSetBrightness(uint8_t pct, bool inverted);
+void         gfxSetBrightnessSteps(uint8_t steps, bool inverted);   // 0..255, the finest the PWM has
 void         gfxSetRotation(uint8_t r);
 // Push the Display tab's colour settings to the panel: MADCTL colour order,
 // the inversion bit, and the per-channel gain gfxTint() applies. Callers repaint

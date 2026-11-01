@@ -1,5 +1,6 @@
 #include "Gfx.h"
 #include "Platform.h"
+#include "SunTimes.h"
 #include <Arduino_GFX_Library.h>
 #include <SPI.h>
 
@@ -109,11 +110,12 @@ void gfxBegin(const Settings& s) {
   gfx->fillScreen(C_BLACK);
 }
 
+void gfxSetBrightnessSteps(uint8_t steps, bool inverted) {
+  analogWrite(TFT_BL, inverted ? 255 - steps : steps);
+}
+
 void gfxSetBrightness(uint8_t pct, bool inverted) {
-  if (pct > 100) pct = 100;
-  int duty = (int)pct * 255 / 100;
-  if (inverted) duty = 255 - duty;
-  analogWrite(TFT_BL, duty);
+  gfxSetBrightnessSteps(brightnessSteps(pct), inverted);
 }
 
 void gfxSetRotation(uint8_t r) {

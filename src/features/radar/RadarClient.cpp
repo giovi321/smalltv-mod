@@ -133,9 +133,9 @@ static String buildDirectUrl(const Settings& s) {
   String u = F("https://");
   u += directHost(s);
   u += directPath(s);
-  u += String(s.radar.lat, 4);
+  u += String(radarLat(s), 4);
   u += F("/lon/");
-  u += String(s.radar.lon, 4);
+  u += String(radarLon(s), 4);
   u += F("/dist/");
   u += String(rangeNm(s.radar.rangeKm));
   return u;
@@ -145,8 +145,8 @@ static String buildWebhookUrl(const Settings& s) {
   String u = s.radar.webhookUrl;
   char sep = (u.indexOf('?') >= 0) ? '&' : '?';
   u += sep;
-  u += "lat=" + String(s.radar.lat, 4);
-  u += "&lon=" + String(s.radar.lon, 4);
+  u += "lat=" + String(radarLat(s), 4);
+  u += "&lon=" + String(radarLon(s), 4);
   u += "&dist=" + String(s.radar.rangeKm);   // webhook works in km
   return u;
 }
@@ -194,7 +194,7 @@ static bool parseAdsb(const Settings& s, Stream& stream) {
     strlcpy(t.callsign, fl, sizeof(t.callsign));
     trimTail(t.callsign);
 
-    geo(s.radar.lat, s.radar.lon, t.lat, t.lon, t.distKm, t.bearingDeg);
+    geo(radarLat(s), radarLon(s), t.lat, t.lon, t.distKm, t.bearingDeg);
     insertNearest(t);
   }
 
@@ -256,7 +256,7 @@ static bool fetchUrl(const Settings& s, const String& url) {
 // ---------------------------------------------------------------------------
 void radarService(const Settings& s) {
   // No home set yet -> nothing to fetch (the mode shows a prompt instead).
-  if (s.radar.lat == 0.0f && s.radar.lon == 0.0f) { g_stage = RADAR_NO_HOME; return; }
+  if (radarLat(s) == 0.0f && radarLon(s) == 0.0f) { g_stage = RADAR_NO_HOME; return; }
 
   if ((int32_t)(millis() - g_nextPollMs) < 0) return;
   g_nextPollMs = millis() + (uint32_t)s.radar.pollSec * 1000UL;

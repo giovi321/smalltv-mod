@@ -356,6 +356,85 @@ static void testCombine() {
   CHECK(sunCombine(SUN_OVERLAP_NIGHT_FIRST, true, 0, 100) == 0, "night first, level 0");
 }
 
+
+// ---- wiring helpers --------------------------------------------------------
+static void testBrightnessSteps() {
+  CHECK(brightnessSteps(0) == 0, "0");
+  CHECK(brightnessSteps(100) == 255, "100");
+  CHECK(brightnessSteps(50) == 127, "50: %d", brightnessSteps(50));
+  CHECK(brightnessSteps(5) == 12, "5: %d", brightnessSteps(5));
+  CHECK(brightnessSteps(101) == 255, "above 100 is capped");
+  CHECK(brightnessSteps(255) == 255, "255 is capped");
+}
+
+static void testCache() {
+  SunCache c = {};
+  const SunTimes& a = sunCacheGet(c, 52.5f, 13.4f, 2026, 6, 21, 120);
+  CHECK(a.kind == SUN_NORMAL && circDiff(a.rise, 283) <= 1, "first result: rise %d", a.rise);
+  CHECK(c.computed == 1, "computed %d", c.computed);
+  sunCacheGet(c, 52.5f, 13.4f, 2026, 6, 21, 120);
+  sunCacheGet(c, 52.5f, 13.4f, 2026, 6, 21, 120);
+  CHECK(c.computed == 1, "same day: not recomputed (%d)", c.computed);
+  const SunTimes& b = sunCacheGet(c, 52.5f, 13.4f, 2026, 6, 22, 120);
+  CHECK(c.computed == 2, "new day: recomputed (%d)", c.computed);
+  CHECK(b.kind == SUN_NORMAL, "new day result");
+  sunCacheGet(c, 52.6f, 13.4f, 2026, 6, 22, 120);
+  CHECK(c.computed == 3, "latitude changed (%d)", c.computed);
+  sunCacheGet(c, 52.6f, 13.5f, 2026, 6, 22, 120);
+  CHECK(c.computed == 4, "longitude changed (%d)", c.computed);
+  const SunTimes& d = sunCacheGet(c, 52.6f, 13.5f, 2026, 6, 22, 60);
+  CHECK(c.computed == 5, "UTC offset changed (%d)", c.computed);
+  SunTimes want = sunTimes(52.6f, 13.5f, 2026, 6, 22, 60);
+  CHECK(d.rise == want.rise && d.set == want.set, "cached = computed");
+  // same date next year, and the next month with the same day number
+  sunCacheGet(c, 52.6f, 13.5f, 2027, 6, 22, 60);
+  CHECK(c.computed == 6, "next year (%d)", c.computed);
+  sunCacheGet(c, 52.6f, 13.5f, 2027, 7, 22, 60);
+  CHECK(c.computed == 7, "next month (%d)", c.computed);
+}
+
+static BrightnessInputs base() {
+  BrightnessInputs in = {};
+  in.sliderPct = 80; in.nightPct = 10; in.sunSteps = 40; in.ldrPct = 30;
+  return in;
+}
+static void testResolve() {
+  BrightnessInputs in = base();
+  CHECK(resolveBrightness(in) == brightnessSteps(80), "slider");
+  in.ldrOn = true;
+  CHECK(resolveBrightness(in) == brightnessSteps(30), "light sensor beats slider");
+  in.nightActive = true;
+  CHECK(resolveBrightness(in) == brightnessSteps(10), "night mode beats light sensor");
+  in.wake = true;
+  CHECK(resolveBrightness(in) == brightnessSteps(80), "wake beats night mode");
+  in.sunValid = true;
+  CHECK(resolveBrightness(in) == brightnessSteps(80), "wake beats the sun");
+  in.wake = false;
+  // sun on, night mode active: the overlap choice decides
+  in.overlap = SUN_OVERLAP_NIGHT_FIRST;
+  CHECK(resolveBrightness(in) == brightnessSteps(10), "sun+night, night first");
+  in.overlap = SUN_OVERLAP_SUN_FIRST;
+  CHECK(resolveBrightness(in) == 40, "sun+night, sun first");
+  in.overlap = SUN_OVERLAP_DARKER;
+  CHECK(resolveBrightness(in) == brightnessSteps(10), "sun+night, darker (night is 25, sun 40)");
+  in.sunSteps = 5;
+  CHECK(resolveBrightness(in) == 5, "sun+night, darker (sun 5)");
+  // sun on, night mode not active: the sun level beats the sensor and slider
+  in.nightActive = false; in.sunSteps = 40;
+  in.overlap = SUN_OVERLAP_NIGHT_FIRST;
+  CHECK(resolveBrightness(in) == 40, "sun alone");
+  in.ldrOn = false;
+  CHECK(resolveBrightness(in) == 40, "sun alone, no sensor");
+  // sun switched on but not valid (no location or no clock): as if it were off
+  in.sunValid = false;
+  CHECK(resolveBrightness(in) == brightnessSteps(80), "invalid sun falls back to the slider");
+  in.nightActive = true;
+  CHECK(resolveBrightness(in) == brightnessSteps(10), "invalid sun falls back to night mode");
+  // night mode level 0 switches the screen off
+  in.nightPct = 0;
+  CHECK(resolveBrightness(in) == 0, "night level 0");
+}
+
 int main() {
   testReferenceTable();
   testSunProperties();
@@ -368,6 +447,9 @@ int main() {
   testLevelAcrossMidnight();
   testFadesLongerThanTheDay();
   testCombine();
+  testBrightnessSteps();
+  testCache();
+  testResolve();
   printf("%d checks, %d failed\n", g_checks, g_failed);
   if (g_failed) return 1;
   printf("sun tests passed\n");

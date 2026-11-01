@@ -145,7 +145,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
   <div class="card"><h2>Screen</h2>
    <label>Brightness: <span id="brVal"></span>%</label>
    <input id="brightness" type="range" min="0" max="100" oninput="brVal.textContent=this.value">
-   <div class="chk"><input id="autoBrightness" type="checkbox"><label>Auto-brightness (light sensor on A0)</label></div>
+   <div class="chk"><input id="autoBrightness" type="checkbox" onchange="autoToggled()"><label>Auto-brightness (light sensor on A0)</label></div>
    <label>Orientation</label>
    <select id="rotation"><option value="0">0&deg;</option><option value="1">90&deg;</option>
     <option value="2">180&deg;</option><option value="3">270&deg;</option></select>
@@ -199,6 +199,17 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <label>Language <span class="muted">(month and weekday names on spec 2 themes)</span></label>
    <select id="lang"><option value="en">English</option><option value="pt">Portugu&ecirc;s</option><option value="es">Espa&ntilde;ol</option><option value="fr">Fran&ccedil;ais</option><option value="de">Deutsch</option><option value="it">Italiano</option></select>
    <div class="muted" id="clockNow" style="margin:8px 0">Clock: -</div>
+   <label>Device location</label>
+   <div class="row">
+    <div><input id="locLat" type="number" step="0.01" placeholder="latitude, e.g. 52.52"></div>
+    <div><input id="locLon" type="number" step="0.01" placeholder="longitude, e.g. 13.41"></div>
+   </div>
+   <div class="row">
+    <div><input id="locQ" type="text" placeholder="Search a place" onkeydown="if(event.key==='Enter')placeSearch()"></div>
+    <div><button class="btn sec" onclick="placeSearch()">Search</button></div>
+   </div>
+   <select id="locRes" style="display:none" onchange="placePick()"></select>
+   <small class="hint" id="locMsg">Used by the sunrise and sunset schedule below, and by the radar unless it has its own. The search runs in your browser (open-meteo.com); the device never sends the name anywhere. Leave 0/0 for none.</small>
    <div class="chk"><input id="nightEnabled" type="checkbox"><label>Dim or blank the screen on a nightly schedule</label></div>
    <div class="row">
     <div><label>From</label><input id="nightStart" type="time"></div>
@@ -207,6 +218,16 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <label>Night brightness: <span id="nlVal"></span>% <span class="muted">(0 = screen off)</span></label>
    <input id="nightLevel" type="range" min="0" max="100" oninput="nlVal.textContent=this.value">
    <small class="hint">Needs internet once to set the clock over NTP. The timezone also applies to theme clocks. While the window is active it overrides the brightness and auto-brightness above. Times are local to the selected timezone; DST is handled automatically. After a reboot the schedule resumes once the clock re-syncs, so the screen may show normal brightness for a few seconds.</small>
+   <div class="chk"><input id="sunEnabled" type="checkbox" onchange="sunToggled()"><label>Follow sunrise and sunset (needs the device location)</label></div>
+   <label>Lowest brightness: <span id="slVal"></span>% <span class="muted">(0 = screen off)</span></label>
+   <input id="sunLow" type="range" min="0" max="100" oninput="slVal.textContent=this.value">
+   <div class="row">
+    <div><label>Sunrise fade (minutes)</label><input id="sunRise" type="number" min="0" max="120"></div>
+    <div><label>Sunset fade (minutes)</label><input id="sunSet" type="number" min="0" max="120"></div>
+   </div>
+   <label>When night mode is also on</label>
+   <select id="sunOverlap"><option value="0">Night mode first</option><option value="1">Sun schedule first</option><option value="2">The darker of the two</option></select>
+   <small class="hint" id="sunNow">The screen rises from the lowest to the normal brightness (the slider above) over the sunrise fade, and falls back over the sunset fade. Sunrise and sunset are worked out on the device. Replaces auto-brightness.</small>
   </div>
  </section>
 
@@ -288,6 +309,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <!-- RADAR (feature) -->
  <section id="radar" class="tab">
   <div class="card"><h2>Home location</h2>
+   <div class="chk"><input id="radarUseDevice" type="checkbox" onchange="radarLocChanged()"><label>Use the device location (Settings tab, Clock)</label></div>
    <div class="row">
     <div><label>Latitude</label><input id="radarLat" type="number" step="0.0001" placeholder="52.3676"></div>
     <div><label>Longitude</label><input id="radarLon" type="number" step="0.0001" placeholder="4.9041"></div>
@@ -401,6 +423,26 @@ function sv(id,v){var e=$(id);if(e)e.value=(v!=null?v:'')}
 function sc(id,v){var e=$(id);if(e)e.checked=!!v}
 function gv(id){var e=$(id);return e?e.value:''}
 function gc(id){var e=$(id);return e?e.checked:false}
+// sun begin (device location, sun schedule; tested by tests/sun/test_webui.js)
+var PLACES=[];
+function placeLabel(p){return [p.name,p.admin1,p.country].filter(Boolean).join(', ')}
+function placeSearch(){var q=gv('locQ').trim(); if(!q)return Promise.resolve();
+ $('locMsg').textContent='Searching...';
+ return fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(q)+'&count=5&language=en&format=json')
+ .then(function(r){return r.json()}).then(function(d){
+  PLACES=d.results||[]; var sel=$('locRes'); sel.innerHTML='';
+  if(!PLACES.length){sel.style.display='none';$('locMsg').textContent='No place found. Try another spelling, or type the numbers.';return}
+  PLACES.forEach(function(p,i){var o=document.createElement('option');o.value=i;o.textContent=placeLabel(p);sel.appendChild(o)});
+  sel.style.display='';sel.value='0';placePick();
+  $('locMsg').textContent='Pick the right place. The numbers are filled in and can still be edited. Save to keep them.';
+ }).catch(function(){$('locMsg').textContent='Search failed (no internet in this browser?). Type the numbers instead.'})}
+function placePick(){var p=PLACES[parseInt(gv('locRes'))]; if(!p)return;
+ sv('locLat',p.latitude.toFixed(2)); sv('locLon',p.longitude.toFixed(2))}
+function sunToggled(){if(gc('sunEnabled'))sc('autoBrightness',false)}
+function autoToggled(){if(gc('autoBrightness'))sc('sunEnabled',false)}
+function radarLocChanged(){var d=gc('radarUseDevice'); $('radarLat').disabled=d; $('radarLon').disabled=d}
+function numIn(v,def,lo,hi){var n=parseInt(v); return isNaN(n)?def:Math.min(hi,Math.max(lo,n))}
+// sun end
 function toast(m){var t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2200)}
 function j(url,opt){return fetch(url,opt).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'Request failed');return d})})}
 
@@ -510,6 +552,9 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('tz',ck.tz||''); sv('lang',ck.lang||'en'); sc('nightEnabled',!!ck.nightEnabled);
  sv('nightStart',ck.nightStart||'22:00'); sv('nightEnd',ck.nightEnd||'07:00');
  sv('nightLevel',ck.nightLevel!=null?ck.nightLevel:0); $('nlVal')&&($('nlVal').textContent=(ck.nightLevel!=null?ck.nightLevel:0));
+ sv('locLat',ck.lat||''); sv('locLon',ck.lon||'');
+ sc('sunEnabled',!!ck.sunEnabled); sv('sunLow',ck.sunLow!=null?ck.sunLow:5); $('slVal')&&($('slVal').textContent=(ck.sunLow!=null?ck.sunLow:5));
+ sv('sunRise',ck.sunRise!=null?ck.sunRise:60); sv('sunSet',ck.sunSet!=null?ck.sunSet:60); sv('sunOverlap',ck.sunOverlap||0);
  $('mode').value=c.mode||'stocks'; modeChanged();
  sv('carouselSec',c.carouselSec||30);
  sc('carouselTicker',c.carouselTicker!==false); sc('carouselUsage',c.carouselUsage!==false); sc('carouselRadar',c.carouselRadar!==false);
@@ -533,6 +578,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  // radar slice
  var r=c.radar||{};
  sv('radarLat',r.lat); sv('radarLon',r.lon);
+ sc('radarUseDevice',r.useDevice!==false); radarLocChanged();
  // An imported config can carry any range from 1 to 500, and a value the list
  // does not offer would leave the select blank. Add it rather than lose it.
  var _rk=r.rangeKm||20, _rs=$('rangeKm');
@@ -660,10 +706,13 @@ function collect(){
  if($('tz')){var _tzn=gv('tz'); var _tzp=(_tzn in TZMAP)?TZMAP[_tzn]:((C.clock&&C.clock.tz===_tzn&&C.clock.tzPosix)?C.clock.tzPosix:'UTC0');
   o.clock={tz:_tzn,tzPosix:_tzp,lang:gv('lang')||'en',
   nightEnabled:gc('nightEnabled'),nightStart:gv('nightStart')||'22:00',
-  nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0};}
+  nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0,
+  lat:parseFloat(gv('locLat'))||0,lon:parseFloat(gv('locLon'))||0,
+  sunEnabled:gc('sunEnabled'),sunLow:numIn(gv('sunLow'),5,0,100),sunRise:numIn(gv('sunRise'),60,0,120),
+  sunSet:numIn(gv('sunSet'),60,0,120),sunOverlap:numIn(gv('sunOverlap'),0,0,2)};}
  // radar slice
  if($('radar')){
-  var r={lat:parseFloat(gv('radarLat'))||0, lon:parseFloat(gv('radarLon'))||0,
+  var r={useDevice:gc('radarUseDevice'), lat:parseFloat(gv('radarLat'))||0, lon:parseFloat(gv('radarLon'))||0,
    rangeKm:parseInt(gv('rangeKm'))||20, unitsMi:gv('unitsMi')==='true',
    pollSec:parseInt(gv('radarPollSec'))||0, source:gv('radarSource'),
    webhookUrl:gv('radarWebhookUrl'),
@@ -758,7 +807,8 @@ document.addEventListener('visibilitychange',function(){
 function showStatus(s){
  $('dot').className='dot'+(s.connected?' ok':'');
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
- var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&C.clock.nightEnabled)||C.mode==='theme'||!!(C.wg&&C.wg.enabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: enable night mode, a theme clock, or WireGuard to start NTP':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
+ var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&(C.clock.nightEnabled||C.clock.sunEnabled))||C.mode==='theme'||!!(C.wg&&C.wg.enabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: enable night mode, a theme clock, or WireGuard to start NTP':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
+ var sn=$('sunNow'); if(sn&&C.clock&&C.clock.sunEnabled)sn.textContent=s.sun?('Today: '+s.sun+'. Fades start at sunrise and at sunset.'):(C.clock.lat||C.clock.lon?'Waiting for the clock (NTP)...':'Set the device location above.');
  var fw=$('fwVer'); if(fw)fw.textContent=s.fw+' '+s.version;
  // Surface the result of a boot-time GitHub update (ESP8266) once on first load,
  // so a failure that happened across the reboot is visible even if the original

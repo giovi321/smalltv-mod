@@ -82,6 +82,15 @@ struct ClockSettings {
   uint16_t nightStartMin; // minutes since local midnight (0..1439)
   uint16_t nightEndMin;
   uint8_t  nightLevel;    // 0..100, 0 = backlight off
+  // Device-wide location (0,0 = not set). The sun schedule and, by default,
+  // the radar use it.
+  float    lat, lon;
+  // Brightness that follows sunrise and sunset (see SunTimes.h)
+  bool     sunEnabled;
+  uint8_t  sunLow;        // 0..100 %, brightness at night (0 = off)
+  uint8_t  sunRise;       // sunrise fade, 0..120 minutes
+  uint8_t  sunSet;        // sunset fade, 0..120 minutes
+  uint8_t  sunOverlap;    // with night mode: 0 night first, 1 sun first, 2 darker
 
   void setDefaults();
   void toJson(JsonObject o) const;
@@ -159,7 +168,8 @@ struct HaSettings {
 struct RadarSettings {
   float    lat;           // home latitude  (0,0 = not set yet)
   float    lon;           // home longitude
-  uint8_t  source;        // RADAR_SRC_ADSBFI, RADAR_SRC_ADSBLOL or RADAR_SRC_WEBHOOK
+  bool     useDevice;     // true: use the device location (clock settings)
+  uint8_t  source;       // RADAR_SRC_ADSBFI, RADAR_SRC_ADSBLOL or RADAR_SRC_WEBHOOK
   String   webhookUrl;    // LAN proxy base URL (when source=webhook)
   uint16_t rangeKm;       // outer ring radius
   uint16_t pollSec;       // refresh period
@@ -233,8 +243,12 @@ struct Settings {
   void setDefaults();
 };
 
+// The radar's home: the device location unless the radar has its own.
+inline float radarLat(const Settings& s) { return s.radar.useDevice ? s.clock.lat : s.radar.lat; }
+inline float radarLon(const Settings& s) { return s.radar.useDevice ? s.clock.lon : s.radar.lon; }
+
 // Persistence
-bool settingsBegin();                       // mount LittleFS
+bool settingsBegin();                      // mount LittleFS
 bool loadSettings(Settings& s);             // false => defaults applied
 bool saveSettings(const Settings& s);
 void factoryReset(Settings& s);             // wipe file + defaults

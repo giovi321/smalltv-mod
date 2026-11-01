@@ -18,6 +18,7 @@
 #include "OtaUpdate.h"
 #include "Mode.h"
 #include "Clock.h"
+#include "SunTimes.h"
 #include "WgClient.h"
 #if WITH_THEME
 #include "features/theme/ThemeMode.h"
@@ -128,11 +129,19 @@ static uint8_t  g_ldrCache   = DEFAULT_BRIGHTNESS;   // last LDR reading (2 s ca
 
 // Single brightness resolver: night mode overrides auto-brightness overrides the
 // manual level. Only writes the PWM when the effective target changes.
+// The order is in resolveBrightness() (SunTimes.cpp), which the native tests
+// cover. The result is in backlight steps (0..255) so the sun fade can move as
+// finely as the PWM allows.
 static uint8_t appEffectiveBrightness() {
+  BrightnessInputs in = {};
   // A button wake press briefly lifts the screen to the manual level so a touch
   // reveals it even when night mode has dimmed or blanked the backlight.
-  if (g_btnWakeUntil && millis() < g_btnWakeUntil) return g_settings.brightness;
-  if (clockNightActive()) return g_settings.clock.nightLevel;
+  in.wake = g_btnWakeUntil && millis() < g_btnWakeUntil;
+  in.sliderPct = g_settings.brightness;
+  in.nightActive = clockNightActive();
+  in.nightPct = g_settings.clock.nightLevel;
+  in.overlap = g_settings.clock.sunOverlap;
+  in.sunValid = clockSunSteps(g_settings, brightnessSteps(g_settings.brightness), in.sunSteps);
 #if HAS_LDR
   if (g_settings.autoBrightness) {
     if (millis() - g_lastAutoBr > 2000) {
@@ -140,17 +149,20 @@ static uint8_t appEffectiveBrightness() {
       int raw = analogRead(LDR_PIN);
       g_ldrCache = (uint8_t)constrain(raw * 100 / ADC_MAX, 5, 100);
     }
-    return g_ldrCache;
+    in.ldrOn = true;
+    in.ldrPct = g_ldrCache;
   }
 #endif
-  return g_settings.brightness;
+  return resolveBrightness(in);
 }
+
+int appBacklightSteps() { return g_lastBr; }   // last level written, 0..255 (-1: none yet)
 
 void appApplyBrightness() {
   uint8_t t = appEffectiveBrightness();
   if ((int)t != g_lastBr) {
     g_lastBr = t;
-    gfxSetBrightness(t, g_settings.backlightInverted);
+    gfxSetBrightnessSteps(t, g_settings.backlightInverted);
   }
 }
 

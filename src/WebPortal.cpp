@@ -32,6 +32,7 @@ extern void appInvalidate();
 extern void appRelease();
 extern const char* appResetReason();   // last reset reason (diagnostics)
 extern void appApplyBrightness();   // main.cpp: re-resolve effective brightness now
+extern int  appBacklightSteps();    // main.cpp: backlight level now, 0..255
 
 static WebServerClass server(80);
 static Settings*        S = nullptr;
@@ -220,6 +221,10 @@ static void handleStatus() {
   d.night = clockNightActive();          // dimming now
   d.nightHeld = clockNightHeld();        // in the window but waiting for a fresh NTP sync
   d.clockFresh = clockTrusted();         // last NTP sync within the trust window
+  char sunText[24] = "";
+  if (!clockSunText(*S, sunText, sizeof(sunText))) sunText[0] = 0;
+  d.sun = sunText;                       // today's sunrise-sunset; left out when empty
+  d.bl = appBacklightSteps();            // backlight level now, 0..255
   d.wg = wgStatus();                     // tunnel state (compiledIn=false where it isn't built)
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
