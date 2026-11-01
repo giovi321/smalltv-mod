@@ -497,6 +497,20 @@ example a seconds bar that needs no `data` block:
 | `time.day` | 1–31 | Day of the month |
 | `time.month` | 1–12 | Month, January is 1 |
 | `time.weekday` | 0–6 | Day of the week, Sunday is 0 |
+| `time.moon` | 0–29 | Age of the moon in whole days: 0 is the new moon, 14–15 the full moon |
+
+`time.moon` needs no network. It counts the time since a reference new moon,
+2000-01-06 18:14 UTC, modulo the mean synodic month of 29.530588 days (29 d 12 h
+44 min 3 s), and drops the fraction. The result is 0 to 29, and it steps up by
+one every 24 hours, then falls from 29 to 0 at the next new moon. Because it
+uses the mean month, the real moon is up to about 0.75 days early or 0.4 days
+late: checked against the US Naval Observatory's times for 150 new and full
+moons from 2020 to 2030, a true new moon reads 28, 29 or 0 and a true full moon
+reads 14 or 15. Use `input: [0, 29]` and treat 28 to 1 as new and 13 to 16 as
+full if a theme needs a safe margin. The value is computed from the clock in
+the configured timezone as if it were UTC, which adds up to the offset
+(at most about half a day) to that error. Before the clock is set there is no
+value.
 
 `time.*` follows the same clock as `{HH}` and the other date and time text
 variables, in the configured timezone. Until the clock has been set (no NTP

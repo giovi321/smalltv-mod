@@ -74,7 +74,7 @@ struct ColorBinding {
 // `device.*` is optional and comes from the firmware (setDeviceValues()), so
 // the binding keeps its name in `source` and has no enum entry of its own.
 enum class BuiltIn : uint8_t {
-  None, TimeSecond, TimeMinute, TimeHour, TimeHour12, TimeSecondOfDay, TimeDay, TimeMonth, TimeWeekday, Device
+  None, TimeSecond, TimeMinute, TimeHour, TimeHour12, TimeSecondOfDay, TimeDay, TimeMonth, TimeWeekday, TimeMoon, Device
 };
 // "time.minute" and the like give their BuiltIn; "device.<name>" for a name
 // the spec lists gives Device. Anything else, including a data field, is None.
