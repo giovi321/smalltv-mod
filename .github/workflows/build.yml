@@ -111,6 +111,7 @@ jobs:
           cmp examples/themes/live-status.stheme /tmp/live-status.stheme
           sh tests/theme/run.sh
           node tests/theme/test_webui.js
+          node tests/theme/test_webui_poll.js
 
       # Mutated packages, theme manifests and imported settings through the
       # real parsers, 32-bit with ASan and UBSan. A fixed seed and 2000 cases

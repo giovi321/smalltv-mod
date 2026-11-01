@@ -736,7 +736,24 @@ function scan(){$('scanList').innerHTML='<div class="muted">Scanning...</div>';
   $('scanList').innerHTML=h||'<div class="muted">No networks found</div>';})}
 
 // status
-function loadStatus(){j('/api/status').then(function(s){
+// The device answers one request at a time and keeps the others waiting in
+// its small memory, so the status is read politely: the next read is timed
+// from the end of the last one (a slow device is not asked again while it is
+// still answering), a lost reply is given up after STATUS_TIMEOUT_MS, and a
+// hidden tab stops asking until it is shown again.
+var STATUS_MS=5000,STATUS_TIMEOUT_MS=8000,statusTimer=0,statusRead=null;
+function loadStatus(){
+ clearTimeout(statusTimer);statusTimer=0;
+ if(statusRead)return statusRead;   // one is under way; it schedules the next
+ var ac=new AbortController(),kill=setTimeout(function(){ac.abort()},STATUS_TIMEOUT_MS);
+ statusRead=j('/api/status',{signal:ac.signal}).then(showStatus).catch(function(){}).then(function(){
+  clearTimeout(kill);statusRead=null;statusNext()});
+ return statusRead;
+}
+function statusNext(){clearTimeout(statusTimer);statusTimer=0;if(!document.hidden)statusTimer=setTimeout(loadStatus,STATUS_MS)}
+document.addEventListener('visibilitychange',function(){
+ if(document.hidden){clearTimeout(statusTimer);statusTimer=0}else loadStatus()});
+function showStatus(s){
  $('dot').className='dot'+(s.connected?' ok':'');
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
  var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&C.clock.nightEnabled)||C.mode==='theme'||!!(C.wg&&C.wg.enabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: enable night mode, a theme clock, or WireGuard to start NTP':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
@@ -767,7 +784,7 @@ function loadStatus(){j('/api/status').then(function(s){
   if(t.error&&t.retryIn!=null)st+=' <span class="muted">(retry '+t.retryIn+'s)</span>';
   h+='<div class="kv"><b style="color:'+c+'">'+t.symbol+'</b><span>'+st+'</span></div>';});
  tb.innerHTML=h||'<span class="muted">No tickers configured</span>';}
-})}
+}
 function kv(k,v){return '<div class="kv"><span class="muted">'+k+'</span><b>'+v+'</b></div>'}
 // WireGuard: one line that names the failure rather than just saying "down".
 // The handshake age is measured against the browser's clock, which is the one
@@ -882,7 +899,6 @@ function upload(){var f=$('fw').files[0];if(!f){toast('Pick a .bin first');retur
  x.send(fd);
 }
 
-loadConfig().then(loadStatus);
-setInterval(loadStatus,5000);
+loadConfig().then(loadStatus,loadStatus);   // the status polls on, whatever the config did
 </script>
 </body></html>
