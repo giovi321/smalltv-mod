@@ -67,6 +67,8 @@ static std::string reference(const Case& c) {
   o["night"] = d.night;
   o["nightHeld"] = d.nightHeld;
   o["clockFresh"] = d.clockFresh;
+  if (d.sun[0]) o["sun"] = std::string(d.sun);
+  o["bl"] = d.bl;
   fillWg(o["wg"].to<JsonObject>(), d.wg);
   if (c.tickersCompiled) {
     JsonArray arr = o["tickers"].to<JsonArray>();
@@ -176,6 +178,8 @@ static std::vector<Case> cases() {
   full.d.night = true;
   full.d.nightHeld = true;
   full.d.clockFresh = false;
+  full.d.sun = "06:58-16:42";
+  full.d.bl = 255;
   full.d.wg.compiledIn = true;
   full.d.wg.enabled = full.d.wg.up = true;
   full.d.wg.stage = 3;
@@ -214,6 +218,17 @@ static std::vector<Case> cases() {
   zeros.radar.hasOk = true;
   zeros.radar.okAgo = 0;
   all.push_back(zeros);
+
+  // The sun text with a dimmed backlight (a middle level), and a sun text
+  // that needs escaping; and no sun text with the backlight fully on.
+  Case dim("sun-dim", true, true);
+  dim.d.sun = "polar \"day\"";
+  dim.d.bl = 37;
+  all.push_back(dim);
+  Case lit("no-sun-lit", false, false);
+  lit.d.sun = "";
+  lit.d.bl = 255;
+  all.push_back(lit);
   return all;
 }
 
@@ -223,7 +238,7 @@ int main() {
       "{\"fw\":\"smalltv-mod\",\"version\":\"3.2.1\",\"variant\":\"esp8266\",\"repo\":\"https://github.com/giovi321/smalltv-mod\","
       "\"mode\":\"sta\",\"connected\":true,\"ssid\":\"home-wifi-01\",\"ip\":\"198.51.100.177\",\"rssi\":-67,\"heap\":6384,"
       "\"maxblk\":3080,\"contstk\":660,\"uptime\":290,\"reset\":\"Software/System restart\",\"synced\":true,"
-      "\"time\":\"2026-11-01 11:00\",\"tz\":\"\",\"night\":false,\"nightHeld\":false,\"clockFresh\":true,"
+      "\"time\":\"2026-11-01 11:00\",\"tz\":\"\",\"night\":false,\"nightHeld\":false,\"clockFresh\":true,\"bl\":0,"
       "\"wg\":{\"compiledIn\":false,\"enabled\":false,\"up\":false,\"held\":false,\"badConfig\":false},"
       "\"tickers\":[],\"radar\":{\"count\":0,\"error\":false,\"stage\":\"idle\",\"seenAc\":0}}";
   int checked = 0;
@@ -231,6 +246,17 @@ int main() {
     const std::string want = reference(c);
     if (std::string(c.name) == "idle") {
       if (want != saved) { std::fprintf(stderr, "reference no longer matches the saved reply:\n%s\n%s\n", want.c_str(), saved); return 1; }
+    }
+    // Where the sun fields sit is fixed: after clockFresh, before wg.
+    if (std::string(c.name) == "full" &&
+        want.find("\"clockFresh\":false,\"sun\":\"06:58-16:42\",\"bl\":255,\"wg\":{") == std::string::npos) {
+      std::fprintf(stderr, "sun and bl are not between clockFresh and wg:\n%s\n", want.c_str());
+      return 1;
+    }
+    if (std::string(c.name) == "no-sun-lit" && (want.find("\"sun\"") != std::string::npos ||
+                                                want.find("\"clockFresh\":true,\"bl\":255,\"wg\":{") == std::string::npos)) {
+      std::fprintf(stderr, "an empty sun text must be left out; bl stays:\n%s\n", want.c_str());
+      return 1;
     }
     StringSink big, small;
     const std::string a = streamed<128>(c, big);
