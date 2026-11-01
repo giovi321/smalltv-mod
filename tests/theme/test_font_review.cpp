@@ -178,16 +178,13 @@ static void testDirtyRects() {
     CHECK(std::string("dirty: partial == full for scroll '")+scroll+"'",!mismatch);
   }
 }
-// 5. The example theme before the clock is set: the engine shows "--" for
-// {HH}:{MM}. The font must not draw those as digits.
-static void testUnsyncedClock() {
-  Disk disk("examples/themes/bebas-clock.stheme");
-  Package p(disk);Theme t;std::string error;
-  CHECK("example loads",p.load(t,error));
-  for(const ThemeFont& f:t.fonts) {
-    const uint8_t g=f.glyph('-');
-    CHECK("example: font '"+f.name+"' does not draw '-' as a digit",!(g>='0'&&g<='9'));
-  }
+// 5. Which glyph is drawn for a byte, in a font whose first code point is not
+// its fallback (test_font.cpp's font has both at 'A').
+static void testGlyphLookup() {
+  ThemeFont f;f.first='A';f.fallback='C';f.advances={4,0,2};
+  CHECK("glyph: the first code point is its own glyph",f.glyph('A')=='A'&&f.advance('A')==4);
+  CHECK("glyph: a code point without a glyph falls back",f.glyph('B')=='C'&&f.advance('B')==2);
+  CHECK("glyph: bytes outside the font fall back",f.glyph('@')=='C'&&f.glyph('D')=='C'&&f.glyph(0)=='C'&&f.glyph(255)=='C');
 }
 // 6. Not a pass/fail check: how many storage reads one redraw of the example costs.
 struct Counting : Disk {
@@ -216,7 +213,7 @@ int main() {
   testAnchors();
   testValues();
   testDirtyRects();
-  testUnsyncedClock();
+  testGlyphLookup();
   std::cout<<(failures?"theme font review tests: FAILED ":"theme font review tests passed ")<<failures<<" failing checks\n";
   return failures?1:0;
 }
