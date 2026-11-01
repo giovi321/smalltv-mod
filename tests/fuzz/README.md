@@ -11,6 +11,7 @@ undefined behaviour aborts the run.
 | `package` | `Package::load()`, `row()`, `resolve()` (STH1 container, STI1 and STI2 images), then the engine and `render()` on whatever loads; `inspectInstalledTheme()` | `examples/themes/*.stheme`, a small built-in package, each STI2 file in `tests/theme/sti/` in a spec 2 package |
 | `manifest` | `parseTheme()` on a string and through the streaming `ManifestSource`, then the engine | `examples/themes/*/theme.json` |
 | `meta` | `ThemeIndexReader` (the theme index, `/themes/.index`), then `copyThemeIndex()` as an install or delete runs it, whose output must read back as usable lines | `corpus/meta/` |
+| `font` | the `package` entry points, on spec 2 packages with a package font (STF) and text layers that use it: anchors, scrolling, fetched values, the clock; mutants change the font's header and glyph records in place | `examples/themes/bebas-clock.stheme`, random fonts that pass the load checks |
 | `import` | `deserializeJson()` + `settingsApplyJson()` as in `handleImport()`, then `settingsToJson()` and a second apply | `corpus/import/`, the device's own default export |
 
 `src/Settings.cpp` is compiled as it is, as the ESP8266 target, against the

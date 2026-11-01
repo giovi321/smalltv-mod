@@ -8,7 +8,7 @@
 // aborts the run. The default mode needs no fuzzing engine: it replays the
 // seed corpus, then a fixed number of mutants drawn from a seeded PRNG, so a
 // failing run can be repeated exactly. With -DFUZZ_LIBFUZZER and one of
-// -DFUZZ_TARGET_PACKAGE/_MANIFEST/_META/_IMPORT it exposes the same targets to
+// -DFUZZ_TARGET_PACKAGE/_MANIFEST/_META/_IMPORT/_FONT it exposes the same targets to
 // libFuzzer instead.
 #include <ESP8266WiFi.h>
 #include <LittleFS.h>
@@ -78,7 +78,7 @@ struct Rng {
   bool chance(uint32_t oneIn) { return below(oneIn) == 0; }
 };
 
-unsigned accepted[4];   // inputs each target parsed successfully: shows the mutants get past validation
+unsigned accepted[5];   // inputs each target parsed successfully: shows the mutants get past validation
 
 // Walks everything a loaded package offers to the renderer.
 void exercise(Package& package, const Theme& theme, Rng& rng) {
@@ -241,9 +241,11 @@ void fuzzImport(const Bytes& input, uint64_t) {
   settingsApplyJson(again, out.as<JsonObjectConst>());
 }
 
-enum Target { PackageTarget, ManifestTarget, MetaTarget, ImportTarget, TargetCount };
-const char* const targetNames[TargetCount] = {"package", "manifest", "meta", "import"};
-void (*const targetFns[TargetCount])(const Bytes&, uint64_t) = {fuzzPackage, fuzzManifest, fuzzMeta, fuzzImport};
+// The font target loads and draws a package with package fonts (STF) the
+// same way the package target does; only its seeds and mutants differ.
+enum Target { PackageTarget, ManifestTarget, MetaTarget, ImportTarget, FontTarget, TargetCount };
+const char* const targetNames[TargetCount] = {"package", "manifest", "meta", "import", "font"};
+void (*const targetFns[TargetCount])(const Bytes&, uint64_t) = {fuzzPackage, fuzzManifest, fuzzMeta, fuzzImport, fuzzPackage};
 
 }  // namespace
 
@@ -257,8 +259,10 @@ void (*const targetFns[TargetCount])(const Bytes&, uint64_t) = {fuzzPackage, fuz
 #define FUZZ_TARGET MetaTarget
 #elif defined(FUZZ_TARGET_IMPORT)
 #define FUZZ_TARGET ImportTarget
+#elif defined(FUZZ_TARGET_FONT)
+#define FUZZ_TARGET FontTarget
 #else
-#error "define one of FUZZ_TARGET_PACKAGE, FUZZ_TARGET_MANIFEST, FUZZ_TARGET_META, FUZZ_TARGET_IMPORT"
+#error "define one of FUZZ_TARGET_PACKAGE, FUZZ_TARGET_MANIFEST, FUZZ_TARGET_META, FUZZ_TARGET_IMPORT, FUZZ_TARGET_FONT"
 #endif
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   uint64_t seed = 0;
@@ -468,8 +472,106 @@ Bytes mutatePackage(const Bytes& seed, Rng& rng) {
   return out;
 }
 
+// A random font the package checks accept (STF1: see Package::checkFont()):
+// the glyph records and bitmaps agree, so the mutants built from it get past
+// the checks and into the renderer, which they could not from random bytes.
+Bytes randomFont(Rng& rng) {
+  const unsigned height = 6 + rng.below(rng.chance(4) ? 91 : 30), first = 32 + rng.below(rng.chance(2) ? 1 : 90);
+  const unsigned count = 1 + rng.below(std::min(95u, 127 - first)), wide = rng.chance(5) ? 120 : 24;
+  Bytes records, bitmaps;
+  std::vector<unsigned> usable;
+  for (unsigned i = 0; i < count; ++i) {
+    unsigned advance = 0, left = 0, top = 0, width = 0, rows = 0, offset = 0;
+    if (!rng.chance(5) || i + 1 == count) {   // a glyph; the last one always, so there is a fallback
+      advance = 1 + rng.below(wide);
+      usable.push_back(first + i);
+      if (rng.below(4)) {   // with ink
+        width = 1 + rng.below(advance);
+        rows = 1 + rng.below(height);
+        left = rng.below(advance - width + 1);
+        top = rng.below(height - rows + 1);
+        const unsigned bytes = (width + 1) / 2;
+        if (bitmaps.size() + bytes * rows > 65535) width = rows = left = top = 0;
+        else {
+          offset = bitmaps.size();
+          for (unsigned r = 0; r < rows; ++r)
+            for (unsigned b = 0; b < bytes; ++b) {
+              unsigned v = rng.next() & 0xff;
+              if (rng.chance(3)) v = rng.chance(2) ? 0 : 0xff;
+              if (width % 2 && b + 1 == bytes) v &= 0xf0;
+              bitmaps += char(v);
+            }
+        }
+      }
+    }
+    records += char(offset) + Bytes(1, char(offset >> 8)) + char(advance) + char(left) + char(top) + char(width) + char(rows) + '\0';
+  }
+  const unsigned fallback = usable[rng.below(usable.size())];
+  Bytes font = "STF1";
+  font += char(height);
+  font += char(1 + rng.below(height));
+  font += char(first);
+  font += char(count);
+  font += char(fallback);
+  font.append(3, '\0');
+  return font + records + bitmaps;
+}
+
+// A package with that font and text layers that use it: anchors, scrolling,
+// fetched values (the fuzz target feeds those junk), and the clock.
+Bytes fontPackage(Rng& rng) {
+  static const char* const anchors[] = {"top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"};
+  std::string layers;
+  for (unsigned i = 0, n = 1 + rng.below(3); i < n; ++i) {
+    std::string value;
+    for (unsigned k = rng.below(24); k; --k) {
+      const char c = char(32 + rng.below(95));
+      value += c == '{' || c == '}' || c == '"' || c == '\\' ? 'x' : c;
+    }
+    if (rng.chance(2)) value += "{d.v}";
+    if (rng.chance(3)) value += "{HH}:{MM}";
+    std::string layer = R"({"id":"t)" + std::to_string(i) + R"(","type":"text","x":)" + std::to_string(int(rng.below(300)) - 30) + R"(,"y":)" +
+                        std::to_string(int(rng.below(260)) - 20) + R"(,"anchor":")" + anchors[rng.below(9)] + R"(","value":")";
+    layer += value;
+    layer += R"(","font":"f","color":"#ffffff")";
+    if (rng.chance(2)) {
+      const bool loop = rng.chance(2);
+      layer += R"(,"scroll":{"width":)" + std::to_string(10 + rng.below(220)) + R"(,"speed":)" + std::to_string(1 + rng.below(60)) +
+               R"(,"pause":0,"mode":")" + (loop ? "loop" : "bounce") + "\"" + (loop ? ",\"gap\":" + std::to_string(rng.below(60)) : "") + "}";
+    }
+    layers += (i ? "," : "") + layer + "}";
+  }
+  if (rng.chance(2)) layers = R"({"id":"bg","type":"shape","shape":"rectangle","x":10,"y":10,"width":220,"height":200,"fill":"#336699"},)" + layers;
+  std::vector<Record> records;
+  records.push_back({"theme.json", R"({"spec":2,"theme":{"id":"seed","name":"Seed","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#102030"},"layers":[)" + layers +
+                                      R"(],"data":[{"id":"d","url":"http://example.com/","interval":60,"fields":[{"id":"v","path":"v"}]}]})"});
+  records.push_back({"fonts/f.stf", randomFont(rng)});
+  return joinPackage(records);
+}
+
+// Mutants of a font package: a new valid one, or the font record changed in
+// place (header and glyph records are 12 + 8 * count bytes at the start).
+Bytes mutateFontPackage(const Bytes& seed, Rng& rng) {
+  if (rng.chance(3)) return fontPackage(rng);
+  std::vector<Record> records;
+  if (rng.chance(8) || !splitPackage(seed, records)) return mutatePackage(seed, rng);
+  for (auto& r : records) {
+    if (r.path.compare(0, 6, "fonts/") || r.payload.size() < 12) continue;
+    for (unsigned n = 1 + rng.below(3); n; --n) {
+      const size_t head = std::min<size_t>(r.payload.size(), 12 + 8 * uint8_t(r.payload[7]));
+      const size_t at = rng.chance(4) ? rng.below(r.payload.size()) : rng.below(head);
+      static const int widths[] = {1, 1, 2};
+      putLe(r.payload, at, extremes[rng.below(extremeCount)], widths[rng.below(3)]);
+      if (rng.chance(3)) r.payload[at] = char(r.payload[at] + (rng.chance(2) ? 1 : -1));
+    }
+  }
+  if (rng.chance(10)) mutateJson(records[0].payload, rng);
+  return joinPackage(records);
+}
+
 Bytes mutateOne(Target target, const Bytes& seed, Rng& rng) {
   if (target == PackageTarget) return mutatePackage(seed, rng);
+  if (target == FontTarget) return mutateFontPackage(seed, rng);
   Bytes b = seed;
   for (unsigned n = rng.chance(2) ? 1 : 1 + rng.below(3); n; --n) mutateJson(b, rng);
   return b;
@@ -553,7 +655,7 @@ int main(int argc, char** argv) {
     else if (a == "--repro") repro = value();
     else if (a == "--crash-dir") crashDir = value();
     else {
-      fprintf(stderr, "usage: %s [--iters N] [--seed S] [--root REPO] [--target package|manifest|meta|import] [--repro FILE] [--crash-dir DIR]\n", argv[0]);
+      fprintf(stderr, "usage: %s [--iters N] [--seed S] [--root REPO] [--target package|manifest|meta|import|font] [--repro FILE] [--crash-dir DIR]\n", argv[0]);
       return 2;
     }
   }
@@ -588,6 +690,13 @@ int main(int argc, char** argv) {
   for (const auto& p : listDir(root + "/tests/theme/sti"))
     if (p.size() > 4 && p.compare(p.size() - 4, 4, ".sti") == 0 && readFile(p, data) && data.compare(0, 4, "STI2") == 0)
       corpus[PackageTarget].push_back(imagePackage(data));
+  {   // fonts: the example's, and random valid ones
+    Rng seeds(seed * 77 + 5);
+    for (const auto& p : listDir(root + "/examples/themes"))
+      if (p.find("bebas") != std::string::npos && p.size() > 7 && p.compare(p.size() - 7, 7, ".stheme") == 0 && readFile(p, data))
+        corpus[FontTarget].push_back(data);
+    for (int i = 0; i < 6; ++i) corpus[FontTarget].push_back(fontPackage(seeds));
+  }
   for (const auto& p : listDir(root + "/tests/fuzz/corpus/meta"))
     if (readFile(p, data)) corpus[MetaTarget].push_back(data);
   for (const auto& p : listDir(root + "/tests/fuzz/corpus/import"))
@@ -614,6 +723,7 @@ int main(int argc, char** argv) {
       continue;
     }
     uint64_t cases = 0;
+    const unsigned packagesBefore = accepted[0];   // the font target parses packages too
     for (const auto& seedInput : corpus[t]) run(Target(t), seedInput, cases++, seed);
     Rng rng(seed * 1000 + t);
     for (uint64_t i = 0; i < iters; ++i) {
@@ -621,6 +731,7 @@ int main(int argc, char** argv) {
       Bytes mutant = mutateOne(Target(t), base, rng);
       run(Target(t), mutant, cases++, seed);
     }
+    if (t == FontTarget) accepted[t] = accepted[0] - packagesBefore;
     printf("fuzz: %-8s %zu seeds + %llu mutants ok (%u of %llu cases parsed)\n", targetNames[t], corpus[t].size(),
            (unsigned long long)iters, accepted[t], (unsigned long long)cases);
   }
