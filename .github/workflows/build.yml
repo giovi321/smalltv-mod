@@ -111,6 +111,7 @@ jobs:
           cmp examples/themes/live-status.stheme /tmp/live-status.stheme
           sh tests/theme/run.sh
           node tests/theme/test_webui.js
+          node tests/theme/test_webui_poll.js
 
       # Mutated packages, theme manifests and imported settings through the
       # real parsers, 32-bit with ASan and UBSan. A fixed seed and 2000 cases
@@ -126,6 +127,11 @@ jobs:
           c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc -I.pio/libdeps/smalltv_esp32_8mb/ArduinoJson/src \
             tests/test_storage.cpp -o /tmp/smalltv-storage-tests
           /tmp/smalltv-storage-tests
+
+      # The /api/status reply: same bytes as before, written in pieces.
+      # 32-bit memory test, so it needs g++-multilib (installed above).
+      - name: Test status reply
+        run: sh tests/status/run.sh
 
       - name: Test web request guard
         run: |

@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include "webui.h"
+#include "StatusJson.h"
 #include "Net.h"
 #include "Gfx.h"
 #include "OtaUpdate.h"
@@ -155,73 +156,97 @@ static void handleGetConfig() {
   sendJson(doc);
 }
 
-static void handleStatus() {
-  if (!requireAuth()) return;
-  JsonDocument doc;
-  JsonObject o = doc.to<JsonObject>();
-  o["fw"] = FW_NAME;
-  o["version"] = FW_VERSION;
-  o["variant"] = FW_VARIANT;   // which release image this is, e.g. "esp8266-lean"
-  o["repo"] = REPO_URL;
-  if (g_updateMsg.length()) o["updateMsg"] = g_updateMsg;
-  o["mode"] = (netMode() == NET_AP) ? "ap" : "sta";
-  o["connected"] = netConnected();
-  o["ssid"] = netSSID();
-  o["ip"] = netIP();
-  o["rssi"] = netRSSI();
-  if (netFailReason()[0]) o["wifiFail"] = netFailReason();
-  o["heap"] = ESP.getFreeHeap();
-  o["maxblk"] = platformMaxFreeBlock();     // largest contiguous block (TLS handshake needs one)
-  o["contstk"] = platformFreeContStack();   // primary stack headroom (ESP8266)
-  o["uptime"] = millis() / 1000;
-  o["reset"] = appResetReason();
-  o["synced"] = clockSynced();
-  { String ts = clockTimeStr(); if (ts.length()) o["time"] = ts; }
-  o["tz"]        = S->clock.tz;
-  o["night"]     = clockNightActive();   // dimming now
-  o["nightHeld"] = clockNightHeld();      // in the window but waiting for a fresh NTP sync
-  o["clockFresh"] = clockTrusted();       // last NTP sync within the trust window
-  wgStatusJson(o["wg"].to<JsonObject>()); // tunnel state (compiledIn=false where it isn't built)
+// The pieces of the status reply, to the client as they come, with a pause
+// after each (CONTRIBUTING: a loop over input-sized data yields).
+struct StatusSink : smalltv::Sink {
+  bool write(const char* data, size_t count) override {
+    server.sendContent(data, count);
+    yield();
+    return true;
+  }
+};
 
 #if WITH_TICKER
-  JsonArray arr = o["tickers"].to<JsonArray>();
-  for (uint8_t i = 0; i < stocksCount(); i++) {
-    const StockData& d = stockAt(i);
-    JsonObject t = arr.add<JsonObject>();
-    t["symbol"] = d.symbol;
-    t["valid"] = d.valid;
-    t["error"] = d.error;
-    if (d.error) t["retryIn"] = stockRetryInSec(i);   // seconds to the next attempt
-    if (d.valid) {
-      t["price"] = d.price;
-      float chg, pct;
-      bool onRange = false;
-      if (stockDisplayChange(d, S->ticker, chg, pct, &onRange)) {
-        t["changePct"] = pct;                       // as displayed on the device
-        t["basis"] = onRange ? "range" : "day";     // which basis that was
-      }
+static smalltv::StatusTicker statusTicker(size_t i) {
+  const StockData& d = stockAt(i);
+  smalltv::StatusTicker t;
+  t.symbol = d.symbol;
+  t.valid = d.valid;
+  t.error = d.error;
+  if (d.error) t.retryIn = stockRetryInSec(i);   // seconds to the next attempt
+  if (d.valid) {
+    t.price = d.price;
+    float chg, pct;
+    bool onRange = false;
+    if (stockDisplayChange(d, S->ticker, chg, pct, &onRange)) {
+      t.hasChange = true;
+      t.changePct = pct;                           // as displayed on the device
+      t.onRange = onRange;                         // which basis that was
     }
   }
+  return t;
+}
 #endif
 
+// GET /api/status. The reply is written in 128-byte pieces as the values are
+// read, never built whole (StatusJson.h): its length is not known before the
+// last value, and uptime and heap change meanwhile, so it goes out chunked.
+// 3.2.1 built a document and a String of it; six requests at once then left
+// the ESP8266 with a 648-byte largest block, and a diag build crashed.
+static void handleStatus() {
+  if (!requireAuth()) return;
+  const String ssid = netSSID(), ip = netIP();
+  const String clockText = clockTimeStr();
+  smalltv::StatusData d;
+  d.fw = FW_NAME;
+  d.version = FW_VERSION;
+  d.variant = FW_VARIANT;   // which release image this is, e.g. "esp8266-lean"
+  d.repo = REPO_URL;
+  d.updateMsg = g_updateMsg.c_str();
+  d.mode = (netMode() == NET_AP) ? "ap" : "sta";
+  d.connected = netConnected();
+  d.ssid = ssid.c_str();
+  d.ip = ip.c_str();
+  d.rssi = netRSSI();
+  d.wifiFail = netFailReason();
+  d.heap = ESP.getFreeHeap();
+  d.maxblk = platformMaxFreeBlock();     // largest contiguous block (TLS handshake needs one)
+  d.contstk = platformFreeContStack();   // primary stack headroom (ESP8266)
+  d.uptime = millis() / 1000;
+  d.reset = appResetReason();
+  d.synced = clockSynced();
+  d.time = clockText.c_str();
+  d.tz = S->clock.tz.c_str();
+  d.night = clockNightActive();          // dimming now
+  d.nightHeld = clockNightHeld();        // in the window but waiting for a fresh NTP sync
+  d.clockFresh = clockTrusted();         // last NTP sync within the trust window
+  d.wg = wgStatus();                     // tunnel state (compiledIn=false where it isn't built)
+
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  StatusSink sink;
+  smalltv::PieceWriter<128> out(sink);
+  smalltv::writeStatusHead(out, d);
+#if WITH_TICKER
+  smalltv::writeStatusTickers(out, stocksCount(), statusTicker);
+#endif
 #if WITH_RADAR
   // An empty scope has several possible causes and the screen shows the same
   // thing for all of them, so report the last poll's actual outcome.
-  {
-    JsonObject r = o["radar"].to<JsonObject>();
-    r["count"] = radarCount();          // aircraft currently plotted
-    r["error"] = radarError();
-    r["stage"] = radarStageName();      // why the last poll produced what it did
-    r["seenAc"] = radarSeenAc();        // aircraft in the last parsed response
-    if (radarLastHttp()) r["http"] = radarLastHttp();   // <0 = HTTPClient internal error
-    if (radarTlsRx())    r["tlsRx"] = radarTlsRx();     // negotiated BearSSL rx buffer
-    if (radarLastTryMs()) r["triedAgo"] = (millis() - radarLastTryMs()) / 1000;
-    if (radarLastOkMs())  r["okAgo"]    = (millis() - radarLastOkMs()) / 1000;
-    if (radarLastUrl().length()) r["url"] = radarLastUrl();
-  }
+  smalltv::StatusRadar r;
+  r.count = radarCount();          // aircraft currently plotted
+  r.error = radarError();
+  r.stage = radarStageName();      // why the last poll produced what it did
+  r.seenAc = radarSeenAc();        // aircraft in the last parsed response
+  r.http = radarLastHttp();        // <0 = HTTPClient internal error
+  r.tlsRx = radarTlsRx();          // negotiated BearSSL rx buffer
+  if (radarLastTryMs()) { r.hasTried = true; r.triedAgo = (millis() - radarLastTryMs()) / 1000; }
+  if (radarLastOkMs())  { r.hasOk = true;    r.okAgo    = (millis() - radarLastOkMs()) / 1000; }
+  r.url = radarLastUrl().c_str();
+  smalltv::writeStatusRadar(out, r);
 #endif
-
-  sendJson(doc);
+  smalltv::writeStatusEnd(out);
+  server.sendContent("", 0);   // the last chunk
 }
 
 // Fingerprint of everything network-identity related: the WiFi list and the

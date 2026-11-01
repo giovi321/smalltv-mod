@@ -411,16 +411,18 @@ void wgService(const Settings& s) {
   }
 }
 
-void wgStatusJson(JsonObject o) {
-  o["compiledIn"] = true;
-  o["enabled"] = s_enabled;
-  o["up"] = s_up;
-  o["held"] = s_held;
-  o["badConfig"] = s_badConfig;
-  o["stage"] = s_stage;
-  o["attempts"] = s_attempts;
-  if (s_endpointIp[0]) o["endpointIp"] = s_endpointIp;
-  if (s_lastHandshake) o["lastHandshake"] = (long)s_lastHandshake;
+smalltv::StatusWg wgStatus() {
+  smalltv::StatusWg w;
+  w.compiledIn = true;
+  w.enabled = s_enabled;
+  w.up = s_up;
+  w.held = s_held;
+  w.badConfig = s_badConfig;
+  w.stage = s_stage;
+  w.attempts = s_attempts;
+  w.endpointIp = s_endpointIp;   // a static buffer, valid for the whole reply
+  w.lastHandshake = (long)s_lastHandshake;
+  return w;
 }
 
 bool wgHeld() { return s_held; }
@@ -436,13 +438,7 @@ void wgBegin(const Settings& s, bool bootWasCrash) { (void)s; (void)bootWasCrash
 void wgReapply(const Settings& s) { (void)s; }
 void wgService(const Settings& s) { (void)s; }
 
-void wgStatusJson(JsonObject o) {
-  o["compiledIn"] = false;
-  o["enabled"] = false;
-  o["up"] = false;
-  o["held"] = false;
-  o["badConfig"] = false;
-}
+smalltv::StatusWg wgStatus() { return smalltv::StatusWg(); }   // compiledIn=false, the rest off
 
 bool wgHeld() { return false; }
 
