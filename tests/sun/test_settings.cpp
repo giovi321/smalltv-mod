@@ -58,6 +58,10 @@ static void testLimits() {
   CHECK(s.clock.sunOverlap == 2, "overlap capped at 2: %d", s.clock.sunOverlap);
   CHECK(s.clock.lat == 90.0f, "latitude capped at 90: %f", s.clock.lat);
   CHECK(s.clock.lon == -180.0f, "longitude capped at -180: %f", s.clock.lon);
+  // Whole numbers are locations too (a page or a script may send 45, not 45.0).
+  apply(s, "{\"clock\":{\"lat\":45,\"lon\":-7}}");
+  CHECK(s.clock.lat == 45.0f && s.clock.lon == -7.0f, "integer location: %f %f", s.clock.lat, s.clock.lon);
+  apply(s, "{\"clock\":{\"lat\":123.0,\"lon\":-400.0}}");
   // Wrong types are ignored, the old value stays.
   apply(s, "{\"clock\":{\"sunLow\":\"x\",\"sunEnabled\":5,\"lat\":\"north\"}}");
   CHECK(s.clock.sunLow == 100 && s.clock.sunEnabled && s.clock.lat == 90.0f, "wrong types ignored");
@@ -106,6 +110,16 @@ static void testOldConfigs() {
   z.setDefaults();
   apply(z, "{\"radar\":{\"lat\":0,\"lon\":0,\"rangeKm\":30}}");
   CHECK(z.radar.useDevice, "unset radar home follows the device location");
+  // A home on the equator (latitude 0) is still a home: longitude decides too.
+  Settings q;
+  q.setDefaults();
+  apply(q, "{\"radar\":{\"lat\":0,\"lon\":4.9041}}");
+  CHECK(!q.radar.useDevice, "old radar home with latitude 0 keeps its own coordinates");
+  // And the other way round: a home on the prime meridian (longitude 0).
+  Settings p;
+  p.setDefaults();
+  apply(p, "{\"radar\":{\"lat\":51.5,\"lon\":0}}");
+  CHECK(!p.radar.useDevice, "old radar home with longitude 0 keeps its own coordinates");
   // The switch, when present, wins over the guess.
   Settings w;
   w.setDefaults();
