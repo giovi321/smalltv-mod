@@ -8,10 +8,15 @@ is the source of truth — edit it, then rerun:
     python tools/gzip_webui.py
 
 Python 3 stdlib only. Output is deterministic (gzip header mtime=0), so
-re-running without changes leaves webui.h untouched.
+re-running without changes leaves webui.h untouched on the same machine.
+Another zlib build (zlib-ng, say) can compress to other bytes, so CI runs
+`python tools/gzip_webui.py --check`, which compares what webui.h
+decompresses to with webui.html instead.
 """
 import gzip
 import pathlib
+import re
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "webui.html"
@@ -31,9 +36,23 @@ static const uint8_t WEBUI_HTML_GZ[] PROGMEM = {
 """
 
 
-def main() -> None:
+def html() -> bytes:
     # The repo stores LF; a Windows checkout with core.autocrlf has CRLF.
-    raw = SRC.read_bytes().replace(b"\r\n", b"\n")
+    return SRC.read_bytes().replace(b"\r\n", b"\n")
+
+
+def check() -> int:
+    body = OUT.read_text(encoding="utf-8").split("PROGMEM = {", 1)[1]
+    blob = bytes(int(b, 16) for b in re.findall(r"0x([0-9a-f]{2})", body))
+    if gzip.decompress(blob) == html():
+        print(f"{OUT.name} matches {SRC.name}")
+        return 0
+    print(f"{OUT.name} is out of date: run python tools/gzip_webui.py")
+    return 1
+
+
+def main() -> None:
+    raw = html()
     blob = gzip.compress(raw, compresslevel=9, mtime=0)
 
     lines = [HEADER]
@@ -49,4 +68,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--check"]:
+        sys.exit(check())
     main()
