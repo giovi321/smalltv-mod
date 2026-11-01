@@ -128,6 +128,11 @@ jobs:
             tests/test_storage.cpp -o /tmp/smalltv-storage-tests
           /tmp/smalltv-storage-tests
 
+      # The /api/status reply: same bytes as before, written in pieces.
+      # 32-bit memory test, so it needs g++-multilib (installed above).
+      - name: Test status reply
+        run: sh tests/status/run.sh
+
       - name: Test web request guard
         run: |
           c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc tests/test_webguard.cpp -o /tmp/smalltv-webguard-tests

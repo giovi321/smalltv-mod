@@ -12,8 +12,8 @@
 // drives raw lwIP and Arduino's prebuilt IDF has core locking off.
 #pragma once
 #include <Arduino.h>
-#include <ArduinoJson.h>
 #include "Settings.h"
+#include "StatusJson.h"
 
 // Bring-up steps, reported in /api/status. Reading "enabled but still at
 // connect" tells you the endpoint never answered, which the handshake
@@ -44,7 +44,7 @@ bool wgHeld();
 
 // Status for /api/status (always emitted, so the web UI can say "not in this
 // build" rather than silently hiding the section).
-void wgStatusJson(JsonObject o);
+smalltv::StatusWg wgStatus();
 
 // True when a tunnel is configured and compiled in. WireGuard rejects
 // handshakes stamped with a wrong clock, so this also decides whether NTP runs
