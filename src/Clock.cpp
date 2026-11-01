@@ -123,8 +123,11 @@ static SunCache s_sunCache;   // today's sunrise and sunset (SunTimes.h)
 static const SunTimes* sunToday(const Settings& s, struct tm& local) {
   if (!s.clock.sunEnabled || !s_haveSync) return nullptr;
   if (s.clock.lat == 0.0f && s.clock.lon == 0.0f) return nullptr;
-  if (!clockNow(local)) return nullptr;
+  if (!platformTimeValid()) return nullptr;
+  // One reading of the clock for both, so the offset cannot be off by a
+  // minute when the minute changes between two reads.
   time_t now = time(nullptr);
+  localtime_r(&now, &local);
   struct tm utc;
   gmtime_r(&now, &utc);
   return &sunCacheGet(s_sunCache, s.clock.lat, s.clock.lon, local.tm_year + 1900,

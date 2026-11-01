@@ -169,7 +169,7 @@ struct RadarSettings {
   float    lat;           // home latitude  (0,0 = not set yet)
   float    lon;           // home longitude
   bool     useDevice;     // true: use the device location (clock settings)
-  uint8_t  source;       // RADAR_SRC_ADSBFI, RADAR_SRC_ADSBLOL or RADAR_SRC_WEBHOOK
+  uint8_t  source;        // RADAR_SRC_ADSBFI, RADAR_SRC_ADSBLOL or RADAR_SRC_WEBHOOK
   String   webhookUrl;    // LAN proxy base URL (when source=webhook)
   uint16_t rangeKm;       // outer ring radius
   uint16_t pollSec;       // refresh period
@@ -248,7 +248,7 @@ inline float radarLat(const Settings& s) { return s.radar.useDevice ? s.clock.la
 inline float radarLon(const Settings& s) { return s.radar.useDevice ? s.clock.lon : s.radar.lon; }
 
 // Persistence
-bool settingsBegin();                      // mount LittleFS
+bool settingsBegin();                       // mount LittleFS
 bool loadSettings(Settings& s);             // false => defaults applied
 bool saveSettings(const Settings& s);
 void factoryReset(Settings& s);             // wipe file + defaults

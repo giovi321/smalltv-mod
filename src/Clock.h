@@ -25,7 +25,7 @@ bool   clockNow(struct tm& out);             // local broken-down time; false if
 bool   clockSunSteps(const Settings& s, uint8_t highSteps, uint8_t& steps);
 bool   clockSunText(const Settings& s, char* buf, size_t n);   // "07:12-17:03", "polar day", "polar night"
 
-bool   clockNightActive();                  // night mode is on right now (from clockService)
+bool   clockNightActive();                   // night mode is on right now (from clockService)
 bool   clockNightHeld();                     // in the window but held off waiting for a fresh NTP sync
 
 String clockTimeStr();                        // "YYYY-MM-DD HH:MM" or "" if unsynced
