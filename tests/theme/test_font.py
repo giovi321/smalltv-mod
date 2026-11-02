@@ -76,6 +76,13 @@ FONT = truetype([b'', simple(SQUARE), SHIFTED, b'', simple(ROUND), simple(DASH)]
                 {65: 1, 66: 2, 32: 3, 67: 4, 63: 4, 45: 5}, [500, 600, 600, 300, 600, 500])
 
 
+def low(top):
+    """A font whose 'A' and '-' lie below the baseline, the top of 'A' at `top`."""
+    return truetype([b'', simple([[(100, -800, True), (100, top, True), (500, top, True), (500, -800, True)]]),
+                     simple([[(100, -400, True), (100, -300, True), (400, -300, True), (400, -400, True)]])],
+                    {65: 1, 45: 2}, [500, 600, 500])
+
+
 class FontTests(unittest.TestCase):
     def test_known_glyphs(self):
         data = font_tool.compile_font(FONT, 10, ' AB')
@@ -104,6 +111,15 @@ class FontTests(unittest.TestCase):
         without = truetype([b'', simple(SQUARE)], {65: 1}, [500, 600])
         with self.assertRaisesRegex(ValueError, "no glyph for '-', which the firmware draws"):
             font_tool.compile_font(without, 10, 'A')
+
+    def test_rejects_no_ink_above_the_baseline(self):
+        # The firmware refuses a baseline of 0, and a negative one did not
+        # fit in a byte (#31 review): the packer says why instead.
+        for top, size, ascent in [(0, 10, 0), (0, 100, 0), (-200, 10, -2)]:
+            with self.assertRaisesRegex(ValueError, f'ascent {ascent} px: no glyph kept reaches above the baseline'):
+                font_tool.compile_font(low(top), size, 'A')
+        # One pixel above it is enough.
+        self.assertEqual(font_tool.compile_font(low(100), 10, 'A')[5], 1)
 
     def test_stable_bytes(self):
         first = font_tool.compile_font(FONT, 37, 'ABC ?')
