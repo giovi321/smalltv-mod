@@ -145,10 +145,10 @@ class FontTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=repr(args[1:])):
                 font_tool.compile_font(*args)
 
-    def theme(self, root, spec, settings):
+    def theme(self, root, spec, settings, value='AB'):
         manifest = {'spec': spec, 'theme': {'id': 'test', 'name': 'Test', 'author': 'Me', 'version': '1'},
                     'display': {'width': 240, 'height': 240, 'background': '#000000'},
-                    'layers': [{'id': 't', 'type': 'text', 'x': 0, 'y': 0, 'value': 'AB', 'font': 'f', 'color': '#ffffff'}]}
+                    'layers': [{'id': 't', 'type': 'text', 'x': 0, 'y': 0, 'value': value, 'font': 'f', 'color': '#ffffff'}]}
         (root/'theme.json').write_text(json.dumps(manifest))
         (root/'fonts').mkdir(exist_ok=True)
         (root/'fonts/f.ttf').write_bytes(FONT)
@@ -166,6 +166,19 @@ class FontTests(unittest.TestCase):
             package = root/'test.stheme'
             package.write_bytes(data)
             self.assertEqual(native.validate_package(package)['id'], 'test')
+
+    def test_package_checks_the_static_text(self):
+        # Text outside {tokens} must have its glyphs; a token's value may
+        # fall back.
+        for value, error in [('AB', None), ('{HH}-{MM}', None), ('{HH}A', None), ('AC', "'C'"), ('DC{HH}', "'CD'")]:
+            with tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                self.theme(root, 2, {'file': 'f.ttf', 'size': 20, 'glyphs': 'AB'}, value)
+                if error is None:
+                    pack.build(root)
+                    continue
+                with self.assertRaisesRegex(ValueError, r'layers\[0\]\.value: font f has no glyph for ' + error):
+                    pack.build(root)
 
     def test_package_rejects(self):
         for spec, settings in [(1, {'file': 'f.ttf', 'size': 20, 'glyphs': 'AB'}), (2, None),

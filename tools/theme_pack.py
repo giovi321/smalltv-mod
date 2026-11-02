@@ -165,6 +165,11 @@ def build_font(root, name):
     return compile_font(data, settings['size'], settings['glyphs'], settings.get('fallback'))
 
 
+def font_glyphs(stf):
+    """The characters an STF font has a glyph for (a record with an advance)."""
+    return {chr(stf[6] + i) for i in range(stf[7]) if stf[12 + 8 * i + 2]}
+
+
 def build(directory):
     root = Path(directory).resolve()
     manifest_path = root / 'theme.json'
@@ -193,11 +198,19 @@ def build(directory):
         kind = layer.get('type')
         if kind not in ('image', 'animation', 'text', 'shape'):
             raise ValueError(f'Unknown layer type: {kind}')
-        if kind == 'text' and 'font' in layer and f'fonts/{layer["font"]}.stf' not in entries:
-            try:
-                entries[f'fonts/{layer["font"]}.stf'] = build_font(root, layer['font'])
-            except (OSError, ValueError, TypeError) as error:
-                raise ValueError(f'layers[{index}].font: {layer["font"]}: {error}') from error
+        if kind == 'text' and 'font' in layer:
+            path = f'fonts/{layer["font"]}.stf'
+            if path not in entries:
+                try:
+                    entries[path] = build_font(root, layer['font'])
+                except (OSError, ValueError, TypeError) as error:
+                    raise ValueError(f'layers[{index}].font: {layer["font"]}: {error}') from error
+            # The text outside {tokens} is known now: a character the font
+            # lacks would be drawn as its fallback glyph.
+            missing = sorted(set(re.sub(r'\{[^}]*\}', '', layer['value'])) - font_glyphs(entries[path]))
+            if missing:
+                raise ValueError(f'layers[{index}].value: font {layer["font"]} has no glyph for {"".join(missing)!r}; '
+                                 f'add it to "glyphs" in fonts/{layer["font"]}.json')
         if kind not in ('image', 'animation'):
             continue
         source = layer.get('source')
