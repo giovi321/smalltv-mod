@@ -294,6 +294,11 @@ def compile_font(data, size, glyphs, fallback=None):
         descent = max(0, max(math.ceil(-box[1] * scale) for box in boxes))
     else:
         ascent, descent = math.ceil(font.ascender * scale), math.ceil(-font.descender * scale)
+    # The baseline lies inside the line box, below its top row: the
+    # firmware refuses a font whose ascent is 0.
+    if ascent < 1:
+        raise ValueError(f'ascent {ascent} px: no glyph kept reaches above the baseline; keep one that does, '
+                         'such as a digit or a letter')
     height = ascent + descent
     if not 6 <= height <= MAX_HEIGHT:
         raise ValueError(f'line height {height} px is outside 6-{MAX_HEIGHT}; change the size')
