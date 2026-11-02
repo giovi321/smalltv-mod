@@ -265,9 +265,12 @@ def compile_font(data, size, glyphs, fallback=None):
         raise ValueError('size: expected an integer from 4 to 200 pixels per em')
     if not isinstance(glyphs, str) or not glyphs or any(not 32 <= ord(c) <= 126 for c in glyphs):
         raise ValueError('glyphs: expected printable ASCII characters')
-    codes = sorted(set(map(ord, glyphs)))
+    # The firmware draws '--' for a value it does not have yet, such as
+    # {HH}:{MM} before the clock is set, so every font keeps '-', and it is
+    # the fallback unless '?' is kept: a digit there would show a time.
+    codes = sorted(set(map(ord, glyphs + '-')))
     if fallback is None:
-        fallback = '?' if '?' in glyphs else chr(codes[0])
+        fallback = '?' if '?' in glyphs else '-'
     if not isinstance(fallback, str) or len(fallback) != 1 or ord(fallback) not in codes:
         raise ValueError('fallback: expected one of the glyphs')
     scale = size / font.units
@@ -275,6 +278,8 @@ def compile_font(data, size, glyphs, fallback=None):
     for code in codes:
         index = font.cmap(code)
         if not 0 < index < len(font.advances):
+            if chr(code) == '-' and '-' not in glyphs:
+                raise ValueError("font has no glyph for '-', which the firmware draws for a value it does not have yet")
             raise ValueError(f'font has no glyph for {chr(code)!r}')
         try:
             outlines[code] = (index, font.contours(index))
@@ -339,8 +344,8 @@ def main():
     parser.add_argument('font', type=Path)
     parser.add_argument('output', type=Path)
     parser.add_argument('--size', type=int, required=True, help='pixels per em, 4-200')
-    parser.add_argument('--glyphs', required=True, help='the characters to include, printable ASCII')
-    parser.add_argument('--fallback', help="drawn for a character the font lacks (default: '?' when included, else the first)")
+    parser.add_argument('--glyphs', required=True, help="the characters to include, printable ASCII; '-' is always included")
+    parser.add_argument('--fallback', help="drawn for a character the font lacks (default: '?' when included, else '-')")
     args = parser.parse_args()
     try:
         data = compile_font(args.font.read_bytes(), args.size, args.glyphs, args.fallback)

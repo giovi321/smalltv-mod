@@ -70,21 +70,40 @@ SQUARE = [[(100, 0, True), (100, 800, True), (500, 800, True), (500, 0, True)]]
 SHIFTED = struct.pack('>hhhhhHHhh', -1, 150, 0, 550, 800, 0x3, 1, 50, 0)
 ROUND = [[(300, 0, True), (100, 0, False), (100, 400, True), (100, 800, False), (300, 800, True),
           (500, 800, False), (500, 400, True), (500, 0, False)]]
-FONT = truetype([b'', simple(SQUARE), SHIFTED, b'', simple(ROUND)], {65: 1, 66: 2, 32: 3, 67: 4, 63: 4}, [500, 600, 600, 300, 600])
+# '-' is a bar 3 pixels wide on the fifth row at 10 pixels per em.
+DASH = [[(100, 300, True), (100, 400, True), (400, 400, True), (400, 300, True)]]
+FONT = truetype([b'', simple(SQUARE), SHIFTED, b'', simple(ROUND), simple(DASH)],
+                {65: 1, 66: 2, 32: 3, 67: 4, 63: 4, 45: 5}, [500, 600, 600, 300, 600, 500])
 
 
 class FontTests(unittest.TestCase):
     def test_known_glyphs(self):
         data = font_tool.compile_font(FONT, 10, ' AB')
-        # Line height 8 (the square's ink), baseline 8, ' ' to 'B', ' ' as fallback.
-        self.assertEqual(data[:12], b'STF1' + bytes([8, 8, 32, 35, 32, 0, 0, 0]))
+        # Line height 8 (the square's ink), baseline 8, ' ' to 'B', '-' as fallback.
+        self.assertEqual(data[:12], b'STF1' + bytes([8, 8, 32, 35, 45, 0, 0, 0]))
         records = data[12:12 + 35 * 8]
         self.assertEqual(records[:8], struct.pack('<HBBBBBx', 0, 3, 0, 0, 0, 0))   # a space
-        self.assertEqual(records[8:33 * 8], bytes(32 * 8))                          # no '!' to '@'
-        self.assertEqual(records[33 * 8:34 * 8], struct.pack('<HBBBBBx', 0, 6, 1, 0, 4, 8))
-        self.assertEqual(records[34 * 8:], struct.pack('<HBBBBBx', 16, 6, 1, 0, 5, 8))
+        self.assertEqual(records[8:13 * 8], bytes(12 * 8))                          # no '!' to ','
+        self.assertEqual(records[13 * 8:14 * 8], struct.pack('<HBBBBBx', 0, 5, 1, 4, 3, 1))
+        self.assertEqual(records[14 * 8:33 * 8], bytes(19 * 8))                     # no '.' to '@'
+        self.assertEqual(records[33 * 8:34 * 8], struct.pack('<HBBBBBx', 2, 6, 1, 0, 4, 8))
+        self.assertEqual(records[34 * 8:], struct.pack('<HBBBBBx', 18, 6, 1, 0, 5, 8))
         # Whole pixels are fully covered; the shifted edges cover half.
-        self.assertEqual(data[12 + 35 * 8:], b'\xff\xff' * 8 + b'\x8f\xff\x80' * 8)
+        self.assertEqual(data[12 + 35 * 8:], b'\xff\xf0' + b'\xff\xff' * 8 + b'\x8f\xff\x80' * 8)
+
+    def test_dash_for_a_missing_value(self):
+        # The firmware draws {HH}:{MM} as '--:--' before the clock is set, so
+        # every font keeps '-' and, unless '?' is kept, falls back to it, not
+        # to the first glyph kept (#31 review: Bebas Clock showed 00:00).
+        data = font_tool.compile_font(FONT, 10, 'AB')
+        self.assertEqual((data[6], data[8]), (ord('-'), ord('-')))
+        self.assertEqual(data[12 + 2], 5)   # the advance of '-'
+        self.assertEqual(font_tool.compile_font(FONT, 10, 'AB-'), data)
+        self.assertEqual(font_tool.compile_font(FONT, 10, 'AB?')[8], ord('?'))
+        self.assertEqual(font_tool.compile_font(FONT, 10, 'AB', 'A')[8], ord('A'))
+        without = truetype([b'', simple(SQUARE)], {65: 1}, [500, 600])
+        with self.assertRaisesRegex(ValueError, "no glyph for '-', which the firmware draws"):
+            font_tool.compile_font(without, 10, 'A')
 
     def test_stable_bytes(self):
         first = font_tool.compile_font(FONT, 37, 'ABC ?')
@@ -94,10 +113,10 @@ class FontTests(unittest.TestCase):
 
     def test_curves_stay_inside_their_advance(self):
         data = font_tool.compile_font(FONT, 40, 'C')
-        height = data[4]
-        offset, advance, left, top, width, rows = struct.unpack_from('<HBBBBBx', data, 12)
+        height, first, count = data[4], data[6], data[7]
+        offset, advance, left, top, width, rows = struct.unpack_from('<HBBBBBx', data, 12 + 8 * (ord('C') - first))
         self.assertTrue(0 < width and left + width <= advance and top + rows <= height)
-        bitmap = data[20:]
+        bitmap = data[12 + 8 * count + offset:]   # 'C' is the last glyph
         self.assertEqual(len(bitmap), rows * ((width + 1) // 2))
         # Antialiased: the edge has partial coverage, the middle is solid.
         levels = {b >> 4 for b in bitmap} | {b & 15 for b in bitmap}
