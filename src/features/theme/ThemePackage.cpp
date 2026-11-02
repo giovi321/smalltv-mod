@@ -6,7 +6,27 @@
 #include <algorithm>
 #include <cstring>
 #include <utility>
+#ifdef ARDUINO
+#include <pgmspace.h>
+#else
+#define PROGMEM
+#define strlen_P strlen
+#define memcpy_P memcpy
+#endif
 namespace smalltv {
+// The font messages sit in flash on the ESP8266, where a string literal
+// would otherwise take RAM (as in ThemeEngine.cpp); the host tests see plain
+// arrays.
+static const char badBaseline[] PROGMEM = ": font baseline must be 1 to the line height";
+static const char fontNeedsSpec2[] PROGMEM = ": font needs \"spec\": 2";
+static const char missingFont[] PROGMEM = "].font: missing font: ";
+// Appended in place: a temporary string took 32 B more of each caller's
+// stack frame.
+static void appendFlash(std::string& to, const char* text) {
+  const size_t at = to.size();
+  to.resize(at + strlen_P(text));
+  memcpy_P(&to[at], text, to.size() - at);
+}
 // Both container formats (STH1 packages, STI1/STI2 images) are little-endian.
 static uint16_t u16(const uint8_t* b) { return b[0] | (uint16_t(b[1]) << 8); }
 static uint32_t u32(const uint8_t* b) { return u16(b) | (uint32_t(u16(b + 2)) << 16); }
@@ -116,7 +136,8 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
       // to the line height. A packer that found no ink above the baseline
       // wrote 0 (#31 review): that gets a message of its own.
       if (!b[5] || b[5] > b[4]) {
-        error = path + ": font baseline must be 1 to the line height";
+        error = path;
+        appendFlash(error, badBaseline);
         return false;
       }
       e.compressed = true;
@@ -160,7 +181,9 @@ bool Package::checkSpec(const Theme& theme, std::string& error) const {
     if (!e.compressed) continue;
     std::string path(e.pathLength, '\0');
     if (!source_.read(e.offset - e.pathLength, &path[0], path.size())) path = e.font() ? "a font" : "an image";
-    error = path + (e.font() ? ": font needs \"spec\": 2" : ": STI2 image needs \"spec\": 2");
+    error = path;
+    if (e.font()) appendFlash(error, fontNeedsSpec2);
+    else error += ": STI2 image needs \"spec\": 2";
     return false;
   }
   return true;
@@ -410,7 +433,9 @@ __attribute__((noinline)) bool Package::loadFonts(Theme& candidate, std::string&
     const Entry* e = find(path);
     uint8_t h[12];
     if (!e || !e->font() || !source_.read(e->offset, h, 12)) {
-      error = "layers[" + std::to_string(i) + "].font: missing font: " + path;
+      error = "layers[" + std::to_string(i);
+      appendFlash(error, missingFont);
+      error += path;
       return false;
     }
     l.size = h[4];
