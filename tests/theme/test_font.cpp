@@ -66,9 +66,11 @@ static void testLoad() {
   assert(t.fonts.size()==1&&t.fonts[0].name=="test"&&t.fonts[0].first=='A'&&t.fonts[0].fallback=='A');
   assert(t.fonts[0].advances.size()==3&&t.fonts[0].advances[0]==4&&t.fonts[0].advances[1]==0&&t.fonts[0].advances[2]==2);
   assert(t.layers[0].font==1&&t.layers[0].size==8);
-  // Missing glyphs and bytes outside the font fall back to 'A'.
+  // Missing glyphs and bytes outside the font fall back to 'A', also the
+  // code points just before and just after it.
   assert(t.fonts[0].glyph('B')=='A'&&t.fonts[0].glyph('z')=='A'&&t.fonts[0].glyph(200)=='A'&&t.fonts[0].glyph('C')=='C');
-  assert(t.fonts[0].advance('B')==4&&t.fonts[0].advance('C')==2);
+  assert(t.fonts[0].glyph('@')=='A'&&t.fonts[0].glyph('D')=='A');
+  assert(t.fonts[0].advance('B')==4&&t.fonts[0].advance('C')==2&&t.fonts[0].advance('D')==4);
   AssetHandle h=p.resolve("fonts/test.stf");assert(h!=InvalidAsset);
   uint8_t coverage[240];int left=-1,width=-1;
   assert(p.glyphRow(h,'A',2,coverage,left,width)&&left==1&&width==3&&coverage[0]==255&&coverage[1]==8*17&&coverage[2]==0);
@@ -80,6 +82,13 @@ static void testLoad() {
   uint16_t colors[1];uint8_t alpha[1];
   assert(!p.row(h,0,0,1,colors,alpha));
   assert(!p.glyphRow(p.resolve("theme.json"),'A',2,coverage,left,width));
+  // A fallback other than the first code point: 'B' takes the space's place.
+  std::string spaceFallback=font();spaceFallback[8]='C';
+  source.data=package(manifest(2,textLayer),"fonts/test.stf",spaceFallback);
+  Package other(source);Theme t3;
+  assert(other.load(t3,error)&&t3.fonts[0].fallback=='C'&&t3.fonts[0].glyph('B')=='C'&&t3.fonts[0].advance('B')==2);
+  Engine e3;e3.setTheme(t3,0);e3.update(0,nullptr);
+  assert(e3.states()[0].bounds.w==4+2+2);
   // Two layers, one font: read once, both get its line height.
   source.data=package(manifest(2,textLayer+","+R"({"id":"u","type":"text","x":0,"y":0,"value":"A","font":"test","color":"#ffffff"})"),"fonts/test.stf",font());
   Package two(source);Theme t2;
@@ -118,6 +127,18 @@ static void testRejected() {
   }
   std::string one=font();one[5]=1;assert(loads(one,error));
   one[5]=8;assert(loads(one,error));
+  // The bitmaps take at most 65,535 bytes, as far as a record's offset
+  // reaches: 11 glyphs of 120x96 pixels, then one of 58x75 or 64x68.
+  for(unsigned last:{58u*256+75,64u*256+68}) {
+    std::string big="STF1";big+=char(96);big+=char(80);big+='A';big+=char(12);big+='A';big.append(3,'\0');
+    unsigned at=0;
+    for(int i=0;i<12;++i) {
+      const unsigned width=i<11?120:last>>8,rows=i<11?96:last&255;
+      record(big,at,120,0,0,width,rows);at+=width/2*rows;
+    }
+    big.append(at,char(0xff));
+    assert(loads(big,error)==(at==65535));
+  }
   // A font path must be fonts/<name>.stf.
   Memory source;source.data=package(manifest(2,textLayer),"fonts/.stf",font());
   Package p(source);Theme t;assert(!p.load(t,error));
