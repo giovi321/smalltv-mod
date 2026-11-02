@@ -79,6 +79,7 @@ bool Package::load(Theme& theme, std::string& error) {
 }
 __attribute__((noinline)) bool Package::readIndex(std::string& error) {
   entries_.clear();
+  std::vector<Glyph>().swap(glyphs_);
   error = "Invalid or truncated .stheme package";
   uint8_t b[12];
   uint32_t size = source_.size();
@@ -433,15 +434,26 @@ bool Package::glyphRow(AssetHandle handle, uint8_t code, int y, uint8_t* coverag
   if (handle >= entries_.size()) return false;
   const Entry& e = entries_[handle];
   if (!e.font() || code < e.width || code >= e.width + e.height) return false;
-  uint8_t g[8];
-  if (!source_.read(e.offset + 12 + 8u * (code - e.width), g, 8)) return false;
-  left = g[3];
+  if (glyphs_.empty()) glyphs_.resize(GlyphSlots);
+  Glyph& g = glyphs_[code % GlyphSlots];
+  if (g.code != code || g.font != handle) {
+    uint8_t b[8];
+    if (!source_.read(e.offset + 12 + 8u * (code - e.width), b, 8)) return false;
+    g.font = static_cast<uint8_t>(handle);   // below MaxEntries
+    g.code = code;
+    g.bitmap = u16(b);
+    g.left = b[3];
+    g.top = b[4];
+    g.width = b[5];
+    g.rows = b[6];
+  }
+  left = g.left;
   width = 0;
-  if (y < g[4] || y >= g[4] + g[6]) return true;
-  const unsigned bytes = (g[5] + 1) / 2;
-  if (!source_.read(e.offset + 12 + 8u * e.height + u16(g) + (y - g[4]) * bytes, coverage, bytes)) return false;
-  for (int i = g[5] - 1; i >= 0; --i) coverage[i] = (i % 2 ? coverage[i / 2] & 15 : coverage[i / 2] >> 4) * 17;
-  width = g[5];
+  if (y < g.top || y >= g.top + g.rows) return true;
+  const unsigned bytes = (g.width + 1) / 2;
+  if (!source_.read(e.offset + 12 + 8u * e.height + g.bitmap + (y - g.top) * bytes, coverage, bytes)) return false;
+  for (int i = g.width - 1; i >= 0; --i) coverage[i] = (i % 2 ? coverage[i / 2] & 15 : coverage[i / 2] >> 4) * 17;
+  width = g.width;
   return true;
 }
 }

@@ -7,9 +7,10 @@
 #include <iostream>
 using namespace smalltv;
 struct Memory : Source {
-  std::string data;
+  std::string data;unsigned reads=0;
   uint32_t size() const override {return data.size();}
   bool read(uint32_t offset,void* dest,size_t count) override {
+    ++reads;
     if(offset>data.size()||count>data.size()-offset) return false;
     memcpy(dest,data.data()+offset,count);return true;
   }
@@ -122,6 +123,47 @@ static void testRejected() {
   Package p(source);Theme t;assert(!p.load(t,error));
   source.data=package(manifest(2,textLayer),"other/test.stf",font());assert(!p.load(t,error));
 }
+// 'A' 1 pixel further left than in font(), and 'Q', 16 code points on: a
+// 1x1 bitmap at (2, 5) in an advance of 3, of coverage 10.
+static std::string fontAQ() {
+  std::string s="STF1";s+=char(8);s+=char(6);s+='A';s+=char(17);s+='A';s.append(3,'\0');
+  record(s,0,4,0,2,3,2);
+  for(int i=1;i<16;++i) record(s,0,0,0,0,0,0);
+  record(s,4,3,2,5,1,1);
+  s+=char(0xf8);s+='\0';s+=char(0x3f);s+=char(0xf0);s+=char(0xa0);
+  return s;
+}
+// glyphRow() keeps the records it read, by code point modulo 16 and font:
+// 'A' and 'Q' share a slot, and two fonts each have their own 'A'.
+static void testGlyphCache() {
+  std::string s="STH1";u16(s,3);u16(s,0);
+  entry(s,"theme.json",manifest(2,textLayer+","+R"({"id":"u","type":"text","x":0,"y":40,"value":"AQ","font":"aq","color":"#ffffff"})"));
+  entry(s,"fonts/test.stf",font());
+  entry(s,"fonts/aq.stf",fontAQ());
+  Memory source;source.data=s;
+  Package p(source);Theme t;std::string error;
+  assert(p.load(t,error));
+  const AssetHandle test=p.resolve("fonts/test.stf"),aq=p.resolve("fonts/aq.stf");
+  uint8_t coverage[240];int left=-1,width=-1;
+  for(int round=0;round<2;++round) {
+    assert(p.glyphRow(aq,'Q',5,coverage,left,width)&&left==2&&width==1&&coverage[0]==170);
+    assert(p.glyphRow(aq,'A',2,coverage,left,width)&&left==0&&width==3&&coverage[0]==255&&coverage[1]==8*17);
+    assert(p.glyphRow(test,'A',3,coverage,left,width)&&left==1&&width==3&&coverage[0]==3*17);
+    assert(p.glyphRow(aq,'Q',4,coverage,left,width)&&left==2&&width==0);
+  }
+  // A record is read once, then only the rows' bitmaps are ('Q' took the
+  // slot of 'A' last).
+  source.reads=0;
+  assert(p.glyphRow(test,'A',2,coverage,left,width)&&width==3&&source.reads==2);
+  assert(p.glyphRow(test,'A',3,coverage,left,width)&&width==3&&source.reads==3);
+  assert(p.glyphRow(test,'C',2,coverage,left,width)&&width==0&&source.reads==4);
+  assert(p.glyphRow(test,'C',3,coverage,left,width)&&width==0&&source.reads==4);
+  // Drawn together, each layer still shows its own font.
+  Engine e;e.setTheme(t,0);Pixels d;
+  assert(render(e,e.update(0,nullptr),p,d));
+  assert(d.data[22*240+11]==0xffff&&d.data[22*240+10]==0);
+  assert(d.data[42*240+0]==0xffff&&d.data[45*240+6]==over(0,10));
+}
 // Every single-byte change the checks let through must still draw inside
 // the text's own rectangle, and no change may crash a load or a draw.
 static void testMutations() {
@@ -213,6 +255,7 @@ static void testManifest() {
 int main() {
   testLoad();
   testRejected();
+  testGlyphCache();
   testMutations();
   testRender();
   testManifest();

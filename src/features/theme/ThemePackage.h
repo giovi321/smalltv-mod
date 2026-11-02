@@ -50,6 +50,17 @@ class Package : public Assets {
   // In blocks: in one vector, a package with many frames needed a block of
   // several KiB.
   BlockList<Entry> entries_;
+  // The glyph records glyphRow() read last, in GlyphSlots slots by code
+  // point: every row of a text needs the same records again, and reading
+  // them was half of a redraw's reads (#31 review). Empty until a glyph is
+  // drawn, so a package without fonts, or one only checked, holds none.
+  static constexpr unsigned GlyphSlots = 16;
+  struct Glyph {
+    uint8_t font = 0, code = 0;   // code 0: an empty slot
+    uint8_t left = 0, top = 0, width = 0, rows = 0;
+    uint16_t bitmap = 0;
+  };
+  std::vector<Glyph> glyphs_;
   bool samePath(const Entry& entry, const std::string& path) const;
   bool checkRows(const Entry& entry) const;
   bool checkFont(const Entry& entry) const;
