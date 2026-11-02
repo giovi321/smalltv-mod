@@ -110,6 +110,13 @@ static void testRejected() {
   past[7]=1;past.resize(20);assert(loads(past,error));
   // A font that falls back to a glyph without ink, a space, is fine.
   std::string spaceFallback=font();spaceFallback[8]='C';assert(loads(spaceFallback,error));
+  // A baseline of 0 or below the line box gets its own message (#31 review).
+  for(char baseline:{char(0),char(9),char(255)}) {
+    std::string bad=font();bad[5]=baseline;
+    assert(!loads(bad,error)&&error=="fonts/test.stf: font baseline must be 1 to the line height");
+  }
+  std::string one=font();one[5]=1;assert(loads(one,error));
+  one[5]=8;assert(loads(one,error));
   // A font path must be fonts/<name>.stf.
   Memory source;source.data=package(manifest(2,textLayer),"fonts/.stf",font());
   Package p(source);Theme t;assert(!p.load(t,error));

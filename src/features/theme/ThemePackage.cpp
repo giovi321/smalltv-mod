@@ -111,6 +111,13 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
       // code point, glyph count and fallback code point, 3 zero bytes;
       // checkFont() checks the rest.
       if (e.length < 12 || !source_.read(pos, b, 12) || memcmp(b, "STF1", 4)) return false;
+      // The baseline is the ascent, the rows of the line box above it, so 1
+      // to the line height. A packer that found no ink above the baseline
+      // wrote 0 (#31 review): that gets a message of its own.
+      if (!b[5] || b[5] > b[4]) {
+        error = path + ": font baseline must be 1 to the line height";
+        return false;
+      }
       e.compressed = true;
       e.width = b[6];
       e.height = b[7];
@@ -358,8 +365,9 @@ bool Package::row(AssetHandle handle, int y, int x, int count, uint16_t* colors,
 bool Package::checkFont(const Entry& e) const {
   uint8_t h[12];
   if (!source_.read(e.offset, h, 12)) return false;
-  const unsigned height = h[4], baseline = h[5], first = h[6], count = h[7], fallback = h[8];
-  if (height < 6 || height > 96 || !baseline || baseline > height || first < 32 || !count || first + count > 127 ||
+  const unsigned height = h[4], first = h[6], count = h[7], fallback = h[8];
+  // The baseline, h[5], is checked in readIndex(), with its own message.
+  if (height < 6 || height > 96 || first < 32 || !count || first + count > 127 ||
       fallback < first || fallback >= first + count || h[9] || h[10] || h[11] || e.length < 12 + 8 * count) return false;
   const uint32_t bitmaps = 12 + 8 * count;
   uint32_t at = 0;
