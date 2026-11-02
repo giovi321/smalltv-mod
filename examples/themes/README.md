@@ -10,7 +10,7 @@ Four examples are ready to install from **Display → Theme clocks** on SmallTV 
   and status text;
 * [`bebas-clock.stheme`](bebas-clock.stheme) — a spec 2 clock in Bebas Neue,
   compiled into two package fonts from `bebas-clock/fonts/` (SIL Open Font
-  License, see `bebas-clock/fonts/OFL.txt`). Firmware up to 3.1.0 refuses it.
+  License, see `bebas-clock/fonts/OFL.txt`). Firmware up to 3.3.0 refuses it.
 
 Their editable sources are in the matching directories. Open
 [pixel-room-preview.html](pixel-room-preview.html),

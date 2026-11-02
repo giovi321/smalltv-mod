@@ -259,8 +259,9 @@ canvas. Colors are exactly `#RRGGBB`, case insensitive; asset alpha is supported
 
 ### Text
 
-Required fields: `value`, `size`, `color`. Optional `anchor` defaults to `top-left`.
-In a spec 2 theme, `font` replaces `size` (see [Fonts in the package](#fonts-in-the-package)).
+Required fields: `value`, `color`, and `size` unless a spec 2 layer names a
+`font` instead (see [Fonts in the package](#fonts-in-the-package)). Optional
+`anchor` defaults to `top-left`.
 Anchors position the complete text cell rectangle:
 
 | Vertical position | Left | Center | Right |
@@ -336,16 +337,20 @@ The packer compiles `fonts/clock.json` in the source theme into
 | `file` | A TrueType (`.ttf`, glyf outlines) file in `fonts/` |
 | `size` | Pixels per em, 4–200 |
 | `glyphs` | The printable ASCII characters to keep, for example `"0123456789:"` |
-| `fallback` | Optional: one of `glyphs`, drawn for any character the font lacks. Default `?` when kept, else the lowest character |
+| `fallback` | Optional: one of `glyphs`, drawn for any character the font lacks. Default `?` when kept, else `-` |
 
 Keep only the characters the theme shows: each costs flash in the package,
 not RAM on the device. For a clock face, the digits and `:` are enough; for
 `{WD}` and `{MON}`, add the letters of the English names. A character the
 font lacks, including any byte a fetched value brings outside printable
-ASCII, is drawn as the fallback glyph. The line box fits the ink of the
-glyphs kept, so `anchor` places what is drawn. Each glyph's ink lies within
-its advance: the compiler widens a glyph's advance rather than cut off ink
-that reaches past it. The compiler reads the outlines itself, without
+ASCII, is drawn as the fallback glyph. Every font keeps `-`, which need not
+be listed: the device draws `--` for a value it does not have yet, such as
+`{HH}:{MM}` before the clock is set. The packer refuses a text layer whose
+text outside `{tokens}` has a character its font lacks. The line box fits the
+ink of the glyphs kept, so `anchor` places what is drawn; some of that ink
+must reach above the baseline. Each glyph's ink lies within its advance: the
+compiler widens a glyph's advance rather than cut off ink that reaches past
+it. The compiler reads the outlines itself, without
 FreeType, so the same font and settings give the same bytes on any computer.
 It does not apply hinting or kerning. To check a font on its own:
 
@@ -355,16 +360,20 @@ python3 tools/theme_font.py fonts/BebasNeue-Regular.ttf /tmp/clock.stf --size 80
 
 A theme may use up to four fonts. The device keeps one byte per glyph in RAM
 (its advance, to lay out text) and reads the glyph bitmaps from the package
-while it draws, one glyph row at a time. Fonts carry their own licence: use
-fonts whose licence allows embedding, such as the
+while it draws, one glyph row at a time. Once a theme draws a font, it also
+keeps the last 16 glyph records it read (128 bytes), so each row of a text
+reads only the bitmaps. Fonts carry their own licence: use fonts whose
+licence allows embedding, such as the
 [SIL Open Font License](https://openfontlicense.org), and ship the licence
 text with the theme source. `examples/themes/bebas-clock` uses Bebas Neue
-(OFL, `fonts/OFL.txt`) in two sizes; its package is 14,094 bytes.
+(OFL, `fonts/OFL.txt`) in two sizes; its package is 14,202 bytes.
 
-Firmware up to 3.1.0 refuses a package with fonts with "Invalid or truncated
+Firmware up to 3.3.0 refuses a package with fonts with "Invalid or truncated
 .stheme package". A spec 1 manifest with `font` is rejected with
 `layers[N].font: needs "spec": 2`, and a spec 1 package with an `.stf` entry
-with `fonts/<name>.stf: font needs "spec": 2`.
+with `fonts/<name>.stf: font needs "spec": 2`. A font whose baseline is 0 or
+below the line box is refused with `fonts/<name>.stf: font baseline must be 1
+to the line height`.
 
 #### Scrolling text
 
@@ -708,7 +717,7 @@ preview it with the `--data` workflow documented above.
 | Hand length / tail; tick length | 1–240 / 0–240 / 1–240 pixels |
 | Tick count | 1–60 |
 | Animation | 1–240 frames, 1–15 FPS |
-| Fonts (spec 2) | 4 per theme; names 1–32 ID characters; printable ASCII glyphs; line height 6–96 pixels; advance 1–120 pixels; 64 KiB of glyph bitmaps |
+| Fonts (spec 2) | 4 per theme; names 1–32 ID characters; printable ASCII glyphs; line height 6–96 pixels; advance 1–120 pixels; 65,535 bytes of glyph bitmaps |
 | Container | 256 entries, at most 3 MiB |
 | Installed packages | 16, within available storage |
 
@@ -823,7 +832,7 @@ the glyph bitmaps:
 | --- | --- |
 | Magic | Four ASCII bytes `STF1` |
 | Line height | `uint8`, 6–96 pixels: the height of a text layer in this font |
-| Baseline | `uint8`, 1 to the line height: from the top of the line |
+| Baseline | `uint8`, 1 to the line height: the rows above the baseline. Checked, not yet used to draw |
 | First code point | `uint8`, 32–126 |
 | Glyph count | `uint8`, 1–95; the last code point is at most 126 |
 | Fallback | `uint8`: a code point with a glyph, drawn for any byte without one |
