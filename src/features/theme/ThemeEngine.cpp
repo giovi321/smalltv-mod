@@ -16,8 +16,10 @@
 #include <pgmspace.h>
 #else
 #define PROGMEM
+#define pgm_read_byte(p) (*reinterpret_cast<const unsigned char*>(p))
 #define strcmp_P strcmp
 #define strlen_P strlen
+#define memcmp_P memcmp
 #define memcpy_P memcpy
 #endif
 
@@ -321,10 +323,11 @@ class Fields {
     if (object_.isNull()) return fail("", "expected an object");
     for (JsonPairConst p : object_) {
       bool found = false;
-      for (const char* start = allowed + 1; *start;) {
-        const char* end = strchr(start, '|');
-        if (!end) break;
-        if (p.key().size() == size_t(end - start) && !memcmp(start, p.key().c_str(), end - start)) {
+      for (const char* start = allowed + 1; pgm_read_byte(start);) {
+        const char* end = start;
+        while (pgm_read_byte(end) && pgm_read_byte(end) != '|') ++end;
+        if (!pgm_read_byte(end)) break;
+        if (p.key().size() == size_t(end - start) && !memcmp_P(p.key().c_str(), start, end - start)) {
           found = true;
           break;
         }
@@ -1094,6 +1097,14 @@ bool parseTheme(ManifestSource& json, Theme& out, std::string& error) {
   error.clear();
   return true;
 }
+// Each shape's allowed keys. In flash on the ESP8266, where a string literal
+// would take RAM; Fields::keys() reads them with the _P functions.
+static const char rectangleKeys[] PROGMEM = "|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|cornerRadius|scroll|bind|";
+static const char circleKeys[] PROGMEM = "|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|";
+static const char lineKeys[] PROGMEM = "|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|";
+static const char arcKeys[] PROGMEM = "|id|type|shape|x|y|radius|start|sweep|stroke|strokeWidth|bind|";
+static const char handKeys[] PROGMEM = "|id|type|shape|x|y|length|tail|angle|stroke|strokeWidth|bind|";
+static const char ticksKeys[] PROGMEM = "|id|type|shape|x|y|radius|count|length|stroke|strokeWidth|bind|";
 // Parses one element of the root `layers` array and appends it to `t`, whose
 // data sources it is checked against; `ids` holds the earlier layers' IDs.
 // The layer is built in place in the list rather than in a local copy: a
@@ -1152,12 +1163,8 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
     if (rotation && t.spec < 2) return f.fail("shape", "arc, hand and ticks need \"spec\": 2");
     if (shape != "rectangle" && shape != "circle" && shape != "line" && !rotation)
       return f.fail("shape", t.spec < 2 ? "expected rectangle, circle or line" : "expected rectangle, circle, line, arc, hand or ticks");
-    const char* allowed = shape == "rectangle" ? "|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|cornerRadius|scroll|bind|" :
-      shape == "circle" ? "|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|" :
-      shape == "arc" ? "|id|type|shape|x|y|radius|start|sweep|stroke|strokeWidth|bind|" :
-      shape == "hand" ? "|id|type|shape|x|y|length|tail|angle|stroke|strokeWidth|bind|" :
-      shape == "ticks" ? "|id|type|shape|x|y|radius|count|length|stroke|strokeWidth|bind|" :
-      "|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|";
+    const char* allowed = shape == "rectangle" ? rectangleKeys : shape == "circle" ? circleKeys :
+      shape == "arc" ? arcKeys : shape == "hand" ? handKeys : shape == "ticks" ? ticksKeys : lineKeys;
     if (!f.keys(allowed)) return false;
     l.hasFill = !o["fill"].isNull();
     l.hasStroke = !o["stroke"].isNull();
@@ -1499,6 +1506,9 @@ static Segment tickSegment(const Layer& l, const ResolvedLayer& r, int k) {
   return Segment{r.x + roundQ14(dx * inner), r.y + roundQ14(dy * inner),
     r.x + roundQ14(dx * r.radius), r.y + roundQ14(dy * r.radius)};
 }
+static bool rotationShape(Shape shape) {
+  return shape == Shape::Arc || shape == Shape::Hand || shape == Shape::Ticks;
+}
 // An arc's start in [0, Turn16) and its sweep, always clockwise from there
 // (a negative sweep is the same arc started at its far end).
 static void arcRange(const ResolvedLayer& r, int& start, int& sweep) {
@@ -1509,6 +1519,30 @@ static void arcRange(const ResolvedLayer& r, int& start, int& sweep) {
     sweep = -sweep;
   }
   start = wrap16(start);
+}
+// An arc's two edges as unit vectors, so a pixel is tested against the wedge
+// with two cross products and no division. Up to half a turn the pixel must be
+// clockwise of the start edge and counter-clockwise of the end edge; past half
+// a turn it must not be in the gap between the end edge and the start edge.
+struct ArcWedge {
+  int sx, sy, ex, ey;
+  bool full, reflex;
+};
+static ArcWedge arcWedge(const ResolvedLayer& r) {
+  int start, sweep;
+  arcRange(r, start, sweep);
+  ArcWedge w{};
+  direction(start, w.sx, w.sy);
+  direction(start + sweep, w.ex, w.ey);
+  w.full = sweep >= Turn16;
+  w.reflex = sweep > Turn16 / 2;
+  return w;
+}
+static bool inWedge(const ArcWedge& w, int dx, int dy) {
+  if (w.full) return true;
+  const int fromStart = w.sx * dy - w.sy * dx, toEnd = dx * w.ey - dy * w.ex;
+  if (!w.reflex) return fromStart >= 0 && toEnd >= 0;
+  return !(toEnd < 0 && fromStart < 0);
 }
 // The box of an arc: its ends (inner and outer), the compass points inside
 // its sweep and, in the pad, the approximations' error. Only this box turns
@@ -1691,7 +1725,7 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     // A rotation shape sweeps a thin diagonal: its old and new boxes are
     // repainted apart, since their union would also cover everything between.
     if (changed && !full_) {
-      if (l.type == LayerType::Shape && l.shape >= Shape::Arc) {
+      if (l.type == LayerType::Shape && rotationShape(l.shape)) {
         addDirty(dirty, s.bounds);
         addDirty(dirty, next);
       } else addDirty(dirty, unite(s.bounds, next));
@@ -1820,9 +1854,10 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
         }
         // The rotation shapes' per-row setup: one sine for a whole row of
         // pixels instead of one per pixel.
-        int arcStart = 0, arcSweep = 0, tickIndex = -1;
+        int tickIndex = -1;
+        ArcWedge wedge{};
         Segment hand{}, tick{};
-        if (l.type == LayerType::Shape && l.shape == Shape::Arc) arcRange(s.resolved, arcStart, arcSweep);
+        if (l.type == LayerType::Shape && l.shape == Shape::Arc) wedge = arcWedge(s.resolved);
         if (l.type == LayerType::Shape && l.shape == Shape::Hand) hand = handSegment(l, s.resolved);
         for (int x = r.x; x < r.x + r.w; ++x) {
           uint16_t c = 0;
@@ -1845,12 +1880,12 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
                 (display.glyphColumn(s.text[charIndex], col) & (1 << row));
               c = s.resolved.color;
             }
-          } else if (l.shape >= Shape::Arc) {
+          } else if (rotationShape(l.shape)) {
             const int dx = x - s.resolved.x, dy = y - s.resolved.y, dist = dx * dx + dy * dy;
             if (l.shape == Shape::Arc) {
               const int outer = s.resolved.radius, inner = std::max(0, outer - s.resolved.strokeWidth);
               draw = s.resolved.y2 != 0 && dist <= outer * outer && (inner == 0 || dist > inner * inner) &&
-                (arcSweep >= Turn16 || wrap16(pixelAngle16(dx, dy) - arcStart) <= arcSweep);
+                inWedge(wedge, dx, dy);
             } else if (l.shape == Shape::Hand) {
               draw = linePixel(hand.x0, hand.y0, hand.x1, hand.y1, s.resolved.strokeWidth, x, y);
             } else {

@@ -248,9 +248,43 @@ static void testRotationRedraw() {
   for(const Rect& r:dirty) area+=r.w*r.h;
   assert(!dirty.empty()&&area<240*240/2);
 }
+// The arc's wedge is tested with two cross products against its edge vectors. Over a grid of
+// starts and sweeps, every pixel in the ring agrees with an atan2 reference except within a
+// fraction of a degree of an edge (the earlier per-pixel arctangent was off by up to 0.31 degrees
+// on the same grid; this one by under 0.1), and the center of a filled wedge is always drawn.
+static void testArcWedgeAgainstReference() {
+  static Pixels d;
+  const int radii[]={50,100},widths[]={12,200};
+  const int sweeps[]={1,3,17,45,90,179,180,181,270,359,360};
+  const double pi=3.14159265358979;
+  long compared=0,edge=0;
+  for(int radius:radii) for(int width:widths) for(int start=-360;start<=360;start+=31) for(int sweep:sweeps) for(int sign=-1;sign<=1;sign+=2) {
+    renderOne(arcLayer(radius,start,sign*sweep,width),d);
+    double from=start,span=sign*sweep;
+    if(span<0) {from+=span;span=-span;}
+    from=std::fmod(std::fmod(from,360)+360,360);
+    const int inner=std::max(0,radius-width);
+    for(int y=120-radius;y<=120+radius;++y) for(int x=120-radius;x<=120+radius;++x) {
+      const int dx=x-120,dy=y-120,dist=dx*dx+dy*dy;
+      if(dist>radius*radius||(inner&&dist<=inner*inner)) continue;
+      if(!dx&&!dy) {assert(ink(d,x,y));continue;}
+      double angle=std::atan2(double(dx),double(-dy))*180/pi;
+      if(angle<0) angle+=360;
+      const double rel=std::fmod(angle-from+720,360);
+      const bool inside=span>=360||rel<=span;
+      double toEdge=std::min(rel,360-rel),toEnd=std::fabs(rel-span);
+      toEdge=std::min(toEdge,std::min(toEnd,360-toEnd));
+      ++compared;
+      if(ink(d,x,y)!=inside) {++edge;assert(toEdge<0.15);}
+    }
+  }
+  // Disagreements are a sliver of the pixels compared: edge pixels only.
+  assert(compared>1000000&&edge*1000<compared);
+}
 int main() {
  testScrollRendering();
  testRotationShapes();
+ testArcWedgeAgainstReference();
  testRotationRedraw();
  testRoundedRectRendering();
  Theme theme;theme.background=0x001f;
