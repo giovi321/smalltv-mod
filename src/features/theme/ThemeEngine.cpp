@@ -781,6 +781,9 @@ static const char timeNames[9][12] PROGMEM = {"second", "minute", "hour", "hour1
 static const char needSpec2[] PROGMEM = "time.* and device.* sources need \"spec\": 2";
 static const char unknownBuiltIn[] PROGMEM = "unknown time.* or device.* name";
 static const char reservedId[] PROGMEM = "time and device are the names of built-in sources";
+static const char fontNeedsSpec2[] PROGMEM = "needs \"spec\": 2";
+static const char sizeWithFont[] PROGMEM = "not allowed with a font, which sets the size";
+static const char tooManyFonts[] PROGMEM = "expected at most 4 fonts per theme";
 static std::string fromFlash(const char* text) {
   std::string out(strlen_P(text), '\0');
   memcpy_P(&out[0], text, out.size());
@@ -1211,13 +1214,13 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
       // A package font (#31): fonts/<name>.stf, whose line height is the
       // layer's size, so `size` is not given.
       std::string name;
-      if (t.spec < 2) return f.fail("font", "needs \"spec\": 2");
+      if (t.spec < 2) return f.fail("font", fromFlash(fontNeedsSpec2));
       if (!f.text("font", name, 32)) return false;
       if (!validId(name)) return f.fail("font", "use ASCII letters, digits, '-' or '_'");
-      if (f.has("size")) return f.fail("size", "not allowed with a font, which sets the size");
+      if (f.has("size")) return f.fail("size", fromFlash(sizeWithFont));
       size_t i = 0;
       while (i < t.fonts.size() && t.fonts[i].name != name) ++i;
-      if (i == MaxFonts) return f.fail("font", "expected at most 4 fonts per theme");
+      if (i == MaxFonts) return f.fail("font", fromFlash(tooManyFonts));
       if (i == t.fonts.size()) {
         t.fonts.emplace_back();
         t.fonts.back().name = std::move(name);
