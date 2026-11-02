@@ -61,8 +61,10 @@ bool declaredDataField(const smalltv::Theme& theme,const std::string& key) {
   size_t dot=key.find('.');
   if(dot==std::string::npos||dot==0||dot+1>=key.size())return false;
   std::string source=key.substr(0,dot),field=key.substr(dot+1);
-  for(const auto& data:theme.data) if(data.id==source)
+  for(const auto& data:theme.data) if(data.id==source) {
+    if(theme.spec>=2&&field=="age")return true;   // the data age the firmware supplies
     for(const auto& f:data.fields) if(f.id==field)return true;
+  }
   return false;
 }
 // `device.<name>=VALUE` (spec 2) goes to `device`, as a firmware would supply it.

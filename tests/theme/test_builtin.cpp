@@ -279,7 +279,46 @@ static void testMoonBinding() {
   c.update(0, &full); assert(c.states()[0].resolved.fill == 0xffe0);
 }
 
+// ---- <source>.age: how old a source's data is, in minutes (spec 2) --------
+static void testDataAgeSource() {
+  const std::string weather = "\"data\":[{\"id\":\"w\",\"url\":\"http://example.test/a.json\",\"interval\":60,\"fields\":[{\"id\":\"t\",\"path\":\"t\"}]}],";
+  Theme theme; std::string error;
+  // A declared source has an "age" field without declaring it (spec 2): bindings and text.
+  assert(parse(manifest(2, bar("a", 10, "w.age", 0, 120, 0, 120), weather), theme, error));
+  assert(theme.layers[0].bindings[0].builtin == BuiltIn::None && !theme.layers[0].timeBound);
+  const std::string text = "{\"id\":\"x\",\"type\":\"text\",\"x\":0,\"y\":0,\"value\":\"{w.age} min\",\"size\":16,\"color\":\"#ffffff\"}";
+  assert(parse(manifest(2, text, weather), theme, error));
+  // Spec 1 keeps its exact rule: only declared fields.
+  assert(!parse(manifest(1, bar("a", 10, "w.age", 0, 120, 0, 120), weather), theme, error) && error.find("declared data field") != std::string::npos);
+  assert(!parse(manifest(1, text, weather), theme, error));
+  // A source that is not declared has no age; neither has a made-up name next to it.
+  assert(!parse(manifest(2, bar("a", 10, "x.age", 0, 120, 0, 120), weather), theme, error) && error.find("declared data field") != std::string::npos);
+  assert(!parse(manifest(2, bar("a", 10, "w.ages", 0, 120, 0, 120), weather), theme, error));
+  assert(!parse(manifest(2, bar("a", 10, "w.Age", 0, 120, 0, 120), weather), theme, error));
+  assert(!parse(manifest(2, bar("a", 10, ".age", 0, 120, 0, 120), weather), theme, error));
+  assert(!parse(manifest(2, text, ""), theme, error));       // no data block at all
+  // A theme may still declare its own field called "age", in either spec.
+  const std::string person = "\"data\":[{\"id\":\"p\",\"url\":\"http://example.test/a.json\",\"interval\":60,\"fields\":[{\"id\":\"age\",\"path\":\"a\"}]}],";
+  assert(parse(manifest(1, bar("a", 10, "p.age", 0, 120, 0, 120), person), theme, error));
+  assert(parse(manifest(2, bar("a", 10, "p.age", 0, 120, 0, 120), person), theme, error));
+
+  // The value reaches the layer like any fetched field. Missing: the static value.
+  assert(parse(manifest(2, bar("a", 10, "w.age", 0, 120, 0, 120) + "," + text, weather), theme, error));
+  Engine e; e.setTheme(theme, 0);
+  tm t = clockAt(0, 0, 0);
+  e.update(0, &t);
+  assert(widthOf(e) == 7 && e.states()[1].text == "-- min");   // before the first fetch
+  e.setValues({{"w.age", "90"}});
+  assert(!e.update(1, &t).empty() && widthOf(e) == 90 && e.states()[1].text == "90 min");
+  e.setValues({{"w.age", "91"}});
+  assert(!e.update(2, &t).empty() && widthOf(e) == 91 && e.states()[1].text == "91 min");
+  e.setValues({});                                            // unknown again
+  e.update(3, &t);
+  assert(widthOf(e) == 7 && e.states()[1].text == "-- min");
+}
+
 int main() {
+  testDataAgeSource();
   testValues();
   testSpecRules();
   testRedraw();

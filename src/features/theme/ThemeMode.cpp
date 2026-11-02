@@ -51,6 +51,7 @@ void ThemeMode::unload() {
   dataNextMs_.clear();
   dataScheduled_.clear();
   dataValues_.clear();
+  dataAges_.reset(0);
   dataCursor_ = 0;
   engine_.setValues({});
   engine_.setTheme(smalltv::Theme{}, millis());
@@ -76,21 +77,20 @@ void ThemeMode::release(uint32_t needFree, uint32_t needLargestBlock) {
 // over sources so no single slow/failing one starves the others.
 void ThemeMode::refreshData() {
   const auto& sources = engine_.theme().data;
+  // The "<source>.age" values (DataAges): move the ages on, and a fetch that
+  // just ended sets or leaves its source's age. millis() only; no wall clock.
+  dataAges_.tick(millis());
+  bool changed = false;
   if (auto result = dataRequests_.take()) {
-    if (result->success) {
-      // Merge into the running set by key rather than replace it wholesale:
-      // a source's fields persist across refreshes of the *other* sources, so
-      // a slow source does not blank fields a fast one already delivered.
-      for (auto& value : result->values) {
-        auto existing = std::find_if(dataValues_.begin(), dataValues_.end(), [&](const smalltv::ThemeValue& old) { return old.key == value.key; });
-        if (existing == dataValues_.end()) dataValues_.push_back(std::move(value));
-        else existing->value = std::move(value.value);
-      }
-      engine_.setValues(dataValues_);
-    }
+    // A success merges its values into the running set and sets the age to 0.
+    changed = smalltv::collectFetch(*result, dataAges_, dataValues_);
     // Schedule from completion, preserving the interval even for slow sources.
     dataNextMs_[result->index] = millis() + sources[result->index].interval * 1000UL;
   }
+  // The ages change once a minute. The engine gets the values only when they
+  // changed: a fetch's new values, or a new age.
+  if (dataAges_.publish(sources, dataValues_)) changed = true;
+  if (changed) engine_.setValues(dataValues_);
   if (sources.empty() || dataRequests_.busy() || WiFi.status() != WL_CONNECTED) return;
   // Scan forward from `dataCursor_` for the first source that is due (an
   // unscheduled one always is), start it, and advance the cursor past it --
@@ -161,6 +161,7 @@ void ThemeMode::service(const Settings& s) {
         dataNextMs_.assign(theme.data.size(), 0);
         dataScheduled_.assign(theme.data.size(), false);
         dataValues_.clear();
+        dataAges_.reset(theme.data.size());
         dataCursor_ = 0;
       }
       engine_.setTheme(std::move(theme), millis());

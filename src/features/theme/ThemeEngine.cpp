@@ -200,6 +200,9 @@ static bool validFieldToken(const std::string& token, const Theme& theme) {
   if (!validId(source) || !validId(field)) return false;
   for (const auto& data : theme.data) {
     if (data.id != source) continue;
+    // Spec 2: every source also has an "age" field, the minutes since its last
+    // successful fetch, which the firmware supplies (DataAges in ThemeData.h).
+    if (theme.spec >= 2 && field == "age") return true;
     for (const auto& f : data.fields) if (f.id == field) return true;
   }
   return false;
