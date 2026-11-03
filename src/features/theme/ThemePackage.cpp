@@ -20,6 +20,8 @@ namespace smalltv {
 static const char badBaseline[] PROGMEM = ": font baseline must be 1 to the line height";
 static const char fontNeedsSpec2[] PROGMEM = ": font needs \"spec\": 2";
 static const char missingFont[] PROGMEM = "].font: missing font: ";
+static const char tooManyFontFiles[] PROGMEM = ": more than 4 fonts in the package, the most a theme can use";
+static_assert(MaxFonts == 4, "tooManyFontFiles names the limit");
 // Appended in place: a temporary string took 32 B more of each caller's
 // stack frame.
 static void appendFlash(std::string& to, const char* text) {
@@ -109,6 +111,7 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
   if (!count || count > MaxEntries) return false;
   entries_.reserve(count);
   uint32_t pos = 8;
+  size_t fonts = 0;
   for (unsigned i = 0; i < count; ++i) {
     // Each entry: uint16 path length, uint32 payload length, path bytes,
     // then the payload itself (read lazily, never buffered here).
@@ -130,7 +133,14 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
     } else if (path.compare(0, 6, "fonts/") == 0 && path.size() > 10 && path.compare(path.size() - 4, 4, ".stf") == 0) {
       // A font (spec 2, #31): "STF1", then the line height, baseline, first
       // code point, glyph count and fallback code point, 3 zero bytes;
-      // checkFont() checks the rest.
+      // checkFont() checks the rest. A manifest can use MaxFonts fonts, so
+      // a package with more is refused before they are checked: each check
+      // reads the whole font (#69 review).
+      if (++fonts > MaxFonts) {
+        error = path;
+        appendFlash(error, tooManyFontFiles);
+        return false;
+      }
       if (e.length < 12 || !source_.read(pos, b, 12) || memcmp(b, "STF1", 4)) return false;
       // The baseline is the ascent, the rows of the line box above it, so 1
       // to the line height. A packer that found no ink above the baseline
@@ -384,8 +394,13 @@ bool Package::row(AssetHandle handle, int y, int x, int count, uint16_t* colors,
 // zero. A bitmap is 4-bit coverage, two pixels per byte, high nibble first,
 // each row on a whole byte with an odd width's unused low nibble 0. The
 // bitmaps follow each other in record order, with nothing in between or
-// after, so every packer writes the same bytes. Checked whole here, read
-// in small pieces, so glyphRow() can trust what it reads.
+// after, so every packer writes the same bytes. Checked whole here, so
+// glyphRow() can trust what it reads. Like checkRows(), this runs at
+// install, at every load and in the listing: the records and the bitmaps
+// are each read front to back through a 64-byte window, and the check
+// pauses for the device after every glyph (#69 review). The largest font
+// the format allows is about 1,040 reads, and readIndex() lets a package
+// carry at most MaxFonts of them.
 bool Package::checkFont(const Entry& e) const {
   uint8_t h[12];
   if (!source_.read(e.offset, h, 12)) return false;
@@ -394,11 +409,14 @@ bool Package::checkFont(const Entry& e) const {
   if (height < 6 || height > 96 || first < 32 || !count || first + count > 127 ||
       fallback < first || fallback >= first + count || h[9] || h[10] || h[11] || e.length < 12 + 8 * count) return false;
   const uint32_t bitmaps = 12 + 8 * count;
+  Reader records(source_, e.offset + 12, e.offset + bitmaps);
+  Reader bits(source_, e.offset + bitmaps, e.offset + e.length);
   uint32_t at = 0;
   bool hasFallback = false;
   for (unsigned i = 0; i < count; ++i) {
+    if (i > 0) source_.pause();
     uint8_t g[8];
-    if (!source_.read(e.offset + 12 + 8 * i, g, 8)) return false;
+    for (uint8_t& byte : g) if (!records.byte(byte)) return false;
     const unsigned advance = g[2], left = g[3], top = g[4], width = g[5], rows = g[6], bytes = (width + 1) / 2;
     if (!width || !rows) {
       // No glyph, or one without ink (a space): no bitmap.
@@ -409,10 +427,10 @@ bool Package::checkFont(const Entry& e) const {
     if (u16(g) != at || !advance || advance > 120 || left + width > advance || top + rows > height || g[7] ||
         e.length - bitmaps - at < bytes * rows) return false;
     if (width % 2) {
-      Reader reader(source_, e.offset + bitmaps + at, e.offset + bitmaps + at + bytes * rows);
+      bits.skipTo(e.offset + bitmaps + at);
       for (unsigned n = 1; n <= bytes * rows; ++n) {
         uint8_t byte;
-        if (!reader.byte(byte) || (n % bytes == 0 && (byte & 15))) return false;
+        if (!bits.byte(byte) || (n % bytes == 0 && (byte & 15))) return false;
       }
     }
     at += bytes * rows;
@@ -423,11 +441,13 @@ bool Package::checkFont(const Entry& e) const {
 }
 // Reads every font a text layer names (fonts/<name>.stf) into the theme:
 // the glyph advances the engine lays text out with, and the line height as
-// the layer's size.
-__attribute__((noinline)) bool Package::loadFonts(Theme& candidate, std::string& error) const {
+// the layer's size. The glyph cache is allocated here too, at load, where a
+// failed allocation is an error rather than a reboot in the middle of a draw.
+__attribute__((noinline)) bool Package::loadFonts(Theme& candidate, std::string& error) {
   for (size_t i = 0; i < candidate.layers.size(); ++i) {
     auto& l = candidate.layers[i];
     if (l.type != LayerType::Text || !l.font) continue;
+    if (glyphs_.empty()) glyphs_.resize(GlyphSlots);
     ThemeFont& font = candidate.fonts[l.font - 1];
     const std::string path = "fonts/" + font.name + ".stf";
     const Entry* e = find(path);
@@ -458,8 +478,7 @@ __attribute__((noinline)) bool Package::loadFonts(Theme& candidate, std::string&
 bool Package::glyphRow(AssetHandle handle, uint8_t code, int y, uint8_t* coverage, int& left, int& width) {
   if (handle >= entries_.size()) return false;
   const Entry& e = entries_[handle];
-  if (!e.font() || code < e.width || code >= e.width + e.height) return false;
-  if (glyphs_.empty()) glyphs_.resize(GlyphSlots);
+  if (!e.font() || code < e.width || code >= e.width + e.height || glyphs_.empty()) return false;
   Glyph& g = glyphs_[code % GlyphSlots];
   if (g.code != code || g.font != handle) {
     uint8_t b[8];

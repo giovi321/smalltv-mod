@@ -7,8 +7,9 @@
 #include <iostream>
 using namespace smalltv;
 struct Memory : Source {
-  std::string data;unsigned reads=0;
+  std::string data;unsigned reads=0,pauses=0;
   uint32_t size() const override {return data.size();}
+  void pause() override {++pauses;}
   bool read(uint32_t offset,void* dest,size_t count) override {
     ++reads;
     if(offset>data.size()||count>data.size()-offset) return false;
@@ -46,6 +47,15 @@ static std::string font() {
   record(s,0,0,0,0,0,0);
   record(s,0,2,0,0,0,0);
   s+=char(0xf8);s+='\0';s+=char(0x3f);s+=char(0xf0);
+  return s;
+}
+// The largest font the format allows: 95 glyphs, a line of 96, and as much
+// bitmap as fits in 65,535 bytes, every glyph of odd width, so the check
+// reads every byte for its padding nibble.
+static std::string largestFont() {
+  std::string s="STF1";s+=char(96);s+=char(80);s+=' ';s+=char(95);s+='?';s.append(3,'\0');
+  for(unsigned i=0;i<95;++i) record(s,i*688,120,0,0,15,86);   // 8 bytes x 86 rows
+  s.append(95*688,char(0xf0));
   return s;
 }
 static const std::string textLayer=R"({"id":"t","type":"text","x":10,"y":20,"value":"ABC","font":"test","color":"#ffffff"})";
@@ -273,6 +283,40 @@ static void testManifest() {
   layers.replace(layers.rfind("f4"),2,"f1");
   assert(parseTheme(manifest(2,layers),t,error)&&t.fonts.size()==4&&t.layers[4].font==2);
 }
+// The watchdog rule (CONTRIBUTING, #69 review): the largest font the format
+// allows is read in 64-byte pieces with a pause after every glyph, and a
+// package carries at most as many fonts as a manifest can use.
+static void testWatchdog() {
+  std::string error;
+  auto count=[&](const std::string& stf,unsigned& reads,unsigned& pauses){
+    Memory source;source.data=package(manifest(2,textLayer),"fonts/test.stf",stf);
+    Package p(source);Theme t;
+    assert(p.load(t,error));
+    reads=source.reads;pauses=source.pauses;
+  };
+  unsigned smallReads,smallPauses,reads,pauses;
+  count(font(),smallReads,smallPauses);
+  count(largestFont(),reads,pauses);
+  // 65,360 bytes of bitmaps are 1,022 windows, 760 bytes of records 12, read
+  // once to check and once for the advances; one read per record or per
+  // glyph row would be several thousand. A pause follows every glyph but the
+  // first: 94 of them.
+  if(reads-smallReads>1060||pauses<94) std::cerr<<"largest font: "<<reads-smallReads<<" more reads, "<<pauses<<" pauses\n";
+  assert(reads-smallReads>=1022&&reads-smallReads<=1060&&pauses>=94);
+  // A fifth .stf is refused before it is read, whatever the manifest uses.
+  auto fonts=[&](int n){
+    std::string s="STH1";u16(s,n+1);u16(s,0);
+    entry(s,"theme.json",manifest(2,R"({"id":"t","type":"text","x":0,"y":0,"value":"A","size":8,"color":"#ffffff"})"));
+    for(int i=0;i<n;++i) entry(s,"fonts/f"+std::to_string(i)+".stf",font());
+    return s;
+  };
+  Memory source;Package p(source);Theme t;
+  source.data=fonts(4);assert(p.load(t,error));
+  const unsigned fourReads=source.reads;
+  source.reads=0;source.data=fonts(5);
+  assert(!p.load(t,error)&&error=="fonts/f4.stf: more than 4 fonts in the package, the most a theme can use");
+  assert(source.reads<fourReads);
+}
 int main() {
   testLoad();
   testRejected();
@@ -280,5 +324,6 @@ int main() {
   testMutations();
   testRender();
   testManifest();
+  testWatchdog();
   std::cout<<"theme font tests passed\n";
 }
