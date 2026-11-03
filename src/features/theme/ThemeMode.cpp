@@ -3,10 +3,17 @@
 #include "Clock.h"
 #include "Gfx.h"
 #include "Platform.h"
+#include "Net.h"
 #include "ThemeDataClient.h"
 #include <Arduino_GFX_Library.h>
 #include <font/glcdfont.h>
 #include <algorithm>
+#include <cstdio>
+#include <new>
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+#include <pgmspace.h>
+#include <recovery_theme_data.h>
+#endif
 
 ThemeMode g_themeMode;
 namespace {
@@ -27,6 +34,19 @@ class Panel : public smalltv::Display {
     if ((y & 15) == 15) yield();
   }
 };
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+class RecoveryThemeSource : public smalltv::Source {
+ public:
+  uint32_t size() const override { return kRecoveryThemeSize; }
+  bool read(uint32_t offset, void* dest, size_t count) override {
+    if (offset > kRecoveryThemeSize || count > kRecoveryThemeSize - offset) return false;
+    uint8_t* out = static_cast<uint8_t*>(dest);
+    for (size_t i = 0; i < count; ++i) out[i] = pgm_read_byte(kRecoveryThemeData + offset + i);
+    return true;
+  }
+};
+static constexpr const char* RecoveryThemeId = "office-recovery";
+#endif
 // What a load needs before it starts: a package parse (ThemeMode.h). A failed
 // allocation mid-load restarts the ESP8266, so a load that would not fit
 // waits instead.
@@ -58,6 +78,25 @@ void ThemeMode::unload() {
   attempted_ = messageDrawn_ = keepData_ = false;
   error_ = "";
 }
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+void ThemeMode::useRecoveryTheme(uint8_t crashCount) {
+  recoveryMode_ = true;
+  recoveryCrashCount_ = crashCount;
+  unload();
+}
+#endif
+#if WITH_THEME_PLAYLIST
+void ThemeMode::setPlaylistTheme(const char* id) {
+  String next = id ? id : "";
+  if (next == playlistId_) return;
+  playlistId_ = next;
+  unload();  // cancels the previous fetch and drops all theme-owned heap state
+}
+bool ThemeMode::playlistLoadFailed() const {
+  return attempted_ && !package_ && error_.length() &&
+      error_ != WaitingForMemory;
+}
+#endif
 void ThemeMode::release(uint32_t needFree, uint32_t needLargestBlock) {
   if (!package_ || (ESP.getFreeHeap() >= needFree && platformMaxFreeBlock() >= needLargestBlock)) return;
   // A fetch in flight is dropped; its source is still due, so the reload
@@ -110,8 +149,19 @@ void ThemeMode::refreshData() {
 // unloading first; otherwise leaves the loaded package alone and only marks
 // the engine's next update() as a full repaint.
 void ThemeMode::invalidate(const Settings& s) {
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  if (recoveryMode_) {
+    engine_.invalidate();
+    messageDrawn_ = false;
+    return;
+  }
+#endif
   const bool onScreen = s.mode == MODE_THEME || (s.mode == MODE_CAROUSEL && s.carouselTheme);
-  if (loadedId_ != s.themeId || !onScreen) unload();
+  String desiredId = s.themeId;
+#if WITH_THEME_PLAYLIST
+  if (playlistId_.length()) desiredId = playlistId_;
+#endif
+  if (loadedId_ != desiredId || !onScreen) unload();
   // A failed load may be retried after installation or settings changes.
   if (!package_) attempted_ = false;
   engine_.invalidate();
@@ -123,9 +173,16 @@ void ThemeMode::invalidate(const Settings& s) {
 // `loadedId_` together are the load state machine; everything past the load
 // block runs every call once a package is open.
 void ThemeMode::service(const Settings& s) {
-  if (loadedId_ != s.themeId) {
+  String desiredId = s.themeId;
+#if WITH_THEME_PLAYLIST
+  if (playlistId_.length()) desiredId = playlistId_;
+#endif
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  if (recoveryMode_) desiredId = RecoveryThemeId;
+#endif
+  if (loadedId_ != desiredId) {
     unload();
-    loadedId_ = s.themeId;
+    loadedId_ = desiredId;
   }
   // A web request, or the buffers of its reply, can briefly hold the heap a
   // load needs; the load then waits, checked again every frame.
@@ -138,19 +195,52 @@ void ThemeMode::service(const Settings& s) {
     attempted_ = true;
     std::string error;
     smalltv::Theme theme;
-    if (!smalltv::validId(s.themeId.c_str())) error = "Select an installed theme";
-    else {
-      file_.reset(new ThemeFile);
-      if (!file_->open("/themes/" + s.themeId + ".stheme")) error = "Theme file not found";
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+    bool sourceReady = false;
+    if (recoveryMode_) {
+      file_.reset(new(std::nothrow) RecoveryThemeSource);
+      sourceReady = bool(file_);
+    } else {
+      if (!smalltv::validId(desiredId.c_str())) error = "Select an installed theme";
       else {
-        package_.reset(new smalltv::Package(*file_));
-        if (!package_->load(theme, error)) package_.reset();
-        else if (theme.id != s.themeId.c_str()) {
+        ThemeFile* source = new(std::nothrow) ThemeFile;
+        if (source && source->open("/themes/" + desiredId + ".stheme")) {
+          file_.reset(source);
+          sourceReady = true;
+        } else {
+          delete source;
+          error = "Theme file not found";
+        }
+      }
+    }
+    if (sourceReady) {
+      package_.reset(new(std::nothrow) smalltv::Package(*file_));
+      if (!package_) error = "Cannot allocate theme package";
+      else if (!package_->load(theme, error)) package_.reset();
+      else if (theme.id != desiredId.c_str()) {
+        error = "Theme ID mismatch";
+        package_.reset();
+      }
+    }
+#else
+    if (!smalltv::validId(desiredId.c_str())) error = "Select an installed theme";
+    else {
+      ThemeFile* source = new(std::nothrow) ThemeFile;
+      if (!source || !source->open("/themes/" + desiredId + ".stheme")) {
+        delete source;
+        error = "Theme file not found";
+      } else {
+        file_.reset(source);
+        package_.reset(new(std::nothrow) smalltv::Package(*file_));
+        if (!package_) error = "Cannot allocate theme package";
+        else if (!package_->load(theme, error)) package_.reset();
+        else if (theme.id != desiredId.c_str()) {
           error = "Theme ID mismatch";
           package_.reset();
         }
       }
     }
+#endif
     if (!error.empty()) {
       error_ = error.c_str();
       package_.reset();
@@ -170,6 +260,10 @@ void ThemeMode::service(const Settings& s) {
   }
   if (!package_) {
     if (!messageDrawn_) {
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+      if (recoveryMode_) gfxSafeTheme(netIP().c_str(), recoveryCrashCount_);
+      else
+#endif
       gfxMessage("THEMES", error_.c_str(), C_WHITE);
       messageDrawn_ = true;
     }
@@ -190,6 +284,19 @@ void ThemeMode::service(const Settings& s) {
     package_.reset();
     file_.reset();
     messageDrawn_ = false;
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+    if (recoveryMode_) gfxSafeTheme(netIP().c_str(), recoveryCrashCount_);
+#endif
+    return;
   }
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  if (recoveryMode_) {
+    char count[24];
+    snprintf(count, sizeof(count), "Crash count: %u", (unsigned)recoveryCrashCount_);
+    gfxDrawCentered("Open settings:", 176, 1, C_GRAY);
+    gfxDrawCentered(netIP().c_str(), 194, 1, C_GREEN);
+    gfxDrawCentered(count, 216, 1, C_GRAY);
+  }
+#endif
 }
 #endif

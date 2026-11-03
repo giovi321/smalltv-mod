@@ -51,3 +51,4 @@ void gfxApInfo(const char* ssid, const char* pass, const char* ip, const char* w
 void gfxStaInfo(const char* ssid, const char* ip, const char* host);
 void gfxMessage(const char* title, const char* msg, uint16_t titleColor);
 void gfxCrash(const char* epc, const char* addr, const char* ip);  // safe-mode diag
+void gfxSafeTheme(const char* ip, uint8_t crashCount);              // built-in recovery theme

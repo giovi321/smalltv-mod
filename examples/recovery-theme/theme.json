@@ -1,0 +1,21 @@
+{
+  "spec": 1,
+  "theme": {
+    "id": "office-recovery",
+    "name": "Office Recovery",
+    "author": "SmallTV Custom",
+    "version": "1.0.0"
+  },
+  "display": {
+    "width": 240,
+    "height": 240,
+    "background": "#101827"
+  },
+  "layers": [
+    {"id": "accent", "type": "shape", "shape": "rectangle", "x": 18, "y": 22, "width": 204, "height": 4, "fill": "#63c7b2"},
+    {"id": "title", "type": "text", "x": 120, "y": 48, "anchor": "center", "value": "RECOVERY MODE", "size": 18, "color": "#63c7b2"},
+    {"id": "paused", "type": "text", "x": 120, "y": 92, "anchor": "center", "value": "Saved theme paused", "size": 13, "color": "#ffffff"},
+    {"id": "settings", "type": "text", "x": 120, "y": 128, "anchor": "center", "value": "Open device settings", "size": 12, "color": "#c5d1e0"},
+    {"id": "select", "type": "text", "x": 120, "y": 150, "anchor": "center", "value": "Select a theme, then reboot", "size": 12, "color": "#f0c674"}
+  ]
+}

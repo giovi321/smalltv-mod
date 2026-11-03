@@ -5,7 +5,11 @@
 #include "Clock.h"
 #include <ArduinoJson.h>
 #include <algorithm>
+#include <string.h>
 extern void appInvalidate();
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+extern void appClearCrashStreak();
+#endif
 namespace {
 WebServerClass* server;
 Settings* settings;
@@ -454,15 +458,29 @@ void selectTheme() {
   }
   String oldId = settings->themeId;
   uint8_t oldMode = settings->mode;
+#if WITH_THEME_PLAYLIST
+  bool oldPlaylistEnabled = settings->themePlaylistEnabled;
+#endif
   settings->themeId = id;
   settings->mode = MODE_THEME;
+#if WITH_THEME_PLAYLIST
+  settings->themePlaylistEnabled = false;
+#endif
   if (!saveSettings(*settings)) {
     settings->themeId = oldId;
     settings->mode = oldMode;
+#if WITH_THEME_PLAYLIST
+    settings->themePlaylistEnabled = oldPlaylistEnabled;
+#endif
     reply(500, "Could not save selection");
     return;
   }
   clockReapply(*settings);
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  // Choosing a valid user theme is the explicit recovery action. Clear any
+  // accumulated crash streak so the next reboot can start that selection.
+  appClearCrashStreak();
+#endif
   appInvalidate();
   reply(200, id);
 }
@@ -505,7 +523,35 @@ void deleteTheme() {
     reply(404, "Theme not found or could not be removed");
     return;
   }
+#if WITH_THEME_PLAYLIST
+  Settings::ThemePlaylistItem removedItem{};
+  bool oldPlaylistEnabled = settings->themePlaylistEnabled;
+  for (uint8_t i = 0; i < settings->themePlaylistCount; ++i) {
+    if (id != settings->themePlaylist[i].id) continue;
+    removedItem = settings->themePlaylist[i];
+    for (uint8_t j = i + 1; j < settings->themePlaylistCount; ++j)
+      settings->themePlaylist[j - 1] = settings->themePlaylist[j];
+    --settings->themePlaylistCount;
+    memset(&settings->themePlaylist[settings->themePlaylistCount], 0,
+           sizeof(settings->themePlaylist[0]));
+    if (!settings->themePlaylistCount) settings->themePlaylistEnabled = false;
+    if (!saveSettings(*settings)) {
+      for (uint8_t j = settings->themePlaylistCount; j > i; --j)
+        settings->themePlaylist[j] = settings->themePlaylist[j - 1];
+      settings->themePlaylist[i] = removedItem;
+      ++settings->themePlaylistCount;
+      settings->themePlaylistEnabled = oldPlaylistEnabled;
+      appInvalidate();
+      reply(500, "Theme removed, but playlist settings could not be saved");
+      return;
+    }
+    break;
+  }
+#endif
   updateIndex(id, nullptr);
+#if WITH_THEME_PLAYLIST
+  appInvalidate();
+#endif
   reply(200, id);
 }
 }

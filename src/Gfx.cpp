@@ -214,3 +214,19 @@ void gfxCrash(const char* epc, const char* addr, const char* ip) {
   gfxDrawCentered("OTA flash to fix:", 182, 2, C_GRAY);
   gfxDrawCentered(ip && ip[0] ? ip : "-", 204, 2, C_GREEN);
 }
+
+// Tiny built-in recovery display. It uses only the shared ASCII font and draw
+// helpers, so it remains available when a package or its assets keep crashing.
+void gfxSafeTheme(const char* ip, uint8_t crashCount) {
+  if (!gfx) return;
+  gfx->fillScreen(C_BLACK);
+  gfxDrawCentered("SMALLTV", 24, 3, C_BLUE);
+  gfxDrawCentered("RECOVERY THEME", 72, 2, C_YELLOW);
+  gfxDrawCentered("Saved theme paused", 112, 2, C_WHITE);
+  char count[28];
+  snprintf(count, sizeof(count), "Crashes: %u", (unsigned)crashCount);
+  gfxDrawCentered(count, 144, 2, C_GRAY);
+  gfxDrawCentered("Choose theme + reboot", 174, 1, C_GRAY);
+  gfxDrawCentered("Settings:", 194, 1, C_GRAY);
+  gfxDrawCentered(ip && ip[0] ? ip : "-", 214, 1, C_GREEN);
+}

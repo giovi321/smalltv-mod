@@ -109,8 +109,12 @@ static inline PlatformReset platformResetInfo() {
   PlatformReset r; r.wasCrash = false; r.epc[0] = 0; r.addr[0] = 0;
   r.reason = ESP.getResetReason();
   struct rst_info* ri = ESP.getResetInfoPtr();
-  if (ri && ri->reason == REASON_EXCEPTION_RST) {
+  if (ri && (ri->reason == REASON_EXCEPTION_RST ||
+             ri->reason == REASON_WDT_RST ||
+             ri->reason == REASON_SOFT_WDT_RST)) {
     r.wasCrash = true;
+  }
+  if (ri && ri->reason == REASON_EXCEPTION_RST) {
     snprintf(r.epc,  sizeof(r.epc),  "0x%08x", (unsigned)ri->epc1);
     snprintf(r.addr, sizeof(r.addr), "0x%08x", (unsigned)ri->excvaddr);
   }

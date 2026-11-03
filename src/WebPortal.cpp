@@ -8,8 +8,12 @@
 #include "Net.h"
 #include "Gfx.h"
 #include "OtaUpdate.h"
+#if WITH_TICKER
 #include "StockClient.h"
+#endif
+#if WITH_USAGE
 #include "UsageClient.h"
+#endif
 #if WITH_RADAR
 #include "RadarClient.h"
 #endif
@@ -20,6 +24,7 @@
 #include "WgClient.h"
 #if WITH_THEME
 #include "features/theme/ThemeWeb.h"
+#include "features/theme/ThemeMode.h"
 #endif
 #include "SettingsTransaction.h"
 #if WITH_HA
@@ -39,6 +44,12 @@ static bool             g_reboot = false;
 static uint32_t         g_rebootAt = 0;
 static bool             g_selfUpdate = false;   // GitHub self-update requested
 static String           g_updateMsg;            // last self-update status/error
+static uint32_t         g_uploadMax = 0;
+static uint32_t         g_uploadBytes = 0;
+static bool             g_uploadStarted = false;
+static bool             g_uploadMagicOk = false;
+static String           g_uploadError;
+static constexpr uint32_t MinFirmwareImageSize = 16UL * 1024UL;
 
 static void scheduleReboot(uint32_t inMs) {
   g_reboot = true;
@@ -132,6 +143,7 @@ static void handleGetConfig() {
   feat["radar"]  = (bool)WITH_RADAR;
   feat["ha"]     = (bool)WITH_HA;
   feat["theme"]  = (bool)WITH_THEME;
+  feat["themePlaylist"] = (bool)WITH_THEME_PLAYLIST;
   // WireGuard is a per-chip decision rather than a per-feature one: it is
   // compiled only where the image has room for it (the ESP32-C2 build).
 #if defined(SMALLTV_WIREGUARD)
@@ -532,10 +544,25 @@ static void handleNotify() {
 // ---- OTA ------------------------------------------------------------------
 static void handleUpdateDone() {
   if (!requireAuth()) return;
-  bool ok = !Update.hasError();
+  bool ok = g_uploadError.length() == 0 && !Update.hasError();
   server.sendHeader("Connection", "close");
-  server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : platformUpdateError().c_str());
+  const String error = g_uploadError.length() ? g_uploadError : platformUpdateError();
+  server.send(ok ? 200 : 400, "text/plain", ok ? "OK" : error.c_str());
   if (ok) scheduleReboot(1200);
+}
+
+static void abortFirmwareUpload(const char* reason) {
+  g_uploadError = reason;
+  if (!g_uploadStarted) return;
+  // Make the updater reject even an interrupted upload that filled its slot:
+  // write one extra byte when no space remains, otherwise leave it incomplete.
+  // A two-byte poison also covers the one-byte-remaining boundary.
+  uint8_t poison[2] = {0, 0};
+  size_t remaining = Update.remaining();
+  size_t poisonSize = remaining < sizeof(poison) ? remaining + 1 : 1;
+  Update.write(poison, poisonSize);
+  Update.end(false);
+  g_uploadStarted = false;
 }
 
 // The upload callback runs while the body streams in, ahead of
@@ -545,26 +572,75 @@ static void handleUpdateDone() {
 static void handleUpdateUpload() {
   HTTPUpload& up = server.upload();
   if (!guardAllowed()) {
-    if (up.status != UPLOAD_FILE_START) Update.end();
+    if (up.status != UPLOAD_FILE_START) abortFirmwareUpload("request rejected");
     return;
   }
   if (S->auth.enabled && S->auth.pass.length() &&
       !server.authenticate(S->auth.user.c_str(), S->auth.pass.c_str())) {
-    if (up.status != UPLOAD_FILE_START) Update.end();
+    if (up.status != UPLOAD_FILE_START) abortFirmwareUpload("authentication failed");
     return;
   }
   if (up.status == UPLOAD_FILE_START) {
+    g_uploadMax = 0;
+    g_uploadBytes = 0;
+    g_uploadStarted = false;
+    g_uploadMagicOk = false;
+    g_uploadError = "";
+#if WITH_THEME
+    // OTA also needs a large contiguous heap block. A running theme keeps its
+    // parsed package and layer state alive, so release it before Update.begin.
+    g_themeMode.release(UINT32_MAX, UINT32_MAX);
+#endif
 #if defined(SMALLTV_FAMILY_ESP8266)
     WiFiUDP::stopAll();   // free UDP sockets so the OTA has max contiguous flash/heap
 #endif
-    uint32_t maxSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-    if (!Update.begin(maxSpace)) Update.printError(Serial);
+    uint32_t freeSpace = ESP.getFreeSketchSpace();
+    if (freeSpace <= 0x1000) {
+      g_uploadError = "no OTA slot available";
+    } else {
+      g_uploadMax = (freeSpace - 0x1000) & 0xFFFFF000;
+      if (g_uploadMax < MinFirmwareImageSize) g_uploadError = "no OTA slot available";
+    }
   } else if (up.status == UPLOAD_FILE_WRITE) {
-    if (Update.write(up.buf, up.currentSize) != up.currentSize) Update.printError(Serial);
+    if (g_uploadError.length()) return;
+    if (!up.currentSize || up.currentSize > g_uploadMax - g_uploadBytes) {
+      abortFirmwareUpload("firmware image exceeds the available OTA slot");
+      return;
+    }
+    if (!g_uploadMagicOk) {
+      if (up.buf[0] != 0xE9) {
+        g_uploadError = "invalid firmware image: expected ESP image magic 0xE9";
+        return;  // reject before Update.begin() erases any OTA sectors
+      }
+      g_uploadMagicOk = true;
+      if (!Update.begin(g_uploadMax)) {
+        g_uploadError = platformUpdateError();
+        return;
+      }
+      g_uploadStarted = true;
+    }
+    if (Update.write(up.buf, up.currentSize) != up.currentSize) {
+      String error = platformUpdateError();
+      abortFirmwareUpload(error.c_str());
+      return;
+    }
+    g_uploadBytes += up.currentSize;
   } else if (up.status == UPLOAD_FILE_END) {
-    if (!Update.end(true)) Update.printError(Serial);
+    if (g_uploadError.length()) return;
+    if (!g_uploadStarted || !g_uploadMagicOk || g_uploadBytes < MinFirmwareImageSize ||
+        up.totalSize != g_uploadBytes) {
+      abortFirmwareUpload(g_uploadBytes < MinFirmwareImageSize
+          ? "firmware image is too small" : "incomplete firmware upload");
+      return;
+    }
+    if (!Update.end(true)) {
+      g_uploadError = platformUpdateError();
+      g_uploadStarted = false;
+    } else {
+      g_uploadStarted = false;
+    }
   } else if (up.status == UPLOAD_FILE_ABORTED) {
-    Update.end();
+    abortFirmwareUpload("firmware upload was interrupted");
   }
   yield();
 }
@@ -603,7 +679,9 @@ void webPortalBegin(Settings& settings) {
   server.on("/api/import", HTTP_POST, handleImport);
   server.on("/api/checkupdate", HTTP_GET, handleCheckUpdate);
   server.on("/api/selfupdate", HTTP_POST, handleSelfUpdate);
+#if WITH_USAGE
   server.on("/api/usage", HTTP_POST, handleUsagePush);   // daemon pushes usage here
+#endif
 #if WITH_HA
   server.on("/api/ha/clear", HTTP_POST, handleHaClear);  // purge HA screens (device + broker retained)
 #endif

@@ -1,26 +1,46 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SmallTV</title>
+<title>SmallTV Clean</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMjJjNTVlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iNyIgeT0iMTMiIHdpZHRoPSI1MCIgaGVpZ2h0PSIzOCIgcng9IjYiLz48cG9seWxpbmUgcG9pbnRzPSIxNSwzOCAyMywzMCAzMCwzNCAzNywyMiA0NCwyOCA1MCwyMCIvPjxwYXRoIGQ9Ik0yNCA1MXY2TTQwIDUxdjZNMjAgNTdoOE0zNiA1N2g4Ii8+PC9nPjwvc3ZnPg==">
 <style>
 :root{--bg:#0e1116;--card:#171c24;--mut:#8b96a5;--fg:#e6edf3;--acc:#3fb950;--acc2:#2f81f7;--red:#f85149;--bd:#262d38}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);font-size:15px}
-header{padding:14px 16px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px}
+header{padding:14px 16px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px;max-width:1040px;margin:0 auto}
 header h1{font-size:17px;margin:0;font-weight:600}
 header .logo{width:26px;height:26px;flex:0 0 auto}
 header .dot{width:9px;height:9px;border-radius:50%;background:var(--mut)}
 header .dot.ok{background:var(--acc)}
-nav{display:flex;gap:4px;padding:8px;overflow-x:auto;border-bottom:1px solid var(--bd);position:sticky;top:0;background:var(--bg);z-index:5}
-nav button{background:none;border:0;color:var(--mut);padding:8px 12px;border-radius:8px;font-size:14px;cursor:pointer;white-space:nowrap}
+header .spacer{flex:1}
+header .help-toggle{background:#222b36;border:1px solid var(--bd);color:var(--mut);padding:7px 11px;border-radius:9px;font-size:13px;cursor:pointer}
+nav{display:flex;gap:5px;padding:9px 16px;overflow-x:auto;border-bottom:1px solid var(--bd);position:sticky;top:0;background:rgba(14,17,22,.96);backdrop-filter:blur(12px);z-index:5;scrollbar-width:thin}
+nav button{background:none;border:0;color:var(--mut);padding:9px 13px;border-radius:9px;font-size:14px;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s}
 nav button.active{background:var(--card);color:var(--fg)}
-main{padding:16px;max-width:680px;margin:0 auto}
+nav button:hover{color:var(--fg)}
+main{padding:24px 16px 32px;max-width:900px;margin:0 auto}
 .tab{display:none}.tab.active{display:block}
-.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 8px 24px rgba(0,0,0,.12)}
 h2{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin:0 0 12px}
+.welcome{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin:2px 0 20px}
+.welcome .eyebrow{margin:0 0 7px;color:var(--acc);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.welcome h2{font-size:24px;letter-spacing:-.03em;text-transform:none;color:var(--fg);margin:0 0 5px}
+.welcome p{margin:0;color:var(--mut);font-size:14px}
+.status-pill{flex:0 0 auto;border:1px solid var(--bd);border-radius:999px;padding:7px 11px;font-size:12px;color:var(--mut);background:var(--card)}
+.status-pill.ok{color:var(--acc);border-color:rgba(63,185,80,.35);background:rgba(63,185,80,.08)}
+.status-pill.warn{color:#e3b341;border-color:rgba(227,179,65,.35);background:rgba(227,179,65,.08)}
+.quick-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.stat-card{min-width:0;background:linear-gradient(145deg,#1a2029,#151a22);border:1px solid var(--bd);border-radius:14px;padding:16px}
+.stat-card .label{color:var(--mut);font-size:11px;font-weight:650;letter-spacing:.08em;text-transform:uppercase}
+.stat-card strong{display:block;margin-top:10px;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stat-card a{display:inline-block;margin-top:5px;color:var(--acc2);font-size:13px;text-decoration:none}
+.home-actions{display:flex;flex-wrap:wrap;gap:9px;margin:16px 0 22px}
+.details{border-top:1px solid var(--bd);padding-top:14px}
+.details summary{color:var(--mut);cursor:pointer;font-size:13px;user-select:none}
+.details[open] summary{margin-bottom:12px}
+.details .card{box-shadow:none;margin:0;padding:0;border:0}
 label{display:block;margin:10px 0 4px;font-size:13px;color:var(--mut)}
 input[type=text],input[type=password],input[type=number],input[type=url],select{
  width:100%;padding:9px 10px;background:#0b0e13;border:1px solid var(--bd);border-radius:8px;color:var(--fg);font-size:15px}
@@ -48,14 +68,17 @@ td{padding:6px 4px}
 .bar{height:8px;background:#0b0e13;border-radius:6px;overflow:hidden;margin-top:8px}
 .bar>div{height:100%;width:0;background:var(--acc2);transition:.2s}
 small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
+small.hint:not([id]){display:none;line-height:1.55}
+body.show-help small.hint:not([id]){display:block}
 .chip{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;letter-spacing:.03em;background:var(--acc2);color:#fff;vertical-align:middle}
+@media(max-width:600px){header{padding:12px}nav{padding:8px 10px}main{padding:18px 12px 28px}.quick-grid{grid-template-columns:1fr 1fr;gap:9px}.stat-card{padding:13px}.stat-card strong{font-size:15px}.welcome h2{font-size:21px}.card{padding:15px}}
 </style></head>
 <body>
-<header><svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><g fill="none" stroke="var(--acc)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="13" width="50" height="38" rx="6"/><polyline points="15,38 23,30 30,34 37,22 44,28 50,20"/><path d="M24 51v6M40 51v6M20 57h8M36 57h8"/></g></svg><span id="dot" class="dot"></span><h1>SmallTV</h1><span id="chip" class="chip" style="display:none"></span><span id="hi" class="muted"></span></header>
+<header><svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><g fill="none" stroke="var(--acc)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="13" width="50" height="38" rx="6"/><polyline points="15,38 23,30 30,34 37,22 44,28 50,20"/><path d="M24 51v6M40 51v6M20 57h8M36 57h8"/></g></svg><span id="dot" class="dot"></span><h1>SmallTV Clean</h1><span id="chip" class="chip" style="display:none"></span><span id="hi" class="muted"></span><span class="spacer"></span><button id="helpToggle" class="help-toggle" type="button" aria-expanded="false">Tipps anzeigen</button></header>
 <nav>
- <button data-t="status" class="active">Status</button>
- <button data-t="wifi">WiFi</button>
- <button data-t="display">Display</button>
+ <button data-t="status" class="active">Übersicht</button>
+ <button data-t="wifi">WLAN</button>
+ <button data-t="display">Anzeige</button>
  <button data-t="ticker">Ticker</button>
  <button data-t="usage">Clawdmeter</button>
  <button data-t="radar">Radar</button>
@@ -65,7 +88,14 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
 <main>
  <!-- STATUS -->
  <section id="status" class="tab active">
-  <div class="card"><h2>Device</h2><div id="statusBox" class="muted">Loading...</div></div>
+  <div class="welcome"><div><p class="eyebrow">SMALLTV CLEAN IMAGE</p><h2>Dein Theme-Display</h2><p>WLAN, Gerätestatus und Themes auf einen Blick.</p></div><span id="statusPill" class="status-pill">Wird geprüft</span></div>
+  <div class="quick-grid">
+   <div class="stat-card"><span class="label">WLAN</span><strong id="statusNetwork">Wird geladen …</strong></div>
+   <div class="stat-card"><span class="label">Geräteadresse</span><a id="statusAddress" href="#">Adresse öffnen</a></div>
+   <div class="stat-card"><span class="label">Laufzeit</span><strong id="statusUptime">—</strong></div>
+  </div>
+  <div class="home-actions"><button class="btn sec" type="button" data-go="wifi">WLAN einrichten</button><button class="btn sec" type="button" data-go="display">Themes &amp; Anzeige</button><button class="btn sec" type="button" data-go="update">System &amp; Firmware</button></div>
+  <details class="details"><summary>Technische Details</summary><div class="card"><div id="statusBox" class="muted">Wird geladen …</div></div></details>
  </section>
 
  <!-- WIFI -->
@@ -112,15 +142,15 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
 
  <!-- DISPLAY (shared) -->
  <section id="display" class="tab">
-  <div class="card"><h2>Mode</h2>
-   <label>What this device shows</label>
+  <div class="card" id="modeCard"><h2>Anzeigemodus</h2>
+   <label>Was auf dem Display erscheint</label>
    <select id="mode" onchange="modeChanged()">
     <option value="stocks">Ticker</option>
     <option value="usage">Clawdmeter</option>
     <option value="radar">Radar</option>
     <option value="ha">Home Assistant</option>
-    <option value="theme">Theme clock</option>
-    <option value="carousel">Carousel (rotate modes)</option>
+    <option value="theme">Theme</option>
+    <option value="carousel">Moduskarussell</option>
    </select>
    <div id="carouselRow">
     <label>Switch mode every (s)</label><input id="carouselSec" type="number" min="5" max="3600">
@@ -130,43 +160,52 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <div class="chk"><input id="carouselHa" type="checkbox"><label>Home Assistant</label></div>
     <div class="chk"><input id="carouselTheme" type="checkbox"><label>Theme clock</label></div>
    </div>
-   <small class="hint">Each name here is the tab that configures it. Pick the active feature, then set it up in its own tab. Carousel rotates through the ticked features.</small>
+   <small class="hint">Wähle ein einzelnes Theme oder – sofern verfügbar – das automatische Karussell.</small>
   </div>
-  <div class="card" id="themeCard"><h2>Theme clocks</h2>
-   <label>Installed theme</label><select id="themeSelect" onchange="themeChoiceChanged()"></select>
-   <div style="margin-top:12px"><button class="btn" id="themeUseBtn" onclick="selectTheme()">Use theme</button>
-    <button class="btn" onclick="deleteTheme()">Remove</button></div>
+  <div class="card" id="themeCard"><h2>Installierte Themes</h2>
+   <label>Einzelnes Theme (Rückfallanzeige)</label><select id="themeSelect" onchange="themeChoiceChanged()"></select>
+   <div style="margin-top:12px"><button class="btn" id="themeUseBtn" onclick="selectTheme()">Theme anzeigen</button>
+    <button class="btn" onclick="deleteTheme()">Entfernen</button></div>
    <small class="hint" id="themeDetails"></small>
-   <label>Install a theme</label><input id="themeFile" type="file" accept=".stheme">
-   <button class="btn" id="themeUploadBtn" onclick="installTheme()">Install .stheme</button>
-   <small class="hint" id="themeStatus">Loading themes…</small>
-   <small class="hint">Theme clocks use the timezone below. Install a package, then choose Use theme. Notifications continue to appear above it.</small>
+   <label>Theme-Datei installieren</label><input id="themeFile" type="file" accept=".stheme">
+   <button class="btn" id="themeUploadBtn" onclick="installTheme()">.stheme installieren</button>
+   <small class="hint" id="themeStatus">Themes werden geladen …</small>
+   <small class="hint">Installiere ein .stheme-Paket und wähle es hier aus oder füge es der Playlist hinzu.</small>
   </div>
-  <div class="card"><h2>Screen</h2>
-   <label>Brightness: <span id="brVal"></span>%</label>
+  <div class="card" id="themePlaylistCard" style="display:none"><h2>Theme-Playlist</h2>
+   <div class="chk"><input id="themePlaylistEnabled" type="checkbox" onchange="themePlaylistToggle()"><label>Themes automatisch nacheinander anzeigen</label></div>
+   <div class="row" style="align-items:end;margin-top:12px">
+    <div><label>Installiertes Theme hinzufügen</label><select id="themePlaylistAdd"></select></div>
+    <button class="btn sec" type="button" onclick="themePlaylistAddItem()">Hinzufügen</button>
+   </div>
+   <div id="themePlaylistList" style="margin-top:12px"></div>
+   <small class="hint">Mit den Pfeilen sortieren und die Anzeigedauer je Theme in Sekunden festlegen (5 bis 3600). Änderungen werden mit „Einstellungen speichern“ gesichert. Fehlende oder ungültige Themes werden übersprungen.</small>
+  </div>
+  <div class="card"><h2>Bildschirm</h2>
+   <label>Helligkeit: <span id="brVal"></span>%</label>
    <input id="brightness" type="range" min="0" max="100" oninput="brVal.textContent=this.value">
-   <div class="chk"><input id="autoBrightness" type="checkbox"><label>Auto-brightness (light sensor on A0)</label></div>
-   <label>Orientation</label>
+   <div class="chk"><input id="autoBrightness" type="checkbox"><label>Automatische Helligkeit (Lichtsensor an A0)</label></div>
+   <label>Ausrichtung</label>
    <select id="rotation"><option value="0">0&deg;</option><option value="1">90&deg;</option>
     <option value="2">180&deg;</option><option value="3">270&deg;</option></select>
-   <div class="chk"><input id="backlightInverted" type="checkbox"><label>Backlight is active-low (try if screen stays dark)</label></div>
+   <div class="chk"><input id="backlightInverted" type="checkbox"><label>Hintergrundbeleuchtung ist invertiert (bei dunklem Bildschirm testen)</label></div>
   </div>
-  <div class="card"><h2>Colour</h2>
-   <label>Colour order</label>
+  <div class="card"><h2>Farben</h2>
+   <label>Farbreihenfolge</label>
    <select id="colorOrder">
-    <option value="auto">Panel default</option>
+    <option value="auto">Display-Standard</option>
     <option value="rgb">RGB</option>
-    <option value="bgr">BGR (swap red and blue)</option>
+    <option value="bgr">BGR (Rot und Blau tauschen)</option>
    </select>
-   <div class="chk" style="margin-top:10px"><input id="colorInvert" type="checkbox"><label>Invert the panel</label></div>
-   <label>Red: <span id="rgVal"></span>%</label>
+   <div class="chk" style="margin-top:10px"><input id="colorInvert" type="checkbox"><label>Farben invertieren</label></div>
+   <label>Rot: <span id="rgVal"></span>%</label>
    <input id="rGain" type="range" min="50" max="150" oninput="rgVal.textContent=this.value">
-   <label>Green: <span id="ggVal"></span>%</label>
+   <label>Grün: <span id="ggVal"></span>%</label>
    <input id="gGain" type="range" min="50" max="150" oninput="ggVal.textContent=this.value">
-   <label>Blue: <span id="bgVal"></span>%</label>
+   <label>Blau: <span id="bgVal"></span>%</label>
    <input id="bGain" type="range" min="50" max="150" oninput="bgVal.textContent=this.value">
-   <div style="margin-top:10px"><button class="btn sec" onclick="resetColors()">Reset to 100%</button></div>
-   <small class="hint">The panels shipped in these devices are not the same part, so the same firmware can look warm on one unit and green on another. Turn a channel down to pull that cast out. If red and blue come out swapped, switch the colour order; if the whole screen looks like a negative, tick Invert. Saving applies it immediately, so you can watch the screen while you adjust.</small>
+   <div style="margin-top:10px"><button class="btn sec" onclick="resetColors()">Auf 100 % zurücksetzen</button></div>
+   <small class="hint">Die Displays können Farben unterschiedlich darstellen. Passe die einzelnen Farbkanäle an, wenn das Bild einen Farbstich hat. Bei vertauschtem Rot und Blau ändere die Farbreihenfolge; bei einem Negativbild aktiviere die Invertierung. Änderungen werden direkt übernommen.</small>
   </div>
   <div class="card" id="buttonCard" style="display:none"><h2>Button</h2>
    <label>Short press</label>
@@ -404,10 +443,16 @@ function j(url,opt){return fetch(url,opt).then(function(r){return r.json().then(
 
 // tabs
 document.querySelectorAll('nav button').forEach(function(b){b.onclick=function(){
- document.querySelectorAll('nav button').forEach(function(x){x.classList.remove('active')});
- document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});
- b.classList.add('active');$(b.dataset.t).classList.add('active');
+ showTab(b.dataset.t);
 }});
+function showTab(id){
+ document.querySelectorAll('nav button').forEach(function(x){x.classList.toggle('active',x.dataset.t===id)});
+ document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('active',x.id===id)});
+}
+document.querySelectorAll('[data-go]').forEach(function(b){b.onclick=function(){showTab(b.dataset.go)}});
+var helpToggle=$('helpToggle'); if(helpToggle)helpToggle.onclick=function(){
+ var open=document.body.classList.toggle('show-help');helpToggle.textContent=open?'Hide tips':'Show tips';helpToggle.setAttribute('aria-expanded',open?'true':'false');
+};
 
 // field groups by their location in the nested config
 var T_TEXT=['webhookUrl','range'];                   // ticker strings
@@ -454,7 +499,7 @@ function hideFeat(name){
  var c=$(CAROPT[name]); if(c)c.closest('.chk').remove();
 }
 function modeChanged(){if(!$('mode'))return;
- $('carouselRow').style.display=$('mode').value==='carousel'?'block':'none';}
+ var row=$('carouselRow');if(row)row.style.display=$('mode').value==='carousel'?'block':'none';}
 
 // The AP password is never read back into the form, so a blank field cannot be
 // told apart from "the user cleared it". Blank therefore keeps the stored one,
@@ -472,6 +517,11 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  var f=c.features||{}; ['ticker','usage','radar','ha'].forEach(function(k){if(f[k]===false)hideFeat(k)});
  // WireGuard is only built for the chips with room for it; drop the card otherwise
  if(f.theme!==true){hideFeat('theme');var tc=$('themeCard');if(tc)tc.remove()}else{loadThemes()}
+ if(f.themePlaylist===true){var pc=$('themePlaylistCard');if(pc)pc.style.display='block';
+  var mc=$('modeCard');if(mc)mc.style.display='none';
+  var carousel=document.querySelector('#mode option[value="carousel"]');if(carousel)carousel.remove();
+  var cr=$('carouselRow');if(cr)cr.remove();
+ }
  if(f.wireguard===false){var wc=$('wgCard'); if(wc)wc.remove()}
  // Physical button card: only on boards that wire one
  if(f.button===true){var bc=$('buttonCard'); if(bc)bc.style.display='block';
@@ -508,10 +558,13 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('tz',ck.tz||''); sc('nightEnabled',!!ck.nightEnabled);
  sv('nightStart',ck.nightStart||'22:00'); sv('nightEnd',ck.nightEnd||'07:00');
  sv('nightLevel',ck.nightLevel!=null?ck.nightLevel:0); $('nlVal')&&($('nlVal').textContent=(ck.nightLevel!=null?ck.nightLevel:0));
- $('mode').value=c.mode||'stocks'; modeChanged();
+ $('mode').value=(f.themePlaylist===true&&c.mode==='carousel')?'theme':(c.mode||'stocks'); modeChanged();
  sv('carouselSec',c.carouselSec||30);
  sc('carouselTicker',c.carouselTicker!==false); sc('carouselUsage',c.carouselUsage!==false); sc('carouselRadar',c.carouselRadar!==false);
  sc('carouselHa',c.carouselHa!==false); sc('carouselTheme',c.carouselTheme===true);
+ var tp=c.themePlaylist||{};sc('themePlaylistEnabled',!!tp.enabled);
+ themePlaylistItems=Array.isArray(tp.items)?tp.items.map(function(x){return {id:String(x.id||''),seconds:Math.max(5,Math.min(3600,parseInt(x.seconds,10)||30))}}):[];
+ renderThemePlaylist();
  // HA / MQTT slice
  var h=c.ha||{};
  sv('haBrokerHost',h.brokerHost); sv('haBrokerPort',h.brokerPort||1883);
@@ -610,6 +663,9 @@ function collect(){
   display:{colorOrder:gv('colorOrder')||'auto', invert:gc('colorInvert'),
    rGain:parseInt(gv('rGain'))||100, gGain:parseInt(gv('gGain'))||100, bGain:parseInt(gv('bGain'))||100},
   wifi:collectWifi()};
+ if($('themePlaylistCard')&&$('themePlaylistCard').style.display!=='none'){
+  o.themePlaylist={enabled:gc('themePlaylistEnabled'),items:themePlaylistItems.map(function(x){return {id:x.id,seconds:x.seconds}})};
+ }
  // Web UI password: same blank-keeps-stored rule as everywhere else. The
  // firmware refuses to enable it without a stored password to check against.
  if($('authEnabled')){var _a={enabled:gc('authEnabled'), user:gv('authUser')||'admin'};
@@ -756,6 +812,10 @@ document.addEventListener('visibilitychange',function(){
 function showStatus(s){
  $('dot').className='dot'+(s.connected?' ok':'');
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
+ var pill=$('statusPill'); if(pill){pill.textContent=s.mode==='ap'?'Setup mode':(s.connected?'Connected':'Offline');pill.className='status-pill'+(s.mode==='ap'?' warn':(s.connected?' ok':''));}
+ var network=$('statusNetwork');if(network)network.textContent=s.mode==='ap'?'Setup hotspot':(s.connected?(s.ssid||'Connected'):'Not connected');
+ var address=$('statusAddress');if(address){address.href=location.origin;address.textContent=location.host||s.ip||'Open device';}
+ var uptime=$('statusUptime');if(uptime)uptime.textContent=fmtUp(s.uptime);
  var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&C.clock.nightEnabled)||C.mode==='theme'||!!(C.wg&&C.wg.enabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: enable night mode, a theme clock, or WireGuard to start NTP':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
  var fw=$('fwVer'); if(fw)fw.textContent=s.fw+' '+s.version;
  // Surface the result of a boot-time GitHub update (ESP8266) once on first load,
@@ -868,26 +928,64 @@ function factory(){if(confirm('Erase ALL settings and reboot?'))j('/api/factory'
 // OTA
 function themeRequest(path,body){return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'Theme request failed');return d})})}
 var themeEntries=[];
+var themePlaylistItems=[];
+function renderThemePlaylist(){
+ var add=$('themePlaylistAdd'),list=$('themePlaylistList');if(!add||!list)return;
+ add.textContent='';
+ var used={};themePlaylistItems.forEach(function(x){used[x.id]=true});
+ var blank=document.createElement('option');blank.value='';blank.textContent='Theme auswählen …';add.appendChild(blank);
+ themeEntries.forEach(function(t){if(t.valid===false||used[t.id])return;
+  var o=document.createElement('option');o.value=t.id;o.textContent=t.name+(t.version?' — '+t.version:'');add.appendChild(o)});
+ list.textContent='';
+ if(!themePlaylistItems.length){var empty=document.createElement('div');empty.className='muted';empty.textContent='Noch keine Themes in der Playlist.';list.appendChild(empty);return}
+ themePlaylistItems.forEach(function(item,index){
+  var row=document.createElement('div');row.className='net';row.style.cursor='default';row.style.alignItems='center';row.style.gap='8px';row.style.flexWrap='wrap';
+  var name=document.createElement('span');name.style.flex='1';name.style.minWidth='100px';
+  var found=themeEntries.find(function(t){return t.id===item.id});
+  name.textContent=(index+1)+'. '+(found?(found.name+(found.valid===false?' — invalid':'')):item.id);
+  var duration=document.createElement('input');duration.type='number';duration.min='5';duration.max='3600';duration.step='1';duration.value=item.seconds;duration.setAttribute('aria-label','Anzeigedauer in Sekunden');duration.style.width='88px';duration.style.flex='0 0 88px';
+  duration.onchange=function(){item.seconds=Math.max(5,Math.min(3600,parseInt(duration.value,10)||30));duration.value=item.seconds};
+  row.appendChild(name);row.appendChild(duration);
+  [['↑',-1,'Theme nach oben'],['↓',1,'Theme nach unten'],['×',0,'Theme entfernen']].forEach(function(spec){
+   var b=document.createElement('button');b.type='button';b.className='btn sec';b.textContent=spec[0];b.title=spec[2];b.style.padding='7px 10px';
+   if(spec[1]===-1&&index===0||spec[1]===1&&index===themePlaylistItems.length-1)b.disabled=true;
+   b.onclick=function(){if(spec[1]===0)themePlaylistItems.splice(index,1);else{var target=index+spec[1],swap=themePlaylistItems[target];themePlaylistItems[target]=themePlaylistItems[index];themePlaylistItems[index]=swap}renderThemePlaylist()};
+   row.appendChild(b);
+  });
+  list.appendChild(row);
+ });
+ var enabled=$('themePlaylistEnabled');if(enabled&&!themePlaylistItems.length)enabled.checked=false;
+}
+function themePlaylistToggle(){var enabled=$('themePlaylistEnabled');if(!enabled)return;
+ if(enabled.checked&&!themePlaylistItems.length){enabled.checked=false;toast('Füge zuerst mindestens ein gültiges Theme hinzu');return}
+ if(enabled.checked){sv('mode','theme');modeChanged()}
+}
+function themePlaylistAddItem(){var id=gv('themePlaylistAdd');if(!id)return;
+ if(themePlaylistItems.length>=8){toast('Die Playlist kann höchstens 8 Themes enthalten');return}
+ if(themePlaylistItems.some(function(x){return x.id===id})){toast('Dieses Theme ist bereits in der Playlist');return}
+ themePlaylistItems.push({id:id,seconds:30});renderThemePlaylist();
+}
 function themeChoiceChanged(){var select=$('themeSelect');if(!select)return;
  var theme=themeEntries.find(function(t){return t.id===select.value});
  $('themeUseBtn').disabled=!theme||theme.valid===false;
- $('themeDetails').textContent=!theme?'No theme selected':(theme.valid===false?'Invalid package: '+(theme.error||'Could not read theme')+' — remove it and install a corrected package.':theme.name+(theme.version?' · '+theme.version:'')+' · '+Math.ceil(theme.bytes/1024)+' KiB');
+ $('themeDetails').textContent=!theme?'Kein Theme ausgewählt':(theme.valid===false?'Ungültiges Paket: '+(theme.error||'Theme konnte nicht gelesen werden')+' — entferne es und installiere eine korrigierte Datei.':theme.name+(theme.version?' · '+theme.version:'')+' · '+Math.ceil(theme.bytes/1024)+' KiB');
 }
 function loadThemes(){return j('/api/themes').then(function(d){
  var select=$('themeSelect');if(!select)return;select.textContent='';themeEntries=d.themes||[];
- themeEntries.forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.valid===false?t.id+' — invalid package':t.name+' — '+t.version;select.appendChild(o)});
+ themeEntries.forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.valid===false?t.id+' — ungültiges Paket':t.name+' — '+t.version;select.appendChild(o)});
  if(d.selected)select.value=d.selected;
- $('themeStatus').textContent=themeEntries.length+' installed · '+Math.floor(d.freeBytes/1024)+' KiB free'+(d.error?' · '+d.error:'');
+ $('themeStatus').textContent=themeEntries.length+' installiert · '+Math.floor(d.freeBytes/1024)+' KiB frei'+(d.error?' · '+d.error:'');
  themeChoiceChanged();
+ renderThemePlaylist();
  }).catch(function(e){toast(e.message)})}
 function selectTheme(){var id=$('themeSelect').value;var theme=themeEntries.find(function(t){return t.id===id});
- if(!theme||theme.valid===false){toast('Choose a valid installed theme first');return}
- themeRequest('/api/themes/select',{id:id}).then(function(){C.mode='theme';C.themeId=id;sv('mode','theme');modeChanged();toast('Theme selected');loadThemes()}).catch(function(e){toast(e.message)})}
+ if(!theme||theme.valid===false){toast('Wähle zuerst ein gültiges installiertes Theme');return}
+ themeRequest('/api/themes/select',{id:id}).then(function(){C.mode='theme';C.themeId=id;sv('mode','theme');sc('themePlaylistEnabled',false);modeChanged();toast('Theme ausgewählt');loadThemes()}).catch(function(e){toast(e.message)})}
 function deleteTheme(){var id=$('themeSelect').value;if(!id)return;
- themeRequest('/api/themes/delete',{id:id}).then(function(){toast('Theme removed');loadThemes()}).catch(function(e){toast(e.message)})}
-function installTheme(){var f=$('themeFile').files[0];if(!f){toast('Choose a .stheme package');return}
- var data=new FormData();data.append('theme',f);$('themeUploadBtn').disabled=true;$('themeStatus').textContent='Installing…';
- fetch('/api/themes/install',{method:'POST',body:data}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'Install failed');return d})}).then(function(d){toast('Theme installed');return loadThemes().then(function(){$('themeSelect').value=d.id;themeChoiceChanged()})}).catch(function(e){$('themeStatus').textContent=e.message;toast(e.message)}).finally(function(){$('themeUploadBtn').disabled=false})}
+ themeRequest('/api/themes/delete',{id:id}).then(function(){themePlaylistItems=themePlaylistItems.filter(function(x){return x.id!==id});renderThemePlaylist();toast('Theme entfernt');loadThemes()}).catch(function(e){toast(e.message)})}
+function installTheme(){var f=$('themeFile').files[0];if(!f){toast('Wähle ein .stheme-Paket aus');return}
+ var data=new FormData();data.append('theme',f);$('themeUploadBtn').disabled=true;$('themeStatus').textContent='Installation läuft …';
+ fetch('/api/themes/install',{method:'POST',body:data}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'Installation fehlgeschlagen');return d})}).then(function(d){toast('Theme installiert');return loadThemes().then(function(){$('themeSelect').value=d.id;themeChoiceChanged()})}).catch(function(e){$('themeStatus').textContent=e.message;toast(e.message)}).finally(function(){$('themeUploadBtn').disabled=false})}
 
 function upload(){var f=$('fw').files[0];if(!f){toast('Pick a .bin first');return}
  var fd=new FormData();fd.append('firmware',f,f.name);

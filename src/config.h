@@ -12,12 +12,22 @@
 // ---------------------------------------------------------------------------
 // Firmware identity
 // ---------------------------------------------------------------------------
-#define FW_NAME     "smalltv-mod"
-#define FW_VERSION  "3.3.0"
+#if defined(SMALLTV_CLEAN)
+  #define FW_NAME    "smalltv-clean"
+  #define FW_VERSION "0.1.0"
+#else
+  #define FW_NAME    "smalltv-mod"
+  #define FW_VERSION "3.3.0"
+#endif
 
 // Project / update references (shown in the web UI; used by the GitHub self-update)
-#define REPO_URL      "https://github.com/giovi321/smalltv-mod"
-#define REPO_OWNER    "giovi321"
+#if defined(SMALLTV_CLEAN)
+  #define REPO_URL      "https://github.com/Jeff-Amdg/smalltv-mod"
+  #define REPO_OWNER    "Jeff-Amdg"
+#else
+  #define REPO_URL      "https://github.com/giovi321/smalltv-mod"
+  #define REPO_OWNER    "giovi321"
+#endif
 #define REPO_NAME     "smalltv-mod"
 // Release asset the GitHub self-updater pulls, and the short variant name shown
 // in the web UI. One app image per target, plus a second one for the two boards
@@ -42,6 +52,12 @@
 #elif defined(SMALLTV_ESP32)
   #define UPDATE_ASSET "smalltv-mod-firmware-esp32.bin"
   #define FW_VARIANT   "esp32"
+#elif defined(SMALLTV_CLEAN)
+  #define UPDATE_ASSET "smalltv-clean-firmware.bin"
+  #define FW_VARIANT   "esp8266-clean"
+#elif defined(SMALLTV_CUSTOM)
+  #define UPDATE_ASSET "smalltv-mod-firmware-custom.bin"
+  #define FW_VARIANT   "esp8266-custom"
 #elif defined(SMALLTV_LEAN)
   #define UPDATE_ASSET "smalltv-mod-firmware-lean.bin"
   #define FW_VARIANT   "esp8266-lean"
@@ -142,7 +158,11 @@
 #define MODE_NOTIFY    4             // transient overlay: armed over HTTP, never persisted
 #define MODE_THEME     6             // declarative installed clock faces
 #define MODE_HA        5             // Home Assistant screens pushed over MQTT
+#if defined(SMALLTV_CUSTOM)
+#define DEFAULT_MODE MODE_THEME
+#else
 #define DEFAULT_MODE MODE_STOCKS
+#endif
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
 // ---------------------------------------------------------------------------
@@ -248,10 +268,9 @@
 #define HA_DWELL_MAX_SEC      300
 
 // ---------------------------------------------------------------------------
-// Compile-time feature toggles. All shipping features are on by default; a lean
-// build drops one by setting e.g. -D WITH_RADAR=0 in a PlatformIO env, which
-// omits that feature's module from the registry and its web UI section.
-// (WITH_RADAR ships off until the radar module lands.)
+// Compile-time feature toggles. Shipping builds keep features enabled by
+// default; a PlatformIO environment can set a WITH_* flag to 0 to omit a
+// feature from the runtime registry and web UI.
 // ---------------------------------------------------------------------------
 #ifndef WITH_TICKER
 #define WITH_TICKER 1
@@ -426,4 +445,7 @@
 // platformio.ini) to keep the heap headroom it exists to protect.
 #ifndef WITH_THEME
 #define WITH_THEME 1
+#endif
+#ifndef WITH_THEME_PLAYLIST
+#define WITH_THEME_PLAYLIST 0
 #endif

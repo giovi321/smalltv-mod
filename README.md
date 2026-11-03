@@ -1,191 +1,67 @@
-<p align="center">
-  <img src="docs/src/assets/logo.svg" alt="smalltv-mod" width="96" />
-</p>
+# SmallTV Clean Image
 
-<h1 align="center">smalltv-mod</h1>
+**Ein schlankes, themenbasiertes Firmware-Image für GeekMagic SmallTV und SmallTV Ultra mit ESP8266.** Projektinhaber und Maintainer dieses Forks: **Jeff-Amdg** (GitHub).
 
-<p align="center">
-  <a href="https://github.com/giovi321/smalltv-mod/actions/workflows/build.yml"><img src="https://github.com/giovi321/smalltv-mod/actions/workflows/build.yml/badge.svg?branch=main&amp;event=push" alt="Build"></a>
-  <a href="https://github.com/giovi321/smalltv-mod/actions/workflows/docs.yml"><img src="https://github.com/giovi321/smalltv-mod/actions/workflows/docs.yml/badge.svg?branch=main&amp;event=push" alt="Docs"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-WTFPL-blue.svg" alt="License: WTFPL"></a>
-  <img src="https://img.shields.io/badge/platform-ESP8266%20%7C%20ESP32--C2%20%7C%20ESP32-informational" alt="ESP8266, ESP32-C2, and ESP32">
-</p>
+Dieses Projekt ist der von **Jeff-Amdg** gepflegte Fork von [smalltv-mod](https://github.com/giovi321/smalltv-mod). Es richtet die ESP8266-Firmware auf einen klaren Zweck aus: Das Display soll mit installierbaren `.stheme`-Designs als Büro-Uhr, Statusanzeige oder persönliches Mini-Dashboard dienen. Die Firmware liefert dafür WLAN, Weboberfläche, Theme-Engine, Playlist, Displaysteuerung und Wiederherstellung. Inhalte und Gestaltung kommen überwiegend aus Themes, sodass ein neues Zifferblatt keine neue Firmware erfordert.
 
-<p align="center">
-  <a href="https://giovi321.github.io/smalltv-mod/"><img src="https://img.shields.io/badge/Read_the_docs-2563eb?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Read the documentation"></a>
-</p>
+## Was im Image enthalten ist
 
-> Not affiliated with GeekMagic or Anthropic. This firmware replaces the stock firmware entirely.
+- **`.stheme`-Theme-Engine:** Themes installieren, auswählen und löschen. Die Firmware rendert unterstützte Bitmap-Grafiken, ASCII-Bitmap-Schrift, Uhrzeit, Datum, Text, Formen und einfache Animationen gemäß dem Theme-Format.
+- **Theme-Playlist:** Bis zu acht installierte Themes in einer gespeicherten Reihenfolge automatisch anzeigen. Für jeden Eintrag lässt sich die Anzeigedauer getrennt einstellen (5 bis 3600 Sekunden). Fehlende oder ungültige Themes werden übersprungen.
+- **WLAN und Weboberfläche:** Erstinstallation über den `SmallTV-Setup`-WLAN-Hotspot, danach Konfiguration im Browser über Gerätenamen oder IP-Adresse. Unterstützt 2,4-GHz-WLAN.
+- **Displaysteuerung:** Helligkeit, Ausrichtung, Farbkorrektur sowie Zeitzone und Nachtabschaltung konfigurieren.
+- **Firmwarepflege:** Firmware manuell über die Weboberfläche hochladen; Export und Import der Geräteeinstellungen.
+- **Recovery:** Nach wiederholten Abstürzen startet ein Schutzmodus. Ein separates, in die Firmware eingebettetes `recovery.stheme` wird angezeigt und bleibt von der normalen Theme-Auswahl getrennt.
 
-The GeekMagic SmallTV is a cheap desk gadget: a little cube with a 1.54" colour screen, an ESP inside, and a USB-C port. This firmware throws away the stock apps and turns it into three things you actually watch. It shows a **stock and crypto ticker** with prices, change, and a sparkline. It flips into a **Claude usage meter** with an animated mascot and your 5-hour and 7-day usage bars. And it becomes a **live plane radar** centred on your location, pulled from a free public feed. One image carries all three; you switch between them in a built-in web UI, and you update over WiFi.
+Ticker, Krypto-/Börsenkurse, Claude-Nutzungsanzeige, Flugradar, Home Assistant/MQTT und Benachrichtigungen sind aus diesem Image entfernt, um Funktionen und Speicherbedarf auf den Theme-Einsatz auszurichten. Das Clean Image baut für **ESP8266** (SmallTV und SmallTV Ultra); es ist kein Image für ESP32-Varianten.
 
-This firmware builds four images from one codebase, covering five devices. The original SmallTV runs an **ESP8266**; the **SmallTV-ultra** is the same ESP-12F hardware and screen, but its stock "Ultra" firmware and flash partitions block a normal OTA of this image, so it takes a two-step loader install (see [Flashing](#flashing)); a second version sold under the same "smart weather clock" look uses an **ESP32-C2 (ESP8684)** instead. A third build targets the **NMMiner NM-TV-154** (PCB marked "NM-TV-Miner"), a classic-ESP32 BTC lottery miner in the same cube with the same screen, confirmed working by a community tester in [issue #1](https://github.com/giovi321/smalltv-mod/issues/1). A fourth build targets the **GeekMagic SmallTV Pro**, a classic ESP32 with 8 MB flash and a touch button, confirmed working on hardware. Pick yours below.
+## Playlist verwenden
 
-<p align="center">
-  <img src="docs/public/assets/screen.svg" alt="The SmallTV running its three modes: stock ticker, Claude usage, and plane radar" width="900" />
-</p>
+1. Öffne die Geräteoberfläche und gehe zu **Display**.
+2. Installiere zuerst `.stheme`-Dateien im Bereich **Themes**.
+3. Füge die gewünschten installierten Themes der Playlist hinzu.
+4. Sortiere die Einträge mit den Pfeilen und trage pro Theme eine Dauer in Sekunden ein.
+5. Aktiviere die Playlist und speichere. Die Reihenfolge und Zeiten werden in der Gerätekonfiguration gesichert.
 
-<p align="center">
-  <img src="docs/public/assets/screen2.svg" alt="Three more SmallTV screens: a Home Assistant screen pushed over MQTT, a notification overlay, and the Pixel Room theme clock" width="900" />
-</p>
+Wenn die Playlist deaktiviert ist, zeigt die Firmware das einzeln ausgewählte Theme. Ist kein Playlist-Eintrag mehr gültig, fällt die Anzeige auf dieses ausgewählte Theme zurück.
 
-## Which one do I have
+## Installation
 
-Check the board before you build, because the variants flash differently.
+### SmallTV mit ESP8266
 
-| | SmallTV (ESP8266) | SmallTV-ultra | SmallTV (ESP32-C2) | NM-TV-154 (ESP32) | SmallTV Pro (ESP32) |
-|---|---|---|---|---|---|
-| Photo | <img src="docs/public/assets/product-8266.png" alt="The SmallTV (ESP8266)" width="240"> | <img src="docs/public/assets/product-ultra.png" alt="The SmallTV-ultra" width="240"> | <img src="docs/public/assets/product-c2.png" alt="The SmallTV (ESP32-C2)" width="240"> | <img src="docs/public/assets/product-esp32.png" alt="The NM-TV-154 (ESP32)" width="240"> | <img src="docs/public/assets/product-pro.png" alt="The GeekMagic SmallTV Pro" width="240"> |
-| MCU | ESP-12F (ESP8266), 4 MB flash | same ESP-12F (ESP8266), 4 MB flash | ESP32-C2 / ESP8684, 4 MB flash | ESP32-WROOM-32E, 4 MB flash | classic ESP32, 8 MB flash |
-| Build env | `smalltv`, or `smalltv_lean` | `smalltv` (same image, `smalltv_loader` to install) | `smalltv_c2` | `smalltv_esp32`, or `smalltv_esp32_wg` | `smalltv_esp32_8mb` |
-| Display | 1.54" 240×240 IPS ST7789 | same panel | same panel, RGB order | same panel | same panel |
-| Flashing | OTA from the stock web UI, or UART header | two-step [loader](#flashing) then OTA, or UART | USB-C via the onboard CH340C (esptool) | USB via esptool | OTA from the stock web UI, or UART header |
-| WireGuard VPN | no, the chip has neither the flash nor the heap | no, same chip | yes | yes, in the separate `-esp32-wg` image; the default image leaves it out to keep flash headroom | yes, the 8 MB layout has room to spare |
-| Tell-tale | ESP8266 module, no USB-serial chip | stock firmware branded "Ultra", OTA of this image fails with "Not Enough Space" | CH340C chip next to the USB-C port | PCB reads "NM-TV-Miner" | sold as "SmallTV Pro", touch button on top |
+Wenn die vorhandene Firmware einen manuellen Upload unterstützt, öffne deren Update-Seite, lade `smalltv-clean-firmware.bin` hoch und warte auf den Neustart. Die Clean-Firmware stellt anschließend den Hotspot `SmallTV-Setup` bereit, falls noch kein WLAN konfiguriert ist.
 
-The screens in the photos above are each unit's **stock firmware**, not this one, and they differ by model and firmware version (the ultra ships as a weather clock, the original as a ticker, and so on). Use the on-screen look as a first clue to which model you are holding, then confirm with the tell-tale row, because the binary and the install method differ per model. If your board has a **CH340C** chip beside the USB-C port and the main chip reads **ESP8684**, you have the ESP32-C2 model. Full teardown photos and pin maps are in [Hardware and variants](https://giovi321.github.io/smalltv-mod/getting-started/hardware/).
+### SmallTV Ultra
 
-## What it does
+Das Ultra verwendet ebenfalls einen ESP8266, aber die originale Ultra-Firmware reserviert einen großen Teil des Flash-Speichers für eigene Inhalte. Daher kann ihr Update-Dialog ein vollständiges Firmware-Image mit „Not Enough Space“ ablehnen. Für die Erstinstallation wird in diesem Fall einmalig der vorhandene SmallTV-Loader benötigt. Danach kann das Image über die Clean-Weboberfläche manuell aktualisiert werden. Prüfe vor dem Flashen Modell und Installationsweg; ein falsches Image kann das Gerät unbrauchbar machen.
 
-- **Stock and crypto ticker.** Price, absolute change, percent change with an up/down arrow, and a sparkline. Up to 8 symbols rotate on a timer. Data comes straight from Yahoo Finance over HTTPS with no backend, from cash.ch for Swiss instruments Yahoo doesn't carry (structured products, AMCs, tracker certificates), or from your own webhook if you want to own the source. Stocks, ETFs, Swiss equities (`NESN.SW`), crypto (`BTC-USD`), and FX (`EURUSD=X`) all work. Add a quantity and cost basis to any ticker and it shows your P/L, with a portfolio summary page in the rotation.
-- **Claude usage meter.** An animated pixel mascot plus your 5-hour and 7-day usage as big percentages with fill bars and reset countdowns. It needs the [clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon) running on your PC, which reads the usage and sends it over WiFi; the screen shows only an idle animation without it. When the data stops, the mascot plays an idle animation until it comes back. Plans without a 5-hour limit can hide that card in the web UI and get a single 7-day layout with an even-pace marker. Running several devices, the daemon discovers them over mDNS and pushes to all of them.
-- **Plane radar.** A scope centred on your location with nearby aircraft as heading triangles, speed vectors, and callsign or altitude labels, from the free [adsb.lol](https://adsb.lol) or [adsb.fi](https://adsb.fi) APIs or a LAN webhook. Marker size, an altitude filter, and label decluttering are configurable.
-- **Home Assistant screens over MQTT.** Publish a small JSON draw list to a LAN broker and the device shows it as a full 240×240 screen. Each carousel slot gets one retained message, and the device rotates through them. Not included in the lean ESP8266 image. See [Home Assistant screens](https://giovi321.github.io/smalltv-mod/features/ha/).
-- **Custom theme clocks.** Install declarative `.stheme` packages from the Display tab: background images, animated sprites, clock/date text, scrolling text, simple and rounded shapes, and bounded JSON data fields such as `{weather.temp}`. Themes live in storage and need no firmware recompilation. Notifications remain above them. Design your own in [SmallTV Studio](https://giovi321.github.io/smalltv-studio/), a browser-based editor that runs with nothing to install, or start from [Pixel Room](examples/themes/pixel-room.stheme). Follow the [theme authoring guide](https://giovi321.github.io/smalltv-mod/features/themes/).
-- **Web UI for everything.** Join WiFi (up to 4 saved networks), pick the mode or a carousel that rotates through them, manage the symbol list, set brightness, orientation, and the panel's colour balance, set an NTP timezone and a nightly dimming schedule (night brightness, 0 = screen off), and back up or restore the whole configuration as a file. First boot creates a `SmallTV-Setup` hotspot with a captive portal.
-- **WireGuard VPN, on the ESP32-C2, the SmallTV Pro and the NM-TV-154.** A built-in tunnel, so you can reach the device from outside your LAN without forwarding its plain-HTTP port to the internet. Configured in the WiFi tab: private key, peer public key, endpoint, tunnel address, allowed IPs. Three crash reboots in a row hold the tunnel down at the next boot, so a bad tunnel config cannot lock you out of the settings page. The ESP8266 boards cannot have it at all, and on the NM-TV-154, whose image is the tightest fit of the three ESP32 boards, it ships as a second image rather than in the default one. See [WireGuard VPN](https://giovi321.github.io/smalltv-mod/features/wireguard/) for the numbers.
-- **Physical touch button, on the classic-ESP32 boards (SmallTV Pro and NM-TV-154).** The capacitive button (GPIO32, touch channel T9) reads as pressed when its `touchRead()` value drops below a share of an idle baseline calibrated at boot, so no fixed threshold is hard-coded; a median-of-three read plus hysteresis and a debounce reject touch glitches. A short tap and a long press (held ≥ 600 ms) each run a configurable action, chosen in the Button card of the web UI: do nothing, blink the screen off for ~1 s, jump Home (first page, resume the carousel), go to the Next page (pausing the carousel on it), show the network / IP screen briefly, wake the screen to full brightness for a few seconds (lifting the nightly dimming), or acknowledge the active notification overlay so it clears at once. The touch sensitivity (50–99 % of the baseline) is adjustable there too, and the card only appears on a board that wires a button.
-- **Optional password on the web UI.** Off by default, so nothing changes unless you want it to. Turn it on in the System tab and the settings page, the API, and the firmware upload all sit behind HTTP digest auth, which keeps the password off the wire on a plain-HTTP LAN. The clawdmeter push endpoint stays open, since the daemon cannot send credentials and can only change what the screen shows. There is no recovery for a forgotten password other than reflashing over a cable.
-- **Updates over WiFi.** Every board pulls the newest release from GitHub itself from the web UI's System tab, or takes a manual firmware upload from the browser. On the ESP8266 the download runs at boot (the device reboots twice). **Warning: ESP8266 devices on firmware 2.6.1 or older cannot self-update** (the updater itself was broken; it fails with "connection failed"). Update those once manually: upload `smalltv-mod-firmware.bin` from the [Releases page](https://github.com/giovi321/smalltv-mod/releases) in the System tab. From 2.7.0 on, self-update works everywhere.
+Nach dem Flashen mit dem WLAN `SmallTV-Setup` verbinden. Wenn das Einrichtungsportal nicht automatisch öffnet, `http://192.168.4.1` aufrufen, das eigene 2,4-GHz-WLAN eintragen und danach die im Display angezeigte Geräteadresse im Browser öffnen.
 
-## Design your own clock face
+## Image bauen
 
-[SmallTV Studio](https://github.com/giovi321/smalltv-studio) is a visual editor for theme clocks. [Open it in your browser](https://giovi321.github.io/smalltv-studio/): nothing to install, and nothing leaves your machine except what you send to your own SmallTV. Stack text, image, animation, and shape layers on a 240×240 canvas, preview the clock at any simulated time, bind fields to JSON data sources, then export a `.stheme` package or send it straight to the device over WiFi. Pixel Room, Terminal Ops, and Live Status load as examples to start from.
+Voraussetzung: PlatformIO Core oder die PlatformIO-Erweiterung für VS Code.
 
-<p align="center">
-  <a href="https://giovi321.github.io/smalltv-studio/"><img src="docs/public/assets/studio.png" alt="SmallTV Studio editing the Pixel Room theme: layer list, live 240×240 canvas, and the clock layer's inspector" width="900" /></a>
-</p>
-
-<p align="center">
-  <a href="https://giovi321.github.io/smalltv-studio/"><img src="https://img.shields.io/badge/Open_SmallTV_Studio-22c55e?style=for-the-badge&logoColor=white" alt="Open SmallTV Studio"></a>
-</p>
-
-## Get the firmware
-
-You do not need a toolchain. GitHub Actions builds the images for all the boards.
-
-- Every push: the **Actions** tab, latest `build` run, download the firmware artifact.
-- Tagged releases (`vX.Y.Z`): attached to the [Releases](../../releases) page.
-
-Eleven files come with each release. Pick by board first, then by whether you are installing for the first time or updating:
-
-| File | Board | Use it for |
-|------|-------|-----------|
-| `smalltv-mod-firmware.bin` | SmallTV, SmallTV-ultra (ESP8266) | The normal install and every later update |
-| `smalltv-mod-firmware-lean.bin` | Same ESP8266 boards | The same device when it needs more heap. HA screens and the usage meter are compiled out |
-| `smalltv-mod-loader.bin` | SmallTV-ultra (ESP8266) | One-time first install when the stock updater rejects the full image |
-| `smalltv-mod-firmware-c2.bin` | SmallTV (ESP32-C2) | Updates |
-| `smalltv-mod-firmware-c2.factory.bin` | SmallTV (ESP32-C2) | First install over USB-C |
-| `smalltv-mod-firmware-esp32.bin` | NM-TV-154 (ESP32) | Updates |
-| `smalltv-mod-firmware-esp32.factory.bin` | NM-TV-154 (ESP32) | First install over USB |
-| `smalltv-mod-firmware-esp32-wg.bin` | NM-TV-154 (ESP32) | The same board when you want the WireGuard tunnel. Updates |
-| `smalltv-mod-firmware-esp32-wg.factory.bin` | NM-TV-154 (ESP32) | The same, first install over USB |
-| `smalltv-mod-firmware-esp32-pro.bin` | SmallTV Pro (ESP32, 8 MB) | First install over the stock web UI, and every later update |
-| `smalltv-mod-firmware-esp32-pro.factory.bin` | SmallTV Pro (ESP32, 8 MB) | Direct install or recovery over the UART header |
-
-The names follow one pattern, `smalltv-mod-<image>[-<target>][.factory].bin`. No target suffix means the original ESP8266; `-lean`, `-c2`, `-esp32`, `-esp32-wg`, and `-esp32-pro` name the others. A `.factory` image is the merged bootloader, partition table, and app, written at offset `0x0` over a cable; without it the file is an app image sized for an OTA slot. The System tab shows which variant a device runs, and self-update keeps it on that variant. Full detail in [Which release file to download](https://giovi321.github.io/smalltv-mod/reference/release-assets/).
-
-Or [build it yourself](#building-from-source).
-
-## Flashing
-
-The right method depends on your board. The steps below are the short version; the [Flashing guide](https://giovi321.github.io/smalltv-mod/getting-started/flashing/) covers recovery, backups, and troubleshooting.
-
-**SmallTV (ESP8266).** The stock firmware exposes an OTA updater, so you can install this without opening the device. Find its IP, browse to `http://<device-ip>/update`, and upload `smalltv-mod-firmware.bin`, or `smalltv-mod-firmware-lean.bin` for the build that trades Home Assistant screens and the usage meter for 8,732 bytes of heap. Back up the stock image first if you might want it back.
-
-**SmallTV-ultra.** Same ESP8266 hardware, but the stock "Ultra" firmware reserves most of the flash for image storage, so its OTA slot is too small for `smalltv-mod-firmware.bin` and rejects it with `Not Enough Space`. Install in two steps, no soldering: flash `smalltv-mod-loader.bin` at `http://<device-ip>/update` (it fits the small slot), join the open `SmallTV-Loader` AP it opens at `192.168.4.1`, then upload `smalltv-mod-firmware.bin` at `http://192.168.4.1/update`. UART is the fallback (`esptool write_flash 0x0 smalltv-mod-firmware.bin`).
-
-**SmallTV (ESP32-C2).** Flash over the USB-C cable with esptool, which talks to the onboard CH340C. Auto-reset works, so no button is needed. Back up the stock image first, then write `smalltv-mod-firmware-c2.factory.bin` from the [Releases](../../releases) page:
-
-```bash
-# back up the original 4 MB image first
-python -m esptool --chip esp32c2 --port COM3 read_flash 0x0 0x400000 stock-backup.bin
-
-# write this firmware (merged image at 0x0)
-python -m esptool --chip esp32c2 --port COM3 --baud 921600 write_flash 0x0 smalltv-mod-firmware-c2.factory.bin
+```powershell
+pio run -e smalltv_clean
 ```
 
-**NM-TV-154 (ESP32).** Flash over USB with esptool the same way as the C2, with `--chip esp32` and `smalltv-mod-firmware-esp32.factory.bin` from the [Releases](../../releases) page (or a local `pio run -e smalltv_esp32` build). Back up the stock image first (`read_flash 0x0 0x400000 stock-backup.bin`).
+Das fertige Image liegt hier:
 
-**SmallTV Pro (ESP32, 8 MB).** No USB-serial chip: the USB-C port is power only. Install over the air from the stock web UI: browse to `http://<device-ip>/update` and upload `smalltv-mod-firmware-esp32-pro.bin` (this firmware's partition layout matches stock, so the stock updater takes it directly). To back up the stock image first (recommended, since it is not redistributed anywhere), or to recover, open the case and wire a 3.3 V USB-UART adapter to the internal header: `read_flash 0x0 0x800000 stock-backup.bin`, and `write_flash 0x0 smalltv-mod-firmware-esp32-pro.factory.bin` for a direct install.
-
-After the first flash, every board updates from the browser under the web UI's System tab.
-
-## First-time setup
-
-1. On first boot the device shows **SETUP MODE** and creates an open `SmallTV-Setup` hotspot.
-2. Join it. A captive portal should open; if not, browse to `http://192.168.4.1`.
-3. Open **WiFi**, scan, pick your 2.4 GHz network, enter the password, and save. The device reboots and joins.
-4. It shows the network, its IP, and its `http://<hostname>.local` address on screen. Browse to either one.
-5. Add a few tickers under **Ticker** (for example `AAPL`, `NESN.SW`, `BTC-USD`). Each ticker picks its own source; Yahoo Finance is the default, so it works immediately.
-
-The [First-time setup guide](https://giovi321.github.io/smalltv-mod/getting-started/setup/) walks through the web UI tab by tab.
-
-## Documentation
-
-Full docs live at **[giovi321.github.io/smalltv-mod](https://giovi321.github.io/smalltv-mod/)**:
-
-- Received one already set up (as a gift, say)? Start at the [user manual](https://giovi321.github.io/smalltv-mod/manual/quick-start/) instead, no technical background assumed
-- [Hardware and variants](https://giovi321.github.io/smalltv-mod/getting-started/hardware/) with pin maps for every board
-- [Flashing](https://giovi321.github.io/smalltv-mod/getting-started/flashing/) and [first-time setup](https://giovi321.github.io/smalltv-mod/getting-started/setup/)
-- The three modes: [ticker](https://giovi321.github.io/smalltv-mod/features/ticker/), [Claude usage](https://giovi321.github.io/smalltv-mod/features/usage/), [plane radar](https://giovi321.github.io/smalltv-mod/features/radar/)
-- [WireGuard VPN](https://giovi321.github.io/smalltv-mod/features/wireguard/) for reaching the device from outside your network, and [Notifications](https://giovi321.github.io/smalltv-mod/features/notify/) for pushing an alert to the screen
-- [Theme clocks](https://giovi321.github.io/smalltv-mod/features/themes/), designed in [SmallTV Studio](https://giovi321.github.io/smalltv-studio/)
-- [Data sources](https://giovi321.github.io/smalltv-mod/reference/data-sources/), [building from source](https://giovi321.github.io/smalltv-mod/reference/building/), and [recovery](https://giovi321.github.io/smalltv-mod/reference/recovery/)
-
-## 3D-printed case
-
-A flat desk case with a stand lives in [case/](case/): an STL ready to slice, plus a preview render.
-
-## Building from source
-
-Requires [PlatformIO](https://platformio.org/). Pick the env for your board:
-
-```bash
-pio run -e smalltv                 # ESP8266
-pio run -e smalltv_lean            # ESP8266, without HA screens or the usage meter
-pio run -e smalltv_c2              # ESP32-C2
-pio run -e smalltv_esp32           # NM-TV-154 (classic ESP32)
-pio run -e smalltv_esp32_wg        # the same, with the WireGuard client
-pio run -e smalltv_esp32_8mb       # SmallTV Pro (classic ESP32, 8 MB)
-pio run -e smalltv_c2 -t upload    # build + flash the C2 over USB-C
-pio device monitor -e smalltv_c2   # serial logs @ 115200
+```text
+.pio/build/smalltv_clean/firmware.bin
 ```
 
-The six images build from one codebase. Chip differences live in `src/Platform.h` and the per-board pin headers (`src/board_esp8266.h`, `src/board_esp32c2.h`, `src/board_esp32.h`, `src/board_esp32_pro.h`); the three feature modes and the web UI are identical across all of them. `src/Target.h` checks that each env selects exactly one chip, and CI fails any image left with less than 8 KB free in its update slot. See [Building from source](https://giovi321.github.io/smalltv-mod/reference/building/) for the project layout and the ESP32 toolchain notes.
+GitHub Actions baut dasselbe Ziel. Ein veröffentlichtes Release-Image erscheint als `smalltv-clean-firmware.bin`. Bis ein solches Release vorhanden ist, kann das lokal gebaute `firmware.bin` über den manuellen Firmware-Upload installiert werden.
 
-The PC-side usage daemon lives in its own repo: [clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon).
+## Projekt, Maintainer und Beiträge
 
-## Related projects
+- Maintainer und Projektinhaber dieses Forks: [Jeff-Amdg auf GitHub](https://github.com/Jeff-Amdg)
+- Quellcode und Änderungen: [Jeff-Amdg/smalltv-mod auf GitHub](https://github.com/Jeff-Amdg/smalltv-mod)
+- Grundlage und ursprüngliches Projekt: [giovi321/smalltv-mod](https://github.com/giovi321/smalltv-mod)
+- Theme-Dateien und Recovery-Beispiel: [`examples/`](examples/)
 
-[SmallTV Pomodoro](https://github.com/davicorrea0/smalltv-pomodoro) is a separate alternative firmware for the SmallTV-ultra (ESP8266): a Pomodoro timer with a pixel-art tomato, installable clock faces, a weather forecast, a photo and GIF album, and a web panel in English, Portuguese, and Spanish. It replaces the stock firmware the same way this one does, so a device runs one or the other. The two projects are working on a shared theme format, so that a clock face designed in [SmallTV Studio](https://giovi321.github.io/smalltv-studio/) runs on both ([#31](https://github.com/giovi321/smalltv-mod/issues/31)). SmallTV Pomodoro is GPL-3.0 licensed.
+Fehlerberichte sollten das genaue SmallTV-Modell, den installierten Image-Namen und die Schritte zur Reproduktion enthalten. Bitte keine WLAN-Passwörter oder privaten Konfigurationsdateien veröffentlichen.
 
-## Credits and references
+## Lizenz
 
-- GeekMagic SmallTV and SmallTV-Pro, the original product and stock firmware ([GeekMagicClock/smalltv-pro](https://github.com/GeekMagicClock/smalltv-pro)).
-- Pin maps and hardware notes from the ESPHome and Tasmota communities:
-  - [ViToni/esphome-geekmagic-smalltv](https://github.com/ViToni/esphome-geekmagic-smalltv)
-  - [Installing ESPHome on a new smart weather clock (HA community)](https://community.home-assistant.io/t/installing-esphome-on-new-smart-weather-clock-wifi-weather-station-display/1006172), which documented the ESP32-C2 pin map
-  - [Puddle of Code, My Own GeekMagic SmallTV](https://puddleofcode.com/story/my-own-geekmagic-smalltv/)
-  - [NMMiner's NM-TV-154 custom firmware guide](https://www.nmminer.com/2026/03/02/how-to-develop-nm-tv-custom-firmware/), which documents the NM-TV-154 pin map
-- The plane radar's look reimplements [MatixYo/ESP32-Plane-Radar](https://github.com/MatixYo/ESP32-Plane-Radar), a sonar-style ADS-B radar for a 1.28" round display: heading triangles, speed vectors, callsign and altitude tags, and rim dots for out-of-range traffic all come from that design.
-- Claude usage mode reimplements [clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) for this hardware; the mascot frames come from [claudepix](https://claudepix.vercel.app).
-- Libraries: [Arduino_GFX](https://github.com/moononournation/Arduino_GFX), [ArduinoJson](https://arduinojson.org/).
-
-## Disclaimer
-
-This firmware and the companion daemon are provided as-is, with no warranty of any kind. You flash and use them at your own risk, including the risk of bricking the device. You are responsible for checking that your use complies with the terms of any service it connects to, including Anthropic's terms for the Claude usage meter and the terms of the market and flight data feeds. Nothing in this repo is legal advice. This project is not affiliated with or endorsed by GeekMagic, Anthropic, or any data provider.
-
-## License
-
-[WTFPL](LICENSE). Do What The F*ck You Want To Public License.
+Die Lizenzbedingungen des zugrunde liegenden Projekts stehen in [LICENSE](LICENSE). Theme-Dateien können eigene Urheber- und Lizenzangaben haben.

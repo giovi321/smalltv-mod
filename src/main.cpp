@@ -1,14 +1,16 @@
 // smalltv-mod — custom firmware for the GeekMagic SmallTV (ESP-12F / ESP8266)
 //
-// Three features, each a self-contained DisplayMode (see Mode.h), picked in the
-// web UI and dispatched from the registry below:
+// Display features are self-contained DisplayMode implementations (see Mode.h),
+// selected at build time and dispatched from the registry below:
 //   - Ticker (features/ticker):  stock/crypto price, % change, sparkline.
 //   - Usage  (features/usage):   Claude 5h/7d usage bars + animated mascot.
-//   - Radar  (features/radar):   live ADS-B plane radar (compiled in when WITH_RADAR).
+//   - Radar  (features/radar):   live ADS-B plane radar.
+//   - HA / themes:               pushed MQTT screens and declarative clock faces.
 // Shared plumbing (WiFi, web UI, OTA, display core, settings) lives at src root.
 //
 // License: WTFPL
 #include <Arduino.h>
+#include <stdio.h>
 #include "Platform.h"
 #include "config.h"
 #include "Settings.h"
@@ -71,9 +73,15 @@ static bool     g_carPaused = false;   // button paused the auto-rotation (stays
 
 static bool carouselHas(const Settings& s, const DisplayMode* m) {
   switch (m->modeConst()) {
+#if WITH_TICKER
     case MODE_STOCKS: return s.carouselTicker;
+#endif
+#if WITH_USAGE
     case MODE_USAGE:  return s.carouselUsage;
+#endif
+#if WITH_RADAR
     case MODE_RADAR:  return s.carouselRadar;
+#endif
 #if WITH_HA
     case MODE_HA:     return s.carouselHa;
 #endif
@@ -114,9 +122,98 @@ static DisplayMode* activeMode(const Settings& s) {
   return kModeCount ? kModes[0] : nullptr;   // fall back to the first compiled mode
 }
 
+#if WITH_THEME_PLAYLIST
+// Playlist state stays small and transient; only the ordered IDs/durations
+// live in Settings and survive reboot.
+static uint8_t  g_themePlaylistIndex = 0;
+static uint8_t  g_themePlaylistVisited = 0;
+static uint32_t g_themePlaylistSince = 0;
+static bool     g_themePlaylistRunning = false;
+static bool     g_themePlaylistStopped = false;
+
+static void themePlaylistReset() {
+  g_themePlaylistIndex = 0;
+  g_themePlaylistVisited = 0;
+  g_themePlaylistSince = 0;
+  g_themePlaylistRunning = false;
+  g_themePlaylistStopped = false;
+  g_themeMode.setPlaylistTheme(nullptr);
+}
+
+static bool themePlaylistSelectNext(const Settings& s, bool skipVisited) {
+  const uint8_t count = s.themePlaylistCount;
+  if (!count) return false;
+  for (uint8_t hop = 1; hop <= count; ++hop) {
+    uint8_t candidate = (g_themePlaylistIndex + hop) % count;
+    uint8_t bit = uint8_t(1u << candidate);
+    if (skipVisited && (g_themePlaylistVisited & bit)) continue;
+    char path[64];
+    snprintf(path, sizeof(path), "/themes/%s.stheme", s.themePlaylist[candidate].id);
+    if (!LittleFS.exists(path)) {
+      g_themePlaylistVisited |= bit;
+      continue;
+    }
+    g_themePlaylistIndex = candidate;
+    g_themePlaylistVisited |= bit;
+    g_themePlaylistSince = 0;  // dwell starts only after the theme loads
+    g_themePlaylistRunning = true;
+    g_themeMode.setPlaylistTheme(s.themePlaylist[candidate].id);
+    return true;
+  }
+  return false;
+}
+
+static void themePlaylistService(const Settings& s) {
+  bool enabled = s.mode == MODE_THEME && s.themePlaylistEnabled && s.themePlaylistCount;
+  if (!enabled) {
+    if (g_themePlaylistRunning || g_themePlaylistStopped) themePlaylistReset();
+    return;
+  }
+  if (g_themePlaylistStopped) return;
+  if (!g_themePlaylistRunning) {
+    // Start at the beginning on enable, after leaving another display mode,
+    // or after a settings save.
+    g_themePlaylistIndex = s.themePlaylistCount - 1;
+    g_themePlaylistVisited = 0;
+    if (!themePlaylistSelectNext(s, true)) {
+      g_themeMode.setPlaylistTheme(nullptr);
+      g_themePlaylistStopped = true;
+    }
+    return;
+  }
+  if (g_themeMode.playlistLoadFailed()) {
+    // A corrupt package is skipped immediately. If every remaining entry is
+    // missing or invalid, stop the playlist and fall back to the chosen theme.
+    if (!themePlaylistSelectNext(s, true)) {
+      g_themeMode.setPlaylistTheme(nullptr);
+      g_themePlaylistRunning = false;
+      g_themePlaylistStopped = true;
+    }
+    return;
+  }
+  if (!g_themeMode.playlistReady()) return;  // wait for memory or package load
+  g_themePlaylistVisited = uint8_t(1u << g_themePlaylistIndex);
+  if (!g_themePlaylistSince) g_themePlaylistSince = millis();
+  uint32_t dwell = (uint32_t)s.themePlaylist[g_themePlaylistIndex].seconds * 1000UL;
+  if (millis() - g_themePlaylistSince < dwell) return;
+  if (!themePlaylistSelectNext(s, false)) {
+    g_themeMode.setPlaylistTheme(nullptr);
+    g_themePlaylistRunning = false;
+    g_themePlaylistStopped = true;
+  }
+}
+#endif
+
 static Settings g_settings;
 static String   g_resetReason;        // why the chip last reset (diagnostics)
-static bool     g_safeMode = false;   // last reset was an exception -> don't re-enter the crash
+static bool     g_safeMode = false;   // last reset was a crash -> don't re-enter the crash path
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+static bool     g_fallbackTheme = false;
+static bool     g_nativeRecovery = false;
+static bool     g_recoveryAttemptMarked = false;
+static uint8_t  g_crashStreak = 0;
+static uint32_t g_bootStartedAt = 0;
+#endif
 static char     g_epcStr[16] = "";
 static char     g_addrStr[16] = "";
 static int g_lastBr = -1;        // last effective brightness written (-1 = none yet)
@@ -124,6 +221,89 @@ static uint32_t g_btnWakeUntil = 0;  // button wake overrides dimming until this
 #if HAS_LDR
 static uint32_t g_lastAutoBr = 0;
 static uint8_t  g_ldrCache   = DEFAULT_BRIGHTNESS;   // last LDR reading (2 s cadence)
+#endif
+
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+// RTC user memory survives exception/watchdog restarts without wearing flash.
+// The first 128 bytes of the user area are reserved by eboot for OTA commands,
+// so this record starts at word offset 32 (byte offset 128).
+static constexpr uint32_t CrashRecordOffset = 32;
+static constexpr uint32_t CrashRecordMagic = 0x53545643UL;  // "STVC"
+static constexpr uint32_t CrashRecordSalt = 0x91C4A72BUL;
+static constexpr uint8_t  CrashFallbackAfter = 3;
+static constexpr uint32_t StableBootMs = 60000UL;
+struct CrashRecord {
+  uint32_t magic;
+  uint32_t state;  // low byte: streak; bit 8: recovery theme already attempted
+  uint32_t check;
+};
+static constexpr uint32_t CrashRecoveryThemeAttempted = 1UL << 8;
+static constexpr uint32_t CrashStateMask = 0xFFUL | CrashRecoveryThemeAttempted;
+static uint32_t crashRecordCheck(uint32_t state) {
+  return CrashRecordMagic ^ state ^ CrashRecordSalt;
+}
+static void crashGuardBegin(bool crashed) {
+  CrashRecord record{};
+  uint32_t count = 0;
+  uint32_t state = 0;
+  bool valid = ESP.rtcUserMemoryRead(CrashRecordOffset,
+      reinterpret_cast<uint32_t*>(&record), sizeof(record)) &&
+      record.magic == CrashRecordMagic && !(record.state & ~CrashStateMask) &&
+      (record.state & 0xFFUL) <= CrashFallbackAfter &&
+      record.check == crashRecordCheck(record.state);
+  if (valid) {
+    state = record.state;
+    count = state & 0xFFUL;
+  }
+  if (crashed && count < CrashFallbackAfter) ++count;
+  state = (state & CrashRecoveryThemeAttempted) | count;
+  g_crashStreak = static_cast<uint8_t>(count);
+  g_fallbackTheme = count >= CrashFallbackAfter;
+  g_nativeRecovery = g_fallbackTheme && (state & CrashRecoveryThemeAttempted);
+  if (crashed) {
+    record.magic = CrashRecordMagic;
+    record.state = state;
+    record.check = crashRecordCheck(state);
+    ESP.rtcUserMemoryWrite(CrashRecordOffset,
+        reinterpret_cast<uint32_t*>(&record), sizeof(record));
+  }
+}
+static void crashGuardMarkRecoveryThemeAttempted() {
+  if (g_recoveryAttemptMarked || g_nativeRecovery) return;
+  CrashRecord record{};
+  bool valid = ESP.rtcUserMemoryRead(CrashRecordOffset,
+      reinterpret_cast<uint32_t*>(&record), sizeof(record)) &&
+      record.magic == CrashRecordMagic && (record.state & 0xFFUL) == CrashFallbackAfter &&
+      !(record.state & ~CrashStateMask) && record.check == crashRecordCheck(record.state);
+  if (!valid) {
+    record.magic = CrashRecordMagic;
+    record.state = g_crashStreak;
+  }
+  record.state |= CrashRecoveryThemeAttempted;
+  record.check = crashRecordCheck(record.state);
+  ESP.rtcUserMemoryWrite(CrashRecordOffset,
+      reinterpret_cast<uint32_t*>(&record), sizeof(record));
+  g_recoveryAttemptMarked = true;
+}
+static void crashGuardService() {
+  // A recovery boot stays out of the selected theme, but a clean recovery boot
+  // can still age out the crash streak after a minute so the next reboot retries it.
+  if ((g_safeMode && !g_fallbackTheme) || !g_crashStreak ||
+      millis() - g_bootStartedAt < StableBootMs) return;
+  CrashRecord record{CrashRecordMagic, 0, crashRecordCheck(0)};
+  ESP.rtcUserMemoryWrite(CrashRecordOffset,
+      reinterpret_cast<uint32_t*>(&record), sizeof(record));
+  g_crashStreak = 0;
+}
+void appClearCrashStreak() {
+  CrashRecord record{CrashRecordMagic, 0, crashRecordCheck(0)};
+  ESP.rtcUserMemoryWrite(CrashRecordOffset,
+      reinterpret_cast<uint32_t*>(&record), sizeof(record));
+  g_crashStreak = 0;
+  g_fallbackTheme = false;
+  g_nativeRecovery = false;
+  g_recoveryAttemptMarked = false;
+}
 #endif
 
 // Single brightness resolver: night mode overrides auto-brightness overrides the
@@ -275,6 +455,9 @@ const char* appResetReason() { return g_resetReason.c_str(); }
 // Called by the web portal after settings are applied: re-init every mode and
 // force a fresh repaint so a mode/URL/symbol change takes effect immediately.
 void appInvalidate() {
+#if WITH_THEME_PLAYLIST
+  themePlaylistReset();
+#endif
   for (size_t i = 0; i < kModeCount; i++) kModes[i]->invalidate(g_settings);
 }
 
@@ -289,6 +472,9 @@ static void bootProgress(const char* msg) {
 }
 
 void setup() {
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  g_bootStartedAt = millis();
+#endif
   Serial.begin(115200);
   Serial.println();
   Serial.println(FW_NAME " " FW_VERSION);
@@ -312,6 +498,10 @@ void setup() {
   } else {
     g_resetReason = pr.reason;
   }
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  crashGuardBegin(pr.wasCrash);
+  if (g_fallbackTheme) g_safeMode = true;
+#endif
 
   Serial.println("[boot] settings");
   settingsBegin();
@@ -359,10 +549,17 @@ void setup() {
 
   Serial.println("[boot] modes");
   for (size_t i = 0; i < kModeCount; i++) kModes[i]->begin(g_settings);
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  if (g_fallbackTheme && !g_nativeRecovery) g_themeMode.useRecoveryTheme(g_crashStreak);
+#endif
   Serial.println("[boot] done");
 
   if (netMode() == NET_AP) {
     gfxApInfo(g_settings.apSsid.c_str(), g_settings.apPass.c_str(), netIP().c_str(), netFailReason());
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  } else if (g_fallbackTheme) {
+    gfxSafeTheme(netIP().c_str(), g_crashStreak);
+#endif
   } else if (g_safeMode) {
     // Last boot crashed: show the crash address (persistent) and keep the web
     // server up for OTA recovery — don't enter the render path that crashed.
@@ -377,6 +574,9 @@ void setup() {
 void loop() {
   netLoop();
   webPortalLoop();
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  crashGuardService();
+#endif
 
 #ifdef BTN_PIN
   buttonService();
@@ -404,6 +604,18 @@ void loop() {
   wgService(g_settings);
 
   if (g_safeMode) {
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+    if (netMode() == NET_AP) {
+      static uint16_t shownFail = netFailSeq();
+      if (netFailSeq() != shownFail) {
+        shownFail = netFailSeq();
+        gfxApInfo(g_settings.apSsid.c_str(), g_settings.apPass.c_str(), netIP().c_str(), netFailReason());
+      }
+    } else if (g_fallbackTheme && !g_nativeRecovery) {
+      crashGuardMarkRecoveryThemeAttempted();
+      g_themeMode.service(g_settings);
+    }
+#endif
     delay(5);
     return;  // crashed last boot: web UI stays up for OTA recovery, no rendering
   }
@@ -462,6 +674,11 @@ void loop() {
   const bool restore = false;
 #endif
 
+#if WITH_THEME_PLAYLIST
+  themePlaylistService(g_settings);
+#endif
+  // A playlist may have selected/unloaded a theme above; display dispatch still
+  // goes through the normal active-mode registry.
   DisplayMode* m = activeMode(g_settings);
   if (m) {
     if (restore) m->wake(g_settings);

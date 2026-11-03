@@ -11,6 +11,7 @@
 #include <ArduinoJson.h>
 #include "config.h"
 
+#if WITH_TICKER
 struct SymbolCfg {
   char    symbol[MAX_SYMBOL_LEN];
   char    name[MAX_NAME_LEN];
@@ -18,12 +19,15 @@ struct SymbolCfg {
   float   qty;        // position size; 0 = not a position
   float   cost;       // cost basis per unit, in the instrument's currency
 };
+#endif
 
+#if WITH_RADAR
 // A home-area airport marker (radar feature), configured in the web UI.
 struct Airport {
   char  icao[MAX_ICAO_LEN];
   float lat, lon;
 };
+#endif
 
 // One saved WiFi station network. The device keeps up to MAX_WIFI_NETS and
 // joins the strongest visible one at boot (hidden SSIDs are tried last).
@@ -32,6 +36,7 @@ struct WifiCred {
   String pass;
 };
 
+#if WITH_TICKER
 // ---- Ticker (stock/crypto) feature slice ----------------------------------
 // The data source is per symbol (SymbolCfg.source); webhookUrl is shared by
 // every symbol whose source is SRC_WEBHOOK.
@@ -61,7 +66,9 @@ struct TickerSettings {
   void toJson(JsonObject o) const;
   void fromJson(JsonObjectConst o);   // applies only the keys present
 };
+#endif
 
+#if WITH_USAGE
 // ---- Claude usage feature slice -------------------------------------------
 struct UsageSettings {
   String   usageUrl;      // daemon HTTP endpoint, e.g. http://192.168.1.10:8787/
@@ -72,6 +79,7 @@ struct UsageSettings {
   void toJson(JsonObject o) const;
   void fromJson(JsonObjectConst o);
 };
+#endif
 
 // ---- Clock / night mode slice (device-wide) --------------------------------
 struct ClockSettings {
@@ -138,6 +146,7 @@ struct DisplaySettings {
   void fromJson(JsonObjectConst o);
 };
 
+#if WITH_HA
 // ---- Home Assistant / MQTT feature slice -----------------------------------
 // The LAN broker the device connects to for HA screens (features/ha). Plain
 // TCP, no TLS. brokerPass follows the same rule as the other secrets here: it
@@ -153,7 +162,9 @@ struct HaSettings {
   void toJson(JsonObject o, bool includeSecrets) const;
   void fromJson(JsonObjectConst o);
 };
+#endif
 
+#if WITH_RADAR
 // ---- Plane radar feature slice --------------------------------------------
 struct RadarSettings {
   float    lat;           // home latitude  (0,0 = not set yet)
@@ -177,6 +188,7 @@ struct RadarSettings {
   void toJson(JsonObject o) const;
   void fromJson(JsonObjectConst o);
 };
+#endif
 
 // ---- Physical button slice (device-wide) -----------------------------------
 // Only acted on where BTN_PIN exists, but the fields persist everywhere so a
@@ -207,9 +219,33 @@ struct Settings {
   String themeId;       // installed .stheme ID; empty until selected
   uint8_t mode;         // MODE_STOCKS / MODE_USAGE / MODE_RADAR / MODE_CAROUSEL / MODE_HA
 
-  // --- Carousel (mode == MODE_CAROUSEL): dwell + which features rotate ---
+  // --- Carousel (mode == MODE_CAROUSEL): dwell + compiled features rotate ---
   uint16_t carouselSec;
-  bool carouselTicker, carouselUsage, carouselRadar, carouselHa, carouselTheme;
+#if WITH_TICKER
+  bool carouselTicker;
+#endif
+#if WITH_USAGE
+  bool carouselUsage;
+#endif
+#if WITH_RADAR
+  bool carouselRadar;
+#endif
+#if WITH_HA
+  bool carouselHa;
+#endif
+#if WITH_THEME
+  bool carouselTheme;
+#endif
+#if WITH_THEME_PLAYLIST
+  static constexpr uint8_t MaxThemePlaylistItems = 8;
+  struct ThemePlaylistItem {
+    char id[49];
+    uint16_t seconds;
+  };
+  bool themePlaylistEnabled;
+  uint8_t themePlaylistCount;
+  ThemePlaylistItem themePlaylist[MaxThemePlaylistItems];
+#endif
 
   // --- Shared HTTP / display ---
   uint16_t httpTimeout; // ms
@@ -219,10 +255,18 @@ struct Settings {
   uint8_t  rotation;          // 0..3 screen orientation
 
   // --- Feature slices ---
+#if WITH_TICKER
   TickerSettings  ticker;
+#endif
+#if WITH_USAGE
   UsageSettings   usage;
+#endif
+#if WITH_RADAR
   RadarSettings   radar;
+#endif
+#if WITH_HA
   HaSettings      ha;        // MQTT broker for HA screens
+#endif
   ClockSettings   clock;
   DisplaySettings display;   // panel colour correction
   WgSettings      wg;        // WireGuard tunnel (ESP32 targets)

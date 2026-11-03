@@ -29,11 +29,20 @@ class ThemeMode : public DisplayMode {
   void begin(const Settings&) override;
   void service(const Settings&) override;
   void invalidate(const Settings&) override;
+#if WITH_THEME_PLAYLIST
+  void setPlaylistTheme(const char* id);
+  bool playlistLoadFailed() const;
+  bool playlistReady() const { return package_ != nullptr; }
+#endif
   void wake(const Settings&) override {
     engine_.invalidate();
     messageDrawn_ = false;
   }
   const String& error() const { return error_; }
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  // Uses a firmware-embedded .stheme that is not listed with user themes.
+  void useRecoveryTheme(uint8_t crashCount);
+#endif
   // What parsing a package needs: its peak heap (tests/theme/test_memory.cpp
   // holds the examples to 5 KB) plus about 1 KB that the network code may
   // claim meanwhile, and blocks of up to 1 KB (the same test's
@@ -60,9 +69,12 @@ class ThemeMode : public DisplayMode {
   void unload();
   void refreshData();
   smalltv::Engine engine_;
-  std::unique_ptr<ThemeFile> file_;
+  std::unique_ptr<smalltv::Source> file_;
   std::unique_ptr<smalltv::Package> package_;
   String loadedId_, error_;
+#if WITH_THEME_PLAYLIST
+  String playlistId_;
+#endif
   std::vector<uint32_t> dataNextMs_;
   std::vector<bool> dataScheduled_;
   std::vector<smalltv::ThemeValue> dataValues_;
@@ -71,6 +83,10 @@ class ThemeMode : public DisplayMode {
   // Set by release(): the next load of the same theme keeps the data state.
   bool keepData_ = false;
   bool attempted_ = false, messageDrawn_ = false;
+#if defined(SMALLTV_CUSTOM) && defined(SMALLTV_FAMILY_ESP8266)
+  bool recoveryMode_ = false;
+  uint8_t recoveryCrashCount_ = 0;
+#endif
 };
 extern ThemeMode g_themeMode;
 #endif

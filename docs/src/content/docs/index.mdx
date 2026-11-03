@@ -1,84 +1,60 @@
 ---
-title: smalltv-mod
-description: Open-source firmware for the GeekMagic SmallTV (ESP8266 and ESP32-C2), the SmallTV Pro, and the NMMiner NM-TV-154. Stock ticker, Claude usage meter, and plane radar in one image.
+title: SmallTV Clean Image
+description: Schlanke ESP8266-Firmware für Themes und eine individuell sortierbare Theme-Playlist auf GeekMagic SmallTV und SmallTV Ultra.
 template: splash
 hero:
-  tagline: One firmware, three modes, four boards. Turn a cheap SmallTV cube into a ticker, a Claude usage meter, or a plane radar.
+  tagline: Dein SmallTV als Büro-Uhr, Statusdisplay oder Mini-Dashboard. Ein leichtes ESP8266-Image, dessen wechselnde Inhalte aus installierbaren .stheme-Dateien kommen.
   image:
     file: ../../assets/logo.svg
   actions:
-    - text: Get started
-      link: /smalltv-mod/getting-started/hardware/
+    - text: Installation und Start
+      link: /smalltv-mod/getting-started/flashing/
       icon: right-arrow
-    - text: View on GitHub
-      link: https://github.com/giovi321/smalltv-mod
+    - text: GitHub-Projekt
+      link: https://github.com/Jeff-Amdg/smalltv-mod
       icon: external
       variant: minimal
 ---
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-The GeekMagic SmallTV is a small cube with a 1.54" colour screen, an ESP inside, and a USB-C port. This firmware replaces the stock apps with three modes you switch between in a built-in web UI, and it updates over WiFi. The web UI header shows a chip badge for the board it's running on, and an optional scheduled night mode dims or turns off the backlight on an NTP clock and timezone you pick, without taking the device offline.
+**SmallTV Clean Image** ist eine auf den ESP8266 zugeschnittene Firmware für GeekMagic SmallTV und SmallTV Ultra. Gepflegt wird diese Variante von **Jeff-Amdg**. Sie behält die Theme-Engine und die nötigen Gerätefunktionen und konzentriert das Display auf eigene `.stheme`-Designs.
 
-![The SmallTV running its three modes](/smalltv-mod/assets/screen.svg)
+Statt Börsen-Ticker, Flugradar oder externen Datenintegrationen bietet das Image eine installierbare Theme-Playlist: Zifferblätter, Büroanzeigen, Statusseiten oder andere unterstützte Layouts lassen sich ohne Firmware-Neubau wechseln.
 
-## The three modes
+## Funktionen
 
 <CardGrid>
-  <Card title="Stock and crypto ticker" icon="seti:default">
-    Price, change, percent change, and a sparkline for up to 8 rotating symbols. Data from Yahoo Finance with no backend, or your own webhook.
+  <Card title="Theme-Playlist" icon="list-ordered">
+    Bis zu acht installierte Themes in eigener Reihenfolge. Für jeden Eintrag eine separate Anzeigedauer von 5 bis 3600 Sekunden festlegen.
   </Card>
-  <Card title="Claude usage meter" icon="seti:crystal">
-    An animated mascot plus your 5-hour and 7-day usage bars with reset countdowns, fed over WiFi by the clawdmeter-daemon on your PC. The daemon can auto-discover several SmallTVs on the LAN and push usage to all of them at once.
+  <Card title=".stheme-Engine" icon="seti:default">
+    Themes über die Weboberfläche installieren, auswählen und löschen. Die Darstellung folgt den Möglichkeiten des Theme-Formats und der Firmware.
   </Card>
-  <Card title="Plane radar" icon="rocket">
-    A scope centred on your location with nearby aircraft, headings, speed vectors, and callsigns, from the free adsb.lol or adsb.fi feeds or a LAN webhook.
+  <Card title="WLAN und Geräteeinstellungen" icon="seti:config">
+    Einrichtung über den SmallTV-Setup-Hotspot, Verwaltung im Browser, Helligkeit, Displayausrichtung und weitere Anzeigeoptionen.
+  </Card>
+  <Card title="Recovery-Theme" icon="seti:shield">
+    Nach wiederholten Abstürzen zeigt ein Schutzmodus ein separates eingebettetes recovery.stheme. Es gehört nicht zur normalen Theme-Liste.
   </Card>
 </CardGrid>
 
-Plus one thing that is not a mode: on every ESP32 board the firmware carries a [WireGuard client](/smalltv-mod/features/wireguard/), so you can reach the device from outside your network without opening a port to the internet. The ESP32-C2 and the 8 MB SmallTV Pro have it in their only image; on the NM-TV-154, whose image is the tightest fit of the three, it comes in a second image you pick at install time.
+## Für welches Gerät?
 
-## More than the three modes
+Dieses Image ist für **SmallTV / SmallTV Ultra mit ESP8266** gedacht. Es ist kein ESP32-Image. Beim Ultra kann die originale Firmware wegen ihres abweichenden Flash-Layouts den ersten Upload eines großen Images ablehnen; dafür kann der Loader nötig sein. Die genaue Installationsanleitung steht unter [Firmware installieren](/smalltv-mod/getting-started/flashing/).
 
-A [Home Assistant screen](/smalltv-mod/features/ha/) arrives over MQTT as a JSON draw list and the device shows it as a full 240×240 screen. A [notification](/smalltv-mod/features/notify/) takes the panel for a few seconds when a script pushes one over HTTP, then puts back whatever was showing. And a [theme clock](/smalltv-mod/features/themes/) replaces the screen with a clock face of your own: background art, animated sprites, clock and date text, and live values from JSON sources, installed as a `.stheme` package with no firmware rebuild.
+## Playlist einrichten
 
-![A Home Assistant screen pushed over MQTT, a notification overlay, and the Pixel Room theme clock](/smalltv-mod/assets/screen2.svg)
-
-## Design a clock face in SmallTV Studio
-
-[SmallTV Studio](https://giovi321.github.io/smalltv-studio/) is the visual editor for theme clocks. It runs in the browser with nothing to install. Stack layers on a 240×240 canvas, preview the clock at any simulated time, bind fields to JSON data, then export a `.stheme` package or send it to the device over WiFi.
-
-[![SmallTV Studio editing the Pixel Room theme](/smalltv-mod/assets/studio.png)](https://giovi321.github.io/smalltv-studio/)
+Installiere zunächst `.stheme`-Dateien über die Theme-Verwaltung. In **Display** kannst du Themes zur Playlist hinzufügen, ihre Reihenfolge ändern, jedem Eintrag eine Anzeigedauer zuweisen und die automatische Wiedergabe aktivieren. Die Einstellungen bleiben nach einem Neustart erhalten. Nicht vorhandene oder nicht ladbare Themes werden übersprungen.
 
 <CardGrid>
-  <LinkCard title="Open SmallTV Studio" href="https://giovi321.github.io/smalltv-studio/" description="The editor, hosted on GitHub Pages. Runs entirely in your browser." />
-  <LinkCard title="Theme clocks guide" href="/smalltv-mod/features/themes/" description="The .stheme format, installing packages, and the command-line tools." />
+  <LinkCard title="Erste Schritte" href="/smalltv-mod/manual/quick-start/" description="WLAN einrichten und das Gerät im Browser öffnen." />
+  <LinkCard title="Themes und Playlist" href="/smalltv-mod/features/themes/" description=".stheme installieren und die Wiedergabeliste konfigurieren." />
+  <LinkCard title="Image selbst bauen" href="/smalltv-mod/reference/building/" description="Clean-Image mit PlatformIO lokal kompilieren." />
 </CardGrid>
 
-## Four hardware variants
+## Ziel des Images
 
-This firmware builds for four boards from one codebase. Confirm which one you have before you flash it.
+Der ESP8266 hat begrenzten Speicher. Deshalb liegen allgemeine Gerätefunktionen wie WLAN, Weboberfläche, Theme-Verwaltung, Playlist und Wiederherstellung in der Firmware. Inhalte und Gestaltung kommen aus den `.stheme`-Paketen. Nicht benötigte Funktionen wie Ticker, Claude-Anzeige, Flugradar, Home Assistant/MQTT und Benachrichtigungen sind aus dem Clean Image herausgenommen.
 
-<CardGrid>
-  <LinkCard title="SmallTV (ESP8266)" href="/smalltv-mod/getting-started/hardware/" description="ESP-12F. Flashes over the air from the stock web UI." />
-  <LinkCard title="SmallTV (ESP32-C2 / ESP8684)" href="/smalltv-mod/getting-started/hardware/" description="CH340C next to the USB-C port. Flashes over USB-C with esptool." />
-  <LinkCard title="NM-TV-154 (classic ESP32)" href="/smalltv-mod/getting-started/hardware/" description="NMMiner BTC lottery miner, same cube and screen. Flashes over USB with esptool." />
-  <LinkCard title="SmallTV Pro (classic ESP32, 8 MB)" href="/smalltv-mod/getting-started/hardware/" description="GeekMagic's higher-end model with a touch button. Flashes over the air from the stock web UI (USB-C is power only)." />
-</CardGrid>
-
-## Start here
-
-<CardGrid>
-  <LinkCard title="Hardware and variants" href="/smalltv-mod/getting-started/hardware/" />
-  <LinkCard title="Flashing" href="/smalltv-mod/getting-started/flashing/" />
-  <LinkCard title="First-time setup" href="/smalltv-mod/getting-started/setup/" />
-  <LinkCard title="Building from source" href="/smalltv-mod/reference/building/" />
-</CardGrid>
-
-## Related projects
-
-[SmallTV Pomodoro](https://github.com/davicorrea0/smalltv-pomodoro) is a separate alternative firmware for the SmallTV-ultra (ESP8266), built around a Pomodoro timer with a pixel-art tomato, clock faces, weather, and a photo album. A device runs either it or smalltv-mod. The two projects are working on a shared theme format, so that a clock face designed in SmallTV Studio runs on both ([#31](https://github.com/giovi321/smalltv-mod/issues/31)).
-
-## Received one as a gift?
-
-The [user manual](/smalltv-mod/manual/quick-start/) skips the technical background and walks through plugging it in, joining WiFi, and everyday use in plain language, no prior knowledge assumed.
+Quellcode, Änderungen und Hinweise zum Projekt findest du auf [GitHub: Jeff-Amdg/smalltv-mod](https://github.com/Jeff-Amdg/smalltv-mod). Die zugrunde liegende Firmware stammt aus dem [Upstream-Projekt smalltv-mod](https://github.com/giovi321/smalltv-mod).

@@ -1,63 +1,36 @@
 ---
-title: First-time setup
-description: Join WiFi, reach the web UI, and configure what the SmallTV shows.
+title: Gerät einrichten
+description: WLAN verbinden, die Weboberfläche öffnen und die erste Theme-Playlist einrichten.
 ---
 
-On first boot the device has no WiFi saved, so it starts its own hotspot and waits for you to point it at your network. Everything after that happens in the web UI.
+Beim ersten Start hat das SmallTV noch kein gespeichertes WLAN. Es startet deshalb den Hotspot `SmallTV-Setup`. Die weitere Einrichtung erfolgt im Browser.
 
-## Join WiFi
+## Mit dem WLAN verbinden
 
-1. On first boot the screen shows **SETUP MODE** and creates an open hotspot named `SmallTV-Setup`.
-2. Join it from your phone or PC. A captive portal should open on its own. If it does not, browse to `http://192.168.4.1`.
-3. Open the **WiFi** tab, press **Scan**, pick your 2.4 GHz network, enter the password, and press **Save and connect**. The device reboots and joins your network. You can save up to 4 networks; at boot the device joins the strongest one it can see.
-4. It shows the joined network, its IP, and its `http://<hostname>.local` address on screen at boot. Browse to either one. New devices get a unique default hostname like `smalltv-3fa2` so several SmallTVs can share a network; rename it in the WiFi tab.
+1. Verbinde Laptop oder Smartphone mit dem WLAN **SmallTV-Setup**.
+2. Öffnet sich kein Einrichtungsfenster automatisch, rufe `http://192.168.4.1` auf.
+3. Öffne **WiFi**, suche dein 2,4-GHz-WLAN und trage das Passwort ein.
+4. Speichere die Verbindung. Das SmallTV startet neu und verbindet sich mit deinem Netzwerk.
+5. Notiere die IP-Adresse, die das Display anzeigt. Öffne diese Adresse im Browser, zum Beispiel `http://192.168.1.42`.
 
-The ESP8266 is 2.4 GHz only. For an AP password use at least 8 characters, or leave it blank for an open hotspot.
+Der ESP8266 unterstützt nur 2,4 GHz. Die IP-Adresse kann sich ändern; wenn dein Router lokale Gerätenamen unterstützt, kannst du auch den angezeigten Hostnamen verwenden.
 
-## Add something to show
+## Ein Theme installieren
 
-Open the **Ticker** tab and add a few tickers, for example `AAPL`, `NESN.SW`, or `BTC-USD`. Each ticker picks its own data source; the default is Yahoo Finance, so prices appear within a few seconds with no server to set up. Swiss instruments Yahoo lacks can use cash.ch, and a custom webhook lets you own the source. See [Data sources](/smalltv-mod/reference/data-sources/) for the full list of what works.
+Öffne in der Weboberfläche den Bereich **Themes** und lade eine `.stheme`-Datei hoch. Nach der Installation kannst du sie als einzelnes Theme auswählen oder in die Playlist aufnehmen. Theme-Dateien sind von der Firmware getrennte Inhalte.
 
-## Web UI reference
+## Eine Playlist einrichten
 
-The UI is a single page served from the device. Saving applies most changes live; changing the WiFi network reboots. The header shows a chip naming the board the firmware targets (ESP8266, ESP32-C2, or ESP32).
+Unter **Display** findest du die Playlist. Füge installierte Themes hinzu, sortiere sie mit den Pfeilen und stelle für jeden Eintrag eine Dauer zwischen 5 und 3600 Sekunden ein. Aktiviere die Playlist und speichere die Konfiguration. Reihenfolge, Aktivierung und Zeiten bleiben nach Neustarts erhalten.
 
-### Status
+Wenn du die Playlist ausschaltest, wird das einzeln gewählte Theme angezeigt. Nicht mehr vorhandene oder nicht ladbare Playlist-Einträge überspringt die Firmware automatisch.
 
-Live device info: mode, IP, signal, free heap, uptime, and, where the firmware has the WireGuard client, the tunnel state.
+## Die Oberfläche
 
-### WiFi
+- **Status:** WLAN-Verbindung, IP-Adresse, Speicher und Firmware-Informationen.
+- **WiFi:** WLANs suchen und speichern sowie Gerätenamen ändern.
+- **Display:** Theme, Playlist, Helligkeit, Ausrichtung und unterstützte Anzeigeoptionen einstellen.
+- **Themes:** `.stheme`-Pakete installieren, auswählen und entfernen.
+- **System:** Konfiguration sichern oder laden, Firmware manuell hochladen und das Gerät neu starten.
 
-Scan and save up to 4 networks; the device joins the strongest visible one at boot and falls over to the others if the connection drops. Also sets the device hostname (its `.local` mDNS name), the setup hotspot name and password, and on the builds that carry it the [WireGuard tunnel](/smalltv-mod/features/wireguard/).
-
-### Display
-
-The mode selector, which lists each feature under the same name as its tab (Ticker, Clawdmeter, Radar, or Carousel, which rotates through the ticked features on a timer), plus brightness with optional auto-brightness, orientation, and backlight polarity.
-
-#### Colour
-
-Per-channel Red, Green, and Blue gain (50 to 150 percent, 100 being the untouched image), a colour-order switch for panels that show red and blue swapped, and an invert toggle for panels that come up looking like a negative. These exist because the units do not all carry the same panel: two devices running this firmware side by side can render the same colour visibly differently. Changes apply as soon as you save.
-
-#### Clock and night mode
-
-The "Clock & night mode" card sets a timezone by IANA name (`Europe/Rome`, `Europe/Zurich`, `America/New_York`, and so on) from a dropdown; DST is handled automatically. Enabling the nightly window adds a From and To time (HH:MM) and a night brightness, where 0 turns the backlight fully off and any other value just dims it. Night mode is off by default. The device keeps rendering behind the dimmed or off backlight rather than sleeping, so WiFi, the web UI, and usage push stay up throughout.
-
-Night mode only switches on once NTP has confirmed the clock within the last few minutes. If NTP can't be reached, the screen stays on and the device keeps retrying until it syncs or the window ends in the morning, so a device that never reaches NTP is never left stuck dark. NTP itself only runs when something needs it: night mode, or a WireGuard tunnel, which cannot handshake without a correct clock. On an ESP8266 this matters if you also use cash.ch tickers: their TLS handshake needs a large contiguous block of heap, and adding night mode's NTP client on top can leave too little. If a ticker stops fetching after enabling night mode, switch it to the GitHub source (self-hosted from a fork — see [Data sources](/smalltv-mod/reference/data-sources/)) or leave night mode off on that device; ESP32 boards aren't affected.
-
-### Ticker
-
-The live value of every ticker sits at the top, with a "Refresh data now" button that forces an immediate poll. Below it, up to 8 tickers, each with its own data source (Yahoo Finance, cash.ch, GitHub, or your webhook). `symbol` follows the source: a Yahoo ticker (`AAPL`, `NESN.SW`, `BTC-USD`, `EURUSD=X`), a cash.ch listing key for cash.ch or GitHub (the built-in finder turns a cash.ch link or ISIN into one), or whatever your webhook expects. `name` is an optional label that overrides the source's own name. Optional `qty` and per-unit `cost` turn a ticker into a position: its page gains a P/L line and a portfolio summary page joins the rotation. The tab also sets the chart timeframe and point count, rotation and refresh intervals, the colour scheme, and which fields to draw.
-
-### System
-
-Check for and install the newest GitHub release (every board fetches its own image), upload a firmware file manually, export or import the full device configuration as a JSON file, put the page behind a password, reboot, or factory reset. The exported file contains the WiFi passwords and the WireGuard private key in clear text, so treat it like a password.
-
-## Modes
-
-Each mode has its own page:
-
-- [Stock and crypto ticker](/smalltv-mod/features/ticker/)
-- [Claude usage meter](/smalltv-mod/features/usage/)
-- [Plane radar](/smalltv-mod/features/radar/)
-
-Remote access over a tunnel is not a mode, but it has its own page too: [WireGuard VPN](/smalltv-mod/features/wireguard/).
+Die Oberfläche ist für lokale Verwendung im Heim- oder Büronetz gedacht. Sie benötigt keine Verbindung zu einem Unternehmensnetz, wenn du das SmallTV direkt mit einem eigenen 2,4-GHz-WLAN oder einem Laptop-Hotspot verbindest.
