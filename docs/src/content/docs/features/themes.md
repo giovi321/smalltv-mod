@@ -337,7 +337,7 @@ The packer compiles `fonts/clock.json` in the source theme into
 | `file` | A TrueType (`.ttf`, glyf outlines) file in `fonts/` |
 | `size` | Pixels per em, 4–200 |
 | `glyphs` | The printable ASCII characters to keep, for example `"0123456789:"` |
-| `fallback` | Optional: one of `glyphs`, drawn for any character the font lacks. Default `?` when kept, else `-` |
+| `fallback` | Optional: one of `glyphs`, or `-`, which every font keeps; drawn for any character the font lacks. Default `?` when kept, else `-` |
 
 Keep only the characters the theme shows: each costs flash in the package,
 not RAM on the device. For a clock face, the digits and `:` are enough; for
@@ -358,15 +358,23 @@ It does not apply hinting or kerning. To check a font on its own:
 python3 tools/theme_font.py fonts/BebasNeue-Regular.ttf /tmp/clock.stf --size 80 --glyphs 0123456789:
 ```
 
-A theme may use up to four fonts. The device keeps one byte per glyph in RAM
-(its advance, to lay out text) and reads the glyph bitmaps from the package
-while it draws, one glyph row at a time. Once a theme draws a font, it also
-keeps the last 16 glyph records it read (128 bytes), so each row of a text
-reads only the bitmaps. Fonts carry their own licence: use fonts whose
-licence allows embedding, such as the
-[SIL Open Font License](https://openfontlicense.org), and ship the licence
-text with the theme source. `examples/themes/bebas-clock` uses Bebas Neue
-(OFL, `fonts/OFL.txt`) in two sizes; its package is 14,202 bytes.
+A theme may use up to four fonts, and a package with more than four `.stf`
+entries is refused. The device keeps one byte per glyph in RAM (its advance,
+to lay out text) and reads the glyph bitmaps from the package while it
+draws, one glyph row at a time. A theme with a font layer also keeps the
+last 16 glyph records it read (128 bytes, allocated when the theme is
+loaded), so each row of a text reads only the bitmaps. Checking a font reads
+it in 64-byte pieces and yields to the system after every glyph; the largest
+font the format allows is about 1,040 reads.
+
+Fonts carry their own licence: use fonts whose licence allows embedding,
+such as the [SIL Open Font License](https://openfontlicense.org), and ship
+the licence text with the theme source. The package itself holds subsets of
+the font, so name the font, its copyright holder and its licence in the
+theme's `author`, which travels with the package. `examples/themes/bebas-clock`
+uses Bebas Neue (OFL, `fonts/OFL.txt`) in two sizes, with `"author":
+"smalltv-mod; font Bebas Neue (c) Dharma Type, OFL"`; its package is
+14,240 bytes.
 
 Firmware up to 3.3.0 refuses a package with fonts with "Invalid or truncated
 .stheme package". A spec 1 manifest with `font` is rejected with
