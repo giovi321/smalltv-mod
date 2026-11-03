@@ -1,6 +1,7 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 // Layout and decisions of the ESP8266 crash record, kept free of Arduino and
 // SDK headers so tests/test_crash_record.cpp can build them on the host.
@@ -35,6 +36,17 @@ static inline uint32_t crashCheck(const CrashRtc& r) {
   uint32_t h = 2166136261u;
   for (size_t i = 8; i < sizeof(r); i++) { h ^= *p++; h *= 16777619u; }
   return h;
+}
+
+// Copy a firmware string out of RTC memory. The record passed its checksum but
+// the bytes are still untrusted: the field is cut at its end whether or not a
+// terminator is there, and the copy always ends in one.
+static inline void crashCopyFw(char* dst, size_t dstSize, const CrashRtc& r) {
+  size_t n = 0;
+  while (n < sizeof r.fw && r.fw[n]) n++;
+  if (n > dstSize - 1) n = dstSize - 1;
+  memcpy(dst, r.fw, n);
+  dst[n] = 0;
 }
 
 static inline const char* crashReasonLabel(uint8_t reason) {

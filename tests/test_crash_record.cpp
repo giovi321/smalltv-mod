@@ -41,6 +41,19 @@ int main() {
   b = a; b.flags = CRASH_PENDING;
   assert(b.check != crashCheck(b));
 
+  // A firmware field with no terminator is cut, and the copy always ends in one.
+  {
+    CrashRtc u; memset(&u, 'x', sizeof(u));
+    char out[16]; memset(out, 'y', sizeof(out));
+    crashCopyFw(out, sizeof(out), u);
+    assert(strlen(out) == 15 && out[15] == 0);
+    char small[4];
+    crashCopyFw(small, sizeof(small), sample());
+    assert(!strcmp(small, "3.2"));
+    crashCopyFw(out, sizeof(out), sample());
+    assert(!strcmp(out, "3.2.0"));
+  }
+
   // Abort and stack overflow carry no registers; the other reasons do.
   assert(!crashHasRegisters(254) && !crashHasRegisters(253));
   assert(crashHasRegisters(1) && crashHasRegisters(2) && crashHasRegisters(3) && crashHasRegisters(0));
