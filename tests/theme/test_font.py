@@ -33,8 +33,9 @@ def simple(contours):
     return data
 
 
-def truetype(glyphs, cmap, advances, units=1000):
-    """A minimal .ttf: the tables theme_font reads, nothing else."""
+def truetype(glyphs, cmap, advances, units=1000, range_offset=0):
+    """A minimal .ttf: the tables theme_font reads, nothing else.
+    `range_offset` goes in every segment's idRangeOffset but the last."""
     glyf, loca = b'', []
     for g in glyphs:
         loca.append(len(glyf))
@@ -46,7 +47,8 @@ def truetype(glyphs, cmap, advances, units=1000):
     sub = struct.pack('>HHHHHHH', 4, 16 + 8 * n, 0, 2 * n, 0, 0, 0)
     sub += struct.pack('>%dH' % n, *[s[1] for s in segments]) + b'\0\0'
     sub += struct.pack('>%dH' % n, *[s[0] for s in segments])
-    sub += struct.pack('>%dH' % n, *[s[2] for s in segments]) + b'\0\0' * n
+    sub += struct.pack('>%dH' % n, *[s[2] for s in segments])
+    sub += struct.pack('>%dH' % n, *([range_offset] * (n - 1) + [0]))
     tables = {
         'head': struct.pack('>IIIIHHqqhhhhHHhhh', 0x10000, 0, 0, 0x5f0f3cf5, 0, units, 0, 0, 0, 0, 0, 0, 0, 8, 2, 1, 0),
         'hhea': struct.pack('>IhhhH11hH', 0x10000, 800, -200, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, len(advances)),
@@ -144,6 +146,13 @@ class FontTests(unittest.TestCase):
                      (FONT, 200, 'A'), (b'OTTO' + FONT[4:], 10, 'A'), (FONT[:100], 10, 'A')]:
             with self.assertRaises(ValueError, msg=repr(args[1:])):
                 font_tool.compile_font(*args)
+
+    def test_malformed_character_map(self):
+        # An idRangeOffset past the end of the cmap table: a message, not a
+        # struct.error traceback from the packer (#69 review).
+        broken = truetype([b'', simple(SQUARE)], {45: 1, 65: 1}, [500, 600], range_offset=0xfff0)
+        with self.assertRaisesRegex(ValueError, 'malformed character map'):
+            font_tool.compile_font(broken, 10, 'A')
 
     def theme(self, root, spec, settings, value='AB'):
         manifest = {'spec': spec, 'theme': {'id': 'test', 'name': 'Test', 'author': 'Me', 'version': '1'},
