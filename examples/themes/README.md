@@ -9,8 +9,9 @@ Four examples are ready to install from **Display → Theme clocks** on SmallTV 
   headline, a threshold-colored rounded progress bar bound to a numeric level,
   and status text;
 * [`bebas-clock.stheme`](bebas-clock.stheme) — a spec 2 clock in Bebas Neue,
-  compiled into two package fonts from `bebas-clock/fonts/` (SIL Open Font
-  License, see `bebas-clock/fonts/OFL.txt`). Firmware up to 3.3.0 refuses it.
+  compiled into two package fonts from `bebas-clock/fonts/` (Bebas Neue (c)
+  Dharma Type, SIL Open Font License, see `bebas-clock/fonts/OFL.txt`; the
+  package names it in its `author`). Firmware up to 3.3.0 refuses it.
 
 Their editable sources are in the matching directories. Open
 [pixel-room-preview.html](pixel-room-preview.html),

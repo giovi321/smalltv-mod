@@ -3,7 +3,7 @@
   "theme": {
     "id": "bebas-clock",
     "name": "Bebas Clock",
-    "author": "smalltv-mod",
+    "author": "smalltv-mod; font Bebas Neue (c) Dharma Type, OFL",
     "version": "1.0.0"
   },
   "display": {
