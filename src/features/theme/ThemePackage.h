@@ -52,8 +52,9 @@ class Package : public Assets {
   BlockList<Entry> entries_;
   // The glyph records glyphRow() read last, in GlyphSlots slots by code
   // point: every row of a text needs the same records again, and reading
-  // them was half of a redraw's reads (#31 review). Empty until a glyph is
-  // drawn, so a package without fonts, or one only checked, holds none.
+  // them was half of a redraw's reads (#31 review). Allocated by loadFonts()
+  // when a layer uses a font, so nothing is allocated while drawing (#69
+  // review); a package without font layers holds none.
   static constexpr unsigned GlyphSlots = 16;
   struct Glyph {
     uint8_t font = 0, code = 0;   // code 0: an empty slot
@@ -64,7 +65,7 @@ class Package : public Assets {
   bool samePath(const Entry& entry, const std::string& path) const;
   bool checkRows(const Entry& entry) const;
   bool checkFont(const Entry& entry) const;
-  bool loadFonts(Theme& theme, std::string& error) const;
+  bool loadFonts(Theme& theme, std::string& error);
   size_t indexOf(const std::string& path) const;
   const Entry* find(const std::string& path) const;
   bool readIndex(std::string& error);
