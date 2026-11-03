@@ -37,6 +37,31 @@ class ThemeCliTests(unittest.TestCase):
             self.assertIn('layers[0].color:', result.stderr)
             self.assertFalse((source/'bad.stheme').exists())
 
+    def test_rotation_shapes_need_spec_2(self):
+        layers = [
+            {'id': 'ring', 'type': 'shape', 'shape': 'arc', 'x': 120, 'y': 120, 'radius': 100,
+             'start': 0, 'sweep': 270, 'stroke': '#47c2ff', 'strokeWidth': 10},
+            {'id': 'hand', 'type': 'shape', 'shape': 'hand', 'x': 120, 'y': 120, 'length': 90,
+             'tail': 20, 'angle': 45, 'stroke': '#ffffff', 'strokeWidth': 4},
+            {'id': 'dial', 'type': 'shape', 'shape': 'ticks', 'x': 120, 'y': 120, 'radius': 112,
+             'count': 12, 'length': 10, 'stroke': '#8a8a8a', 'strokeWidth': 3}]
+        for spec in (2, 1):
+            with self.subTest(spec=spec), tempfile.TemporaryDirectory() as d:
+                source = Path(d)
+                (source/'theme.json').write_text(json.dumps({
+                    'spec': spec,
+                    'theme': {'id': 'dials', 'name': 'Dials', 'author': 'Test', 'version': '1'},
+                    'display': {'width': 240, 'height': 240, 'background': '#000000'},
+                    'layers': layers}))
+                result = self.run_cli('build', source, source/'dials.stheme')
+                if spec == 2:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue((source/'dials.stheme').exists())
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('need "spec": 2', result.stderr)
+                    self.assertFalse((source/'dials.stheme').exists())
+
     def test_preview_is_standalone_and_escapes_metadata(self):
         with tempfile.TemporaryDirectory() as d:
             output = Path(d)/'preview.html'
@@ -163,6 +188,36 @@ class ThemeCliTests(unittest.TestCase):
             ):
                 result = self.run_cli('preview', source, source/'bad.html', '--seconds', 1, '--fps', 1, *args)
                 self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('Traceback', result.stderr)
+
+    def test_spec_2_text_tokens_and_device_values(self):
+        def manifest(spec, value):
+            return {'spec': spec, 'theme': {'id': 'tokentest', 'name': 'Token Test', 'author': 'Test', 'version': '1'},
+                    'display': {'width': 240, 'height': 240, 'background': '#000000'},
+                    'layers': [{'id': 'line', 'type': 'text', 'x': 0, 'y': 0, 'value': value, 'size': 16,
+                                'color': '#ffffff'}]}
+        with tempfile.TemporaryDirectory() as d:
+            source = Path(d)
+            (source/'theme.json').write_text(json.dumps(manifest(2, '{H}:{MM} {AMPM} {MO} {device.temperature}')))
+            frames = {}
+            for name, extra in (('absent', []), ('present', ['--data', 'device.temperature=21'])):
+                result = self.run_cli('preview', source, source/f'{name}.html', '--seconds', 1, '--fps', 1,
+                                      '--time', '2026-09-18T15:04:00', *extra)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                data = self.preview_data(source/f'{name}.html')
+                frames[name] = self.frame(data, 0).crop((0, 0, 240, 16)).tobytes()
+            self.assertNotEqual(frames['absent'], frames['present'])
+            # The preview feeds device values only to a spec 2 theme.
+            (source/'theme.json').write_text(json.dumps(manifest(1, '{MM}')))
+            result = self.run_cli('preview', source, source/'one.html', '--seconds', 1, '--fps', 1,
+                                  '--data', 'device.temperature=21')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn('Traceback', result.stderr)
+            # A spec 1 theme that uses a spec 2 token is refused.
+            for token in ('{H}', '{MO}', '{AMPM}', '{device.streak}'):
+                (source/'theme.json').write_text(json.dumps(manifest(1, token)))
+                result = self.run_cli('validate', source)
+                self.assertNotEqual(result.returncode, 0, token)
                 self.assertNotIn('Traceback', result.stderr)
 
     def test_documentation_covers_scrolling_and_dynamic_properties(self):
