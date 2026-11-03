@@ -114,6 +114,7 @@ bool platformCrashRecordGet(PlatformCrashRecord& out) {
   memset(&out, 0, sizeof(out));
   strlcpy(out.reason, crashReasonLabel(r.rstReason), sizeof(out.reason));
   strlcpy(out.fw, r.fw, sizeof(out.fw));
+  out.hasRegisters = crashHasRegisters(r.rstReason);
   out.exccause    = r.exccause;
   out.epc1        = r.epc1;
   out.excvaddr    = r.excvaddr;

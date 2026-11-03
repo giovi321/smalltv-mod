@@ -248,7 +248,7 @@ static void handleStatus() {
     smalltv::StatusCrash k;
     k.reason = cr.reason;
     k.fw = cr.fw;
-    k.exccause = cause; k.epc = epc; k.addr = addr;
+    if (cr.hasRegisters) { k.exccause = cause; k.epc = epc; k.addr = addr; }
     k.hasUptime = cr.uptimeKnown;
     k.uptime = cr.uptimeS;
     smalltv::writeStatusCrash(out, k);

@@ -48,6 +48,13 @@ static inline const char* crashReasonLabel(uint8_t reason) {
   }
 }
 
+// The core zeroes rst_info before it calls custom_crash_callback() for an
+// abort and for a stack smash, so there is no exccause, epc1 or excvaddr to
+// report for them: showing 0x0 would read as a real fault at address 0.
+static inline bool crashHasRegisters(uint8_t reason) {
+  return reason != CRASH_RST_SW_EXC && reason != CRASH_RST_STACK_SMASH;
+}
+
 // What platformCrashRecordBegin() does with the record at boot.
 enum CrashBootAction { CRASH_KEEP, CRASH_ADOPT, CRASH_CAPTURE };
 // A record the callback wrote is adopted whatever the boot reason says: after

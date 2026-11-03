@@ -166,6 +166,7 @@ void platformOnTimeSync(void (*cb)());
 struct PlatformCrashRecord {
   char     reason[24];     // see crashReasonLabel() in CrashRecord.h
   char     fw[16];         // FW_VERSION of the image that crashed
+  bool     hasRegisters;   // false for abort and stack overflow: the three below are not known
   uint32_t exccause;       // Xtensa EXCCAUSE
   uint32_t epc1;           // faulting PC, for addr2line
   uint32_t excvaddr;       // faulting address

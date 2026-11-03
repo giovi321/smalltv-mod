@@ -41,6 +41,10 @@ int main() {
   b = a; b.flags = CRASH_PENDING;
   assert(b.check != crashCheck(b));
 
+  // Abort and stack overflow carry no registers; the other reasons do.
+  assert(!crashHasRegisters(254) && !crashHasRegisters(253));
+  assert(crashHasRegisters(1) && crashHasRegisters(2) && crashHasRegisters(3) && crashHasRegisters(0));
+
   // Boot decisions.
   assert(crashBootAction(true, true, 4)  == CRASH_ADOPT);    // abort(): comes back as a software restart
   assert(crashBootAction(true, true, 2)  == CRASH_ADOPT);    // exception

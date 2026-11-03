@@ -882,7 +882,7 @@ function showStatus(s){
   h+='<div class="kv"><b style="color:'+c+'">'+t.symbol+'</b><span>'+st+'</span></div>';});
  tb.innerHTML=h||'<span class="muted">No tickers configured</span>';}
 }
-function crashLine(x){return x.reason+', cause '+x.exccause+', epc '+x.epc+', addr '+x.addr+', fw '+x.fw+(x.uptime!=null?', up '+fmtUp(x.uptime):'')}
+function crashLine(x){return x.reason+(x.epc?', cause '+x.exccause+', epc '+x.epc+', addr '+x.addr:'')+', fw '+x.fw+(x.uptime!=null?', up '+fmtUp(x.uptime):'')}
 function clearCrash(){j('/api/crash/clear',{method:'POST'}).then(function(){toast('Crash record cleared');loadStatus()}).catch(function(e){toast(e.message)})}
 function kv(k,v){return '<div class="kv"><span class="muted">'+k+'</span><b>'+v+'</b></div>'}
 // WireGuard: one line that names the failure rather than just saying "down".

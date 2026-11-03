@@ -273,6 +273,19 @@ int main() {
     assert(small.pieces == (want.size() + 4) / 5);
     checked++;
   }
+  {  // lastCrash: after the 3.2.1 keys, registers left out when empty
+    StatusCrash k;
+    k.reason = "Exception"; k.fw = "3.2.1"; k.exccause = "0x1d"; k.epc = "0x40201234"; k.addr = "0x00000000";
+    k.hasUptime = true; k.uptime = 77;
+    StringSink s1;
+    { PieceWriter<5> out(s1); writeStatusCrash(out, k); out.flush(); }
+    assert(s1.text == ",\"lastCrash\":{\"reason\":\"Exception\",\"fw\":\"3.2.1\",\"exccause\":\"0x1d\",\"epc\":\"0x40201234\",\"addr\":\"0x00000000\",\"uptime\":77}");
+    StatusCrash a;
+    a.reason = "Abort/out of memory"; a.fw = "3.2.1";
+    StringSink s2;
+    { PieceWriter<128> out(s2); writeStatusCrash(out, a); out.flush(); }
+    assert(s2.text == ",\"lastCrash\":{\"reason\":\"Abort/out of memory\",\"fw\":\"3.2.1\"}");
+  }
   std::printf("status reply tests passed (%d replies, byte for byte)\n", checked);
   return 0;
 }
