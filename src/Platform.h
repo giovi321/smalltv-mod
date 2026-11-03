@@ -159,10 +159,13 @@ static inline bool platformTimeValid() { return time(nullptr) > 1609459200; }
 void platformOnTimeSync(void (*cb)());
 
 // ---- common: record of the last crash --------------------------------------
-// What the previous abnormal reset (exception or watchdog) left behind. On the
-// ESP8266 it lives in RTC user memory, so it survives a normal restart and is
-// kept until platformCrashRecordClear() or a power cycle; no flash is written.
-// The ESP32 targets keep no record: platformCrashRecordGet() returns false.
+// What the previous abnormal reset (exception, watchdog, abort() or stack
+// overflow) left behind. On the ESP8266 it lives in RTC user memory, so it
+// survives a normal restart, and also a power-on reset as long as the RTC
+// contents are still valid (a brief dip in power). It is kept until
+// platformCrashRecordClear() or until power is really lost; no flash is
+// written. The ESP32 targets keep no record: platformCrashRecordGet() returns
+// false.
 struct PlatformCrashRecord {
   char     reason[24];     // see crashReasonLabel() in CrashRecord.h
   char     fw[16];         // FW_VERSION of the image that crashed
