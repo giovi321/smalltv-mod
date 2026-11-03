@@ -283,6 +283,34 @@ Month and weekday names are English; the device's configured timezone applies.
 | `{WD}` / `{WEEKDAY}` | Abbreviated / full weekday |
 | `{YYYY}` | Year |
 
+A theme with `"spec": 2` also accepts these tokens, so one text can use the
+union of what this firmware and SmallTV Pomodoro offer:
+
+| Token | Value |
+| --- | --- |
+| `{H}` | 0–23 hour, no leading zero |
+| `{MO}` | 01–12 month number |
+| `{AMPM}` | `AM` for 00:00–11:59, `PM` for 12:00–23:59 |
+| `{device.focusToday}`, `{device.focusGoal}`, `{device.streak}`, `{device.humidity}`, `{device.temperature}` | The firmware's value, as text, exactly as it supplied it |
+
+`{hh}` is the 12-hour clock with a leading zero, so `{hh}:{MM} {AMPM}` reads
+`03:04 PM`; `{H}:{MM}` reads `15:04`. Like the other clock tokens, the three
+clock tokens show `--` until the clock has been set. A `{device.*}` token shows
+`--` when the firmware does not supply that value, which is always the case on
+this firmware today (see [Built-in sources](#built-in-sources)), so a layout
+that must also run here should leave room for `--`. The names are the same as
+for bindings; `time.*` is not a text token, because `{HH}`, `{MM}` and the other
+clock tokens already cover it.
+
+In a `"spec": 1` theme none of these is accepted: `{H}`, `{MO}`, `{AMPM}` and
+`{device.*}` are unknown variables, so the package is refused when it is checked
+with `layers[n].value: use printable ASCII and declared clock/data variables only`,
+the same as any other unknown `{...}`. (A spec 1 theme that declares its own
+`data` source called `device` keeps using `{device.<field>}` as a fetched
+field, as before.) `tools/smalltv_theme.py preview --data device.temperature=21`
+supplies a device value for a spec 2 theme, to see what the layer shows with and
+without it.
+
 #### Scrolling text
 
 A text layer whose rendered content is wider than a declared viewport can

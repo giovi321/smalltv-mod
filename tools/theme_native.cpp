@@ -65,13 +65,19 @@ bool declaredDataField(const smalltv::Theme& theme,const std::string& key) {
     for(const auto& f:data.fields) if(f.id==field)return true;
   return false;
 }
-std::vector<smalltv::ThemeValue> injectedValues(const smalltv::Theme& theme,char** args,int count) {
+// `device.<name>=VALUE` (spec 2) goes to `device`, as a firmware would supply it.
+std::vector<smalltv::ThemeValue> injectedValues(const smalltv::Theme& theme,char** args,int count,std::vector<smalltv::ThemeValue>& device) {
   std::vector<smalltv::ThemeValue> values;
   for(int i=0;i<count;++i) {
     std::string arg=args[i];
     size_t eq=arg.find('=');
     if(eq==std::string::npos||eq==0)throw std::runtime_error("Expected KEY=VALUE: "+arg);
     std::string key=arg.substr(0,eq),value=arg.substr(eq+1);
+    if(theme.spec>=2&&smalltv::builtInSource(key)==smalltv::BuiltIn::Device) {
+      for(const auto& existing:device) if(existing.key==key)throw std::runtime_error("Duplicate data key: "+key);
+      device.push_back({key,value});
+      continue;
+    }
     if(!declaredDataField(theme,key))throw std::runtime_error("Undeclared data key: "+key);
     for(const auto& existing:values) if(existing.key==key)throw std::runtime_error("Duplicate data key: "+key);
     if(values.size()==MaxInjectedValues)throw std::runtime_error("Expected at most 32 injected values");
@@ -97,11 +103,11 @@ int main(int argc,char** argv) {
     uint64_t epoch=integer(argv[4],253402300739ULL);
     unsigned fps=integer(argv[5],15),frames=integer(argv[6],900);
     if(!fps||!frames||frames>60*fps)throw std::runtime_error("Preview is limited to 1..15 FPS and 60 seconds");
-    std::vector<smalltv::ThemeValue> values=injectedValues(theme,argv+7,argc-7);
+    std::vector<smalltv::ThemeValue> device,values=injectedValues(theme,argv+7,argc-7,device);
     std::ofstream out(argv[3],std::ios::binary);
     if(!out)throw std::runtime_error("Cannot create preview frames");
     out.write("STP1",4);u16(out,240);u16(out,240);u16(out,fps);u16(out,frames);
-    smalltv::Engine engine;engine.setTheme(std::move(theme),0);engine.setValues(std::move(values));Screen screen;
+    smalltv::Engine engine;engine.setTheme(std::move(theme),0);engine.setValues(std::move(values));engine.setDeviceValues(std::move(device));Screen screen;
     for(unsigned i=0;i<frames;++i) {
       // Sample at the first whole millisecond on/after the frame deadline.
       // Flooring 1000/15 would repeatedly sample before a 15 FPS frame is due.
