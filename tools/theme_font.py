@@ -276,7 +276,10 @@ def compile_font(data, size, glyphs, fallback=None):
     scale = size / font.units
     outlines = {}
     for code in codes:
-        index = font.cmap(code)
+        try:
+            index = font.cmap(code)
+        except (struct.error, IndexError) as error:
+            raise ValueError(f'{chr(code)!r}: malformed character map') from error
         if not 0 < index < len(font.advances):
             if chr(code) == '-' and '-' not in glyphs:
                 raise ValueError("font has no glyph for '-', which the firmware draws for a value it does not have yet")
