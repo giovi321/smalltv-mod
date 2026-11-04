@@ -118,6 +118,13 @@ jobs:
           node tests/theme/test_webui.js
           node tests/theme/test_webui_poll.js
 
+      # Sunrise and sunset worked out on the device, the dimming curve and its
+      # overlap with night mode. The settings test needs ArduinoJson (from
+      # .pio/libdeps, installed by the build step above) and the page test
+      # needs node.
+      - name: Test sun dimming logic
+        run: sh tests/sun/run.sh
+
       # Mutated packages, theme manifests and imported settings through the
       # real parsers, 32-bit with ASan and UBSan. A fixed seed and 2000 cases
       # per target keep the step short and repeatable; see tests/fuzz/README.md

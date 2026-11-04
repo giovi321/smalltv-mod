@@ -63,6 +63,7 @@ static StatusData busyData() {
   d.reset = "Software/System restart";
   d.synced = true; d.time = "2026-11-01 11:00"; d.tz = "Europe/Berlin";
   d.clockFresh = true;
+  d.sun = "06:58-16:42"; d.bl = 128;
   d.wg.compiledIn = d.wg.enabled = d.wg.up = true;
   d.wg.stage = 3; d.wg.attempts = 2; d.wg.endpointIp = "203.0.113.9"; d.wg.lastHandshake = 1793532000;
   return d;
@@ -102,6 +103,8 @@ static size_t oldWay() {
   o["heap"] = d.heap; o["maxblk"] = d.maxblk; o["contstk"] = d.contstk; o["uptime"] = d.uptime;
   o["reset"] = d.reset; o["synced"] = d.synced; o["time"] = std::string(d.time);
   o["tz"] = std::string(d.tz); o["night"] = d.night; o["nightHeld"] = d.nightHeld; o["clockFresh"] = d.clockFresh;
+  if (d.sun[0]) o["sun"] = std::string(d.sun);
+  o["bl"] = d.bl;
   fillWg(o["wg"].to<JsonObject>(), d.wg);
   JsonArray arr = o["tickers"].to<JsonArray>();
   for (size_t i = 0; i < 3; i++) {

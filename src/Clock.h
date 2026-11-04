@@ -19,6 +19,12 @@ bool   clockSynced();                        // SNTP has ever set the clock
 bool   clockTrusted();                       // synced within the trust window (clock believed correct now)
 bool   clockNow(struct tm& out);             // local broken-down time; false if unsynced
 
+// Sun schedule (SunTimes.h): the backlight steps for right now, between the
+// lowest level and highSteps. False when it cannot run (off, no location,
+// clock not set yet): the caller then uses the normal brightness.
+bool   clockSunSteps(const Settings& s, uint8_t highSteps, uint8_t& steps);
+bool   clockSunText(const Settings& s, char* buf, size_t n);   // "07:12-17:03", "polar day", "polar night"
+
 bool   clockNightActive();                   // night mode is on right now (from clockService)
 bool   clockNightHeld();                     // in the window but held off waiting for a fresh NTP sync
 

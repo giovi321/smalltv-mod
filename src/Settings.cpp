@@ -171,6 +171,11 @@ void ClockSettings::setDefaults() {
   nightStartMin = DEFAULT_NIGHT_START_MIN;
   nightEndMin   = DEFAULT_NIGHT_END_MIN;
   nightLevel    = DEFAULT_NIGHT_LEVEL;
+  lat = lon     = 0;
+  sunEnabled    = false;
+  sunLow        = 5;
+  sunRise = sunSet = 60;
+  sunOverlap    = 0;
 }
 
 void ClockSettings::toJson(JsonObject o) const {
@@ -181,6 +186,13 @@ void ClockSettings::toJson(JsonObject o) const {
   o["nightStart"]   = minToHhmm(nightStartMin);
   o["nightEnd"]     = minToHhmm(nightEndMin);
   o["nightLevel"]   = nightLevel;
+  o["lat"]          = lat;
+  o["lon"]          = lon;
+  o["sunEnabled"]   = sunEnabled;
+  o["sunLow"]       = sunLow;
+  o["sunRise"]      = sunRise;
+  o["sunSet"]       = sunSet;
+  o["sunOverlap"]   = sunOverlap;
 }
 
 void ClockSettings::fromJson(JsonObjectConst o) {
@@ -194,6 +206,13 @@ void ClockSettings::fromJson(JsonObjectConst o) {
   if (o["nightStart"].is<const char*>())  nightStartMin = hhmmToMin(o["nightStart"], nightStartMin);
   if (o["nightEnd"].is<const char*>())    nightEndMin   = hhmmToMin(o["nightEnd"], nightEndMin);
   if (o["nightLevel"].is<int>())          nightLevel = constrain((int)o["nightLevel"], 0, 100);
+  if (o["lat"].is<float>() || o["lat"].is<int>()) lat = constrain(o["lat"].as<float>(), -90.0f, 90.0f);
+  if (o["lon"].is<float>() || o["lon"].is<int>()) lon = constrain(o["lon"].as<float>(), -180.0f, 180.0f);
+  if (o["sunEnabled"].is<bool>())         sunEnabled = o["sunEnabled"];
+  if (o["sunLow"].is<int>())              sunLow = constrain((int)o["sunLow"], 0, 100);
+  if (o["sunRise"].is<int>())             sunRise = constrain((int)o["sunRise"], 0, 120);
+  if (o["sunSet"].is<int>())              sunSet = constrain((int)o["sunSet"], 0, 120);
+  if (o["sunOverlap"].is<int>())          sunOverlap = constrain((int)o["sunOverlap"], 0, 2);
 }
 
 // ===========================================================================
@@ -370,6 +389,7 @@ void HaSettings::fromJson(JsonObjectConst o) {
 void RadarSettings::setDefaults() {
   lat = DEFAULT_RADAR_LAT;
   lon = DEFAULT_RADAR_LON;
+  useDevice = true;
   source = DEFAULT_RADAR_SRC;
   webhookUrl = "";
   rangeKm = DEFAULT_RADAR_RANGE_KM;
@@ -390,6 +410,7 @@ void RadarSettings::setDefaults() {
 void RadarSettings::toJson(JsonObject o) const {
   o["lat"]         = lat;
   o["lon"]         = lon;
+  o["useDevice"]   = useDevice;
   o["source"]      = (source == RADAR_SRC_WEBHOOK) ? "webhook"
                    : (source == RADAR_SRC_ADSBLOL) ? "adsblol" : "adsbfi";
   o["webhookUrl"]  = webhookUrl;
@@ -414,6 +435,13 @@ void RadarSettings::toJson(JsonObject o) const {
 void RadarSettings::fromJson(JsonObjectConst o) {
   if (o["lat"].is<float>() || o["lat"].is<int>()) lat = o["lat"].as<float>();
   if (o["lon"].is<float>() || o["lon"].is<int>()) lon = o["lon"].as<float>();
+  // Files from before the device location have a home but no switch: the radar
+  // keeps its own coordinates. An unset home (0/0) follows the device location.
+  // The rule only applies when this object carries a home itself: a partial
+  // save such as {"radar":{"rangeKm":50}} must not read the stored coordinates.
+  if (o["useDevice"].is<bool>()) useDevice = o["useDevice"];
+  else if ((!o["lat"].isNull() || !o["lon"].isNull()) && (lat != 0.0f || lon != 0.0f))
+    useDevice = false;
   if (o["source"].is<const char*>()) {
     String src = o["source"].as<String>();
     // "direct" is the pre-2.11 name for "whichever direct feed we default to".
@@ -675,4 +703,15 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["wg"].is<JsonObjectConst>()) s.wg.fromJson(root["wg"].as<JsonObjectConst>());
   if (root["auth"].is<JsonObjectConst>()) s.auth.fromJson(root["auth"].as<JsonObjectConst>());
   if (root["button"].is<JsonObjectConst>()) s.button.fromJson(root["button"].as<JsonObjectConst>());
+
+  // The sun schedule and the light sensor each pick the brightness alone: not
+  // both. Whichever this save turned on wins; if both arrive on (or both were
+  // already stored), the sun schedule wins.
+  if (s.autoBrightness && s.clock.sunEnabled) {
+    JsonObjectConst c = root["clock"].as<JsonObjectConst>();
+    bool autoNew = root["autoBrightness"].is<bool>() && root["autoBrightness"].as<bool>();
+    bool sunNew = c["sunEnabled"].is<bool>() && c["sunEnabled"].as<bool>();
+    if (autoNew && !sunNew) s.clock.sunEnabled = false;
+    else s.autoBrightness = false;
+  }
 }

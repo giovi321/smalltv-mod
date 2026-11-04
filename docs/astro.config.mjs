@@ -52,6 +52,7 @@ export default defineConfig({
             { label: 'WireGuard VPN', link: '/features/wireguard/' },
             { label: 'Notifications', link: '/features/notify/' },
             { label: 'Theme clocks', link: '/features/themes/' },
+            { label: 'Sunrise and sunset brightness', link: '/features/sun/' },
             { label: 'SmallTV Studio editor', link: 'https://giovi321.github.io/smalltv-studio/' },
             { label: 'Home Assistant screens', link: '/features/ha/' },
           ],
