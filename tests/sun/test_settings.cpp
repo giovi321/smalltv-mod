@@ -156,6 +156,10 @@ static void testOldConfigs() {
   n.setDefaults();
   apply(n, "{\"radar\":{\"lon\":4.9041}}");
   CHECK(!n.radar.useDevice, "a save with only a longitude is a home");
+  Settings na;
+  na.setDefaults();
+  apply(na, "{\"radar\":{\"lat\":52.3676}}");
+  CHECK(!na.radar.useDevice, "a save with only a latitude is a home");
   // A save that carries a 0/0 home leaves the radar on the device location.
   Settings u;
   u.setDefaults();
