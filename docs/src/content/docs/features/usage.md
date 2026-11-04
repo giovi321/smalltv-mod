@@ -71,3 +71,35 @@ IMPORTANT: mDNS is link-local and does not cross routers, subnets, or VLANs. If 
 - run the daemon on the devices' subnet
 - enable an mDNS reflector between the subnets
 - list the device IPs explicitly instead of relying on discovery, with repeatable or comma-separated `--push-to`, or via the tray icon's **Configure push targets** dialog
+
+## Prompt status from Claude Code
+
+The stats screen can also show whether Claude Code is working right now. It appears in the top-right corner, next to the header:
+
+- **Running**: three orange dots that hop in turn while a prompt is being processed.
+- **Done**: when the prompt finishes, the panel flashes orange with a large `DONE` for 1.5 s. A small `DONE` badge then stays in the corner.
+- **Idle**: nothing.
+
+Claude Code hooks on the PC set the state with `POST /api/activity?state=running|done|idle`. Add two hooks to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "async": true,
+        "command": "curl -s -m 1 -X POST \"http://<smalltv-ip>/api/activity?state=running\" >/dev/null 2>&1 || true" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "async": true,
+        "command": "curl -s -m 1 -X POST \"http://<smalltv-ip>/api/activity?state=done\" >/dev/null 2>&1 || true" } ] }
+    ]
+  }
+}
+```
+
+Merge them into any hooks you already have. Hooks load when a session starts, so open a new Claude Code session afterwards.
+
+- `async: true` and `-m 1` mean a prompt never waits on the device.
+- If the web UI password is on, the endpoint needs it like every other page: add `--digest -u <user>:<password>` to both curl commands.
+- The states time out on their own, so a missed hook cannot leave the corner stuck: running after 30 minutes, done after 10 minutes.
+- The indicator shows only on the stats screen, so the daemon has to be pushing. The idle mascot screen does not show it.

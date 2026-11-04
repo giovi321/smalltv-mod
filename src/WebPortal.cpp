@@ -481,6 +481,20 @@ static void handleUsagePush() {
               ok ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
+// Prompt activity from Claude Code hooks: /api/activity?state=running|done|idle.
+// A query argument rather than JSON so a hook is a single curl with no quoting.
+// Behind the password like /api/notify, for the same reason.
+static void handleActivity() {
+  if (!requireAuth()) return;
+#if WITH_USAGE
+  bool ok = usageSetActivity(server.arg("state"));
+#else
+  bool ok = false;
+#endif
+  server.send(ok ? 200 : 400, "application/json",
+              ok ? "{\"ok\":true}" : "{\"ok\":false}");
+}
+
 // Attention overlay. Every field is optional and falls back to the preset named
 // by "type" (itself defaulting to "info"), so the smallest useful request is
 // {"label":"..."} and the largest overrides the lot:
@@ -609,6 +623,7 @@ void webPortalBegin(Settings& settings) {
   server.on("/api/checkupdate", HTTP_GET, handleCheckUpdate);
   server.on("/api/selfupdate", HTTP_POST, handleSelfUpdate);
   server.on("/api/usage", HTTP_POST, handleUsagePush);   // daemon pushes usage here
+  server.on("/api/activity", HTTP_POST, handleActivity); // Claude Code hooks
 #if WITH_HA
   server.on("/api/ha/clear", HTTP_POST, handleHaClear);  // purge HA screens (device + broker retained)
 #endif

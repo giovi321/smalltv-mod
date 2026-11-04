@@ -274,6 +274,11 @@
 // animation. Effective timeout also scales with the poll period (see main.cpp).
 #define USAGE_STALE_GRACE_MS  20000UL
 
+// Prompt activity indicator (POST /api/activity): how long "running" holds
+// without a new event, and how long the DONE badge stays up.
+#define USAGE_ACT_RUNNING_MS  (30UL * 60UL * 1000UL)
+#define USAGE_ACT_DONE_MS     (10UL * 60UL * 1000UL)
+
 // ---------------------------------------------------------------------------
 // Data source (stock mode)
 //   0 = custom webhook (n8n / Node-RED / your own HTTP endpoint)
