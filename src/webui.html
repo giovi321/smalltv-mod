@@ -217,7 +217,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    </div>
    <label>Night brightness: <span id="nlVal"></span>% <span class="muted">(0 = screen off)</span></label>
    <input id="nightLevel" type="range" min="0" max="100" oninput="nlVal.textContent=this.value">
-   <small class="hint">Needs internet once to set the clock over NTP. The timezone also applies to theme clocks. While the window is active it overrides the brightness and auto-brightness above. Times are local to the selected timezone; DST is handled automatically. After a reboot the schedule resumes once the clock re-syncs, so the screen may show normal brightness for a few seconds.</small>
+   <small class="hint">Needs internet once to set the clock over NTP. The timezone also applies to theme clocks. While the window is active it overrides the brightness and auto-brightness above, except when the sun schedule below is on: then its "When night mode is also on" choice decides. Times are local to the selected timezone; DST is handled automatically. After a reboot the schedule resumes once the clock re-syncs, so the screen may show normal brightness for a few seconds.</small>
    <div class="chk"><input id="sunEnabled" type="checkbox" onchange="sunToggled()"><label>Follow sunrise and sunset (needs the device location)</label></div>
    <label>Lowest brightness: <span id="slVal"></span>% <span class="muted">(0 = screen off)</span></label>
    <input id="sunLow" type="range" min="0" max="100" oninput="slVal.textContent=this.value">
@@ -309,7 +309,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <!-- RADAR (feature) -->
  <section id="radar" class="tab">
   <div class="card"><h2>Home location</h2>
-   <div class="chk"><input id="radarUseDevice" type="checkbox" onchange="radarLocChanged()"><label>Use the device location (Settings tab, Clock)</label></div>
+   <div class="chk"><input id="radarUseDevice" type="checkbox" onchange="radarLocChanged()"><label>Use the device location (Display tab, Clock &amp; night mode card)</label></div>
    <div class="row">
     <div><label>Latitude</label><input id="radarLat" type="number" step="0.0001" placeholder="52.3676"></div>
     <div><label>Longitude</label><input id="radarLon" type="number" step="0.0001" placeholder="4.9041"></div>
@@ -807,7 +807,7 @@ document.addEventListener('visibilitychange',function(){
 function showStatus(s){
  $('dot').className='dot'+(s.connected?' ok':'');
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
- var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&(C.clock.nightEnabled||C.clock.sunEnabled))||C.mode==='theme'||!!(C.wg&&C.wg.enabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: enable night mode, a theme clock, or WireGuard to start NTP':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
+ var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&(C.clock.nightEnabled||C.clock.sunEnabled))||C.mode==='theme'||!!(C.wg&&C.wg.enabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: enable night mode, the sun schedule, a theme clock, or WireGuard to start NTP':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
  var sn=$('sunNow'); if(sn&&C.clock&&C.clock.sunEnabled)sn.textContent=s.sun?('Today: '+s.sun+'. Fades start at sunrise and at sunset.'):(C.clock.lat||C.clock.lon?'Waiting for the clock (NTP)...':'Set the device location above.');
  var fw=$('fwVer'); if(fw)fw.textContent=s.fw+' '+s.version;
  // Surface the result of a boot-time GitHub update (ESP8266) once on first load,

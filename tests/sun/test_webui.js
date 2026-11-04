@@ -55,6 +55,13 @@ vm.runInContext(code, context);
   assert.equal(nodes.locLat.value, '44.4687');
   assert.equal(nodes.locLon.value, '-71.1851');
 
+  // the hints name every setting that starts NTP, and do not overstate night mode
+  assert.match(html, /enable night mode, the sun schedule, a theme clock, or WireGuard to start NTP/);
+  assert.ok(!html.includes('it overrides the brightness and auto-brightness above.'),
+    'night-mode hint must not say it always overrides');
+  assert.match(html, /except when the sun schedule below is on: then its "When night mode is also on" choice decides/);
+  assert.match(html, /Use the device location \(Display tab, Clock &amp; night mode card\)/);
+
   // the fields accept 4 decimals: the browser rejects a number off the step
   assert.match(html, /id="locLat" type="number" step="0\.0001"/);
   assert.match(html, /id="locLon" type="number" step="0\.0001"/);
