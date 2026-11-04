@@ -80,7 +80,21 @@ The stats screen can also show whether Claude Code is working right now. It appe
 - **Done**: when the prompt finishes, the panel flashes orange with a large `DONE` for 1.5 s. A small `DONE` badge then stays in the corner.
 - **Idle**: nothing.
 
-Claude Code hooks on the PC set the state with `POST /api/activity?state=running|done|idle`. Add two hooks to `~/.claude/settings.json`:
+Claude Code hooks on the PC set the state with `POST /api/activity?state=running|done|idle`. [clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon) installs them in one step:
+
+```sh
+python clawdmeter_daemon.py --install-hooks     # remove again with --uninstall-hooks
+```
+
+The hooks report to the daemon on localhost, and the daemon forwards the state to every device it pushes to. So the hooks need no device address. Open a new Claude Code session afterwards, since hooks load when a session starts.
+
+- The daemon has to run with the **HTTP push** transport. The stats screen needs that anyway, and the idle mascot screen does not show the indicator.
+- If the web UI password is on, `/api/activity` needs it like every other page. Put it in the daemon's config (`~/.clawdmeter-daemon.json`, `device_user` and `device_password`), not in Claude's settings.
+- The states time out on their own, so a missed hook cannot leave the corner stuck: running after 30 minutes, done after 10 minutes.
+
+### Without the daemon's installer
+
+Add two hooks to `~/.claude/settings.json` by hand, merged into any hooks you already have. They call the device directly:
 
 ```json
 {
@@ -97,9 +111,4 @@ Claude Code hooks on the PC set the state with `POST /api/activity?state=running
 }
 ```
 
-Merge them into any hooks you already have. Hooks load when a session starts, so open a new Claude Code session afterwards.
-
-- `async: true` and `-m 1` mean a prompt never waits on the device.
-- If the web UI password is on, the endpoint needs it like every other page: add `--digest -u <user>:<password>` to both curl commands.
-- The states time out on their own, so a missed hook cannot leave the corner stuck: running after 30 minutes, done after 10 minutes.
-- The indicator shows only on the stats screen, so the daemon has to be pushing. The idle mascot screen does not show it.
+`async: true` and `-m 1` mean a prompt never waits on the device. With the web UI password on, add `--digest -u <user>:<password>` to both curl commands. Note that this leaves the password in plain text in `settings.json`.
