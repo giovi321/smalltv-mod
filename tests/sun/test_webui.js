@@ -113,6 +113,9 @@ vm.runInContext(code, context);
     'Today: 07:12-17:03. Fades start at sunrise and at sunset. Brightness now: 100%.');
   assert.match(context.sunNowText(on, { sun: 'polar night', bl: 13 }), /^Today: polar night\..* Brightness now: 5%\.$/);
   assert.match(context.sunNowText(on, { sun: '07:12-17:03', bl: 0 }), /Brightness now: 0%\.$/);
+  // rounded to the nearest percent: 130/255 is 50.98
+  assert.match(context.sunNowText(on, { sun: '07:12-17:03', bl: 130 }), /Brightness now: 51%\.$/);
+  assert.match(context.sunNowText(on, { sun: '07:12-17:03', bl: 127 }), /Brightness now: 50%\.$/);
   // bl is -1 until the first backlight write after boot: say nothing about it, not "-1%"
   const early = context.sunNowText(on, { sun: '07:12-17:03', bl: -1 });
   assert.ok(!/Brightness now/.test(early) && !/-1%/.test(early), early);

@@ -456,7 +456,7 @@ static void testSunText() {
   n = sunTimesText(t, b, sizeof(b));
   CHECK(strcmp(b, "polar night") == 0 && n == 11, "polar night: '%s'", b);
   // The longest text fits the 24 bytes WebPortal gives it; a short buffer is cut, never overrun.
-  char small[6] = "xxxxx";
+  char small[6] = {'x', 'x', 'x', 'x', 'x', 'x'};
   t = {SUN_POLAR_NIGHT, 0, 0};
   sunTimesText(t, small, sizeof(small));
   CHECK(strcmp(small, "polar") == 0, "cut to the buffer: '%s'", small);
