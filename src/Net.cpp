@@ -95,6 +95,16 @@ static void recordFailure(const String& ssid) {
 static void beginJoin(const WifiCred& n) {
   g_lastReason = 0;
   g_assoc = false;
+#if !defined(SMALLTV_FAMILY_ESP32)
+  // Put the PHY mode and TX power back to the SDK defaults before every join.
+  // The SDK keeps its RF settings in flash, so after an install over the stock
+  // OTA (no erase_flash) whatever the stock firmware left there stays in force.
+  // A SmallTV-ultra was refused by a FRITZ! mesh with reason 203 until this and
+  // the boot scan in netBegin() went in together (not tested apart). Setting
+  // the defaults changes nothing for a device that already uses them.
+  WiFi.setPhyMode(WIFI_PHY_MODE_11N);
+  WiFi.setOutputPower(20.5f);
+#endif
   WiFi.begin(n.ssid.c_str(), n.pass.c_str());
 }
 
@@ -143,6 +153,13 @@ void netBegin(const Settings& s, void (*onProgress)(const char*)) {
   uint8_t order[MAX_WIFI_NETS];
   bool    seen[MAX_WIFI_NETS];
   if (s.wifiCount == 1) {
+#if !defined(SMALLTV_FAMILY_ESP32)
+    // Scan anyway, results unused (about 2 s at boot). Part of the fix for the
+    // 203 refusal described in beginJoin(); the two went in together.
+    if (onProgress) onProgress("Scanning...");
+    WiFi.scanNetworks();
+    WiFi.scanDelete();
+#endif
     order[0] = 0;
     seen[0] = true;
   } else {
