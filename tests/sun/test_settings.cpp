@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 // Stand-ins the real Settings.cpp links against (as in tests/fuzz/fuzz_parsers.cpp).
 FSClass LittleFS;
@@ -84,6 +85,25 @@ static void testRoundTrip() {
         t.clock.sunSet == 90 && t.clock.sunOverlap == 1, "sun settings survive a round trip");
   CHECK(fabsf(t.clock.lat + 33.87f) < 1e-3f && fabsf(t.clock.lon - 151.21f) < 1e-3f, "location survives");
   CHECK(!t.radar.useDevice && t.radar.lat == 1.5f && t.radar.lon == 2.5f, "radar switch and own location survive");
+  // Four decimals (about 10 m) survive the whole path: apply, write the file
+  // text, read it back. The radar follows the device location, so it matters.
+  Settings g;
+  g.setDefaults();
+  apply(g, "{\"clock\":{\"lat\":-33.8688,\"lon\":151.2093},\"radar\":{\"useDevice\":false,\"lat\":52.3676,\"lon\":4.9041}}");
+  JsonDocument gd;
+  settingsToJson(g, gd.to<JsonObject>(), true);
+  char text[2048];
+  serializeJson(gd, text, sizeof(text));
+  JsonDocument gd2;
+  CHECK(!deserializeJson(gd2, text), "file text parses");
+  Settings g2;
+  g2.setDefaults();
+  settingsApplyJson(g2, gd2.as<JsonObjectConst>());
+  CHECK(fabsf(g2.clock.lat + 33.8688f) < 5e-5f && fabsf(g2.clock.lon - 151.2093f) < 5e-5f,
+        "device location keeps 4 decimals: %.5f %.5f", g2.clock.lat, g2.clock.lon);
+  CHECK(fabsf(g2.radar.lat - 52.3676f) < 5e-5f && fabsf(g2.radar.lon - 4.9041f) < 5e-5f,
+        "radar location keeps 4 decimals: %.5f %.5f", g2.radar.lat, g2.radar.lon);
+  CHECK(strstr(text, "151.2093") != nullptr, "the file text carries 4 decimals: %s", text);
   // The web API output (no secrets) carries them too, for the settings page.
   JsonDocument api;
   settingsToJson(s, api.to<JsonObject>(), false);

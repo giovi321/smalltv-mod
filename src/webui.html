@@ -201,8 +201,8 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <div class="muted" id="clockNow" style="margin:8px 0">Clock: -</div>
    <label>Device location</label>
    <div class="row">
-    <div><input id="locLat" type="number" step="0.01" placeholder="latitude, e.g. 52.52"></div>
-    <div><input id="locLon" type="number" step="0.01" placeholder="longitude, e.g. 13.41"></div>
+    <div><input id="locLat" type="number" step="0.0001" placeholder="latitude, e.g. 52.3676"></div>
+    <div><input id="locLon" type="number" step="0.0001" placeholder="longitude, e.g. 4.9041"></div>
    </div>
    <div class="row">
     <div><input id="locQ" type="text" placeholder="Search a place" onkeydown="if(event.key==='Enter')placeSearch()"></div>
@@ -437,7 +437,7 @@ function placeSearch(){var q=gv('locQ').trim(); if(!q)return Promise.resolve();
   $('locMsg').textContent='Pick the right place. The numbers are filled in and can still be edited. Save to keep them.';
  }).catch(function(){$('locMsg').textContent='Search failed (no internet in this browser?). Type the numbers instead.'})}
 function placePick(){var p=PLACES[parseInt(gv('locRes'))]; if(!p)return;
- sv('locLat',p.latitude.toFixed(2)); sv('locLon',p.longitude.toFixed(2))}
+ sv('locLat',p.latitude.toFixed(4)); sv('locLon',p.longitude.toFixed(4))}
 function sunToggled(){if(gc('sunEnabled'))sc('autoBrightness',false)}
 function autoToggled(){if(gc('autoBrightness'))sc('sunEnabled',false)}
 function radarLocChanged(){var d=gc('radarUseDevice'); $('radarLat').disabled=d; $('radarLon').disabled=d}

@@ -44,16 +44,20 @@ vm.runInContext(code, context);
   assert.match(nodes.locRes.children[1].textContent, /New Hampshire/);
   assert.notEqual(nodes.locRes.style.display, 'none');
 
-  // picking a match fills in latitude and longitude with 2 decimals
+  // picking a match fills in latitude and longitude with 4 decimals (the radar
+  // follows this location and used to take 4: about 10 m, not 1 km)
   nodes.locRes.value = '0';
   context.placePick();
-  assert.equal(nodes.locLat.value, '52.52');
-  assert.equal(nodes.locLon.value, '13.41');
+  assert.equal(nodes.locLat.value, '52.5244');
+  assert.equal(nodes.locLon.value, '13.4105');
   nodes.locRes.value = '1';
   context.placePick();
-  assert.equal(nodes.locLat.value, '44.47');
-  assert.equal(nodes.locLon.value, '-71.19');
+  assert.equal(nodes.locLat.value, '44.4687');
+  assert.equal(nodes.locLon.value, '-71.1851');
 
+  // the fields accept 4 decimals: the browser rejects a number off the step
+  assert.match(html, /id="locLat" type="number" step="0\.0001"/);
+  assert.match(html, /id="locLon" type="number" step="0\.0001"/);
   // an empty search sends nothing
   nodes.locQ.value = '   ';
   await context.placeSearch();
