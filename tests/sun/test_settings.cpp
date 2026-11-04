@@ -120,6 +120,27 @@ static void testOldConfigs() {
   p.setDefaults();
   apply(p, "{\"radar\":{\"lat\":51.5,\"lon\":0}}");
   CHECK(!p.radar.useDevice, "old radar home with longitude 0 keeps its own coordinates");
+  // A partial save that does not mention the home must not touch the switch,
+  // even when coordinates are stored (a script posting only the range).
+  Settings m;
+  m.setDefaults();
+  m.radar.useDevice = true;
+  m.radar.lat = 52.3676f; m.radar.lon = 4.9041f;
+  apply(m, "{\"radar\":{\"rangeKm\":50}}");
+  CHECK(m.radar.useDevice, "partial save without lat/lon keeps the switch on");
+  CHECK(m.radar.rangeKm == 50, "partial save still applies the range");
+  CHECK(fabsf(m.radar.lat - 52.3676f) < 1e-4f && fabsf(m.radar.lon - 4.9041f) < 1e-4f,
+        "partial save leaves the stored coordinates alone");
+  // A partial save that carries one coordinate counts as a home, as in a file.
+  Settings n;
+  n.setDefaults();
+  apply(n, "{\"radar\":{\"lon\":4.9041}}");
+  CHECK(!n.radar.useDevice, "a save with only a longitude is a home");
+  // A save that carries a 0/0 home leaves the radar on the device location.
+  Settings u;
+  u.setDefaults();
+  apply(u, "{\"radar\":{\"lat\":0,\"lon\":0}}");
+  CHECK(u.radar.useDevice, "a save with a 0/0 home stays on the device location");
   // The switch, when present, wins over the guess.
   Settings w;
   w.setDefaults();

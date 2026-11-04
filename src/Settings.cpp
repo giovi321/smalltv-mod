@@ -437,8 +437,11 @@ void RadarSettings::fromJson(JsonObjectConst o) {
   if (o["lon"].is<float>() || o["lon"].is<int>()) lon = o["lon"].as<float>();
   // Files from before the device location have a home but no switch: the radar
   // keeps its own coordinates. An unset home (0/0) follows the device location.
+  // The rule only applies when this object carries a home itself: a partial
+  // save such as {"radar":{"rangeKm":50}} must not read the stored coordinates.
   if (o["useDevice"].is<bool>()) useDevice = o["useDevice"];
-  else if (lat != 0.0f || lon != 0.0f) useDevice = false;
+  else if ((!o["lat"].isNull() || !o["lon"].isNull()) && (lat != 0.0f || lon != 0.0f))
+    useDevice = false;
   if (o["source"].is<const char*>()) {
     String src = o["source"].as<String>();
     // "direct" is the pre-2.11 name for "whichever direct feed we default to".
