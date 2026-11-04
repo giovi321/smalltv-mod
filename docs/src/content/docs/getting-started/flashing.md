@@ -68,6 +68,8 @@ The fix is a two-step install through a tiny loader, no soldering. The loader is
 
 After this first install, normal OTA works from the System tab, because this firmware's layout has room for two sketch copies. You only need the loader once.
 
+The loader path does not erase the flash, so the ESP8266's stored RF settings from the stock firmware survive it. If the device then never joins your WiFi and the router log shows `router refused (203)`, update to a firmware that has the join fix (it resets those settings before every join). If it still fails, erase the flash over the serial header (`esptool.py --port COM5 erase_flash`) and write the image as in the [UART recovery](#uart-header-for-recovery-or-a-direct-install) steps.
+
 If the loader ever will not come back up, flash over the serial header instead. The board is a plain ESP-12F, so the [UART recovery](#uart-header-for-recovery-or-a-direct-install) steps above apply directly: `esptool.py --port COM5 write_flash 0x0 smalltv-mod-firmware.bin`.
 
 ## SmallTV (ESP32-C2 / ESP8684)
