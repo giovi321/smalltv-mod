@@ -7,7 +7,13 @@ Switch **Display → Mode** to **Radar** and set it up in the **Radar** tab. The
 
 ## Set your location
 
-Enter your home latitude and longitude in decimal degrees, a range ring (5, 10, 15, 20, 25, or 50), and whether to measure in km or miles. Then pick a data source, below.
+By default the radar is centred on the **device location**, the one you set in the Display tab's **Clock & night mode** card (see [Sunrise and sunset brightness](/smalltv-mod/features/sun/)). In the Radar tab this is the **Use the device location** box, and it is on. While it is on, the radar's own Latitude and Longitude fields are greyed out, because they are not used. If the device location is still 0/0 (not set), the screen asks you to set a location.
+
+To centre the radar somewhere else, for example on an airport, untick **Use the device location**. The fields become editable. Enter the latitude and longitude in decimal degrees (four decimals are kept). Tick the box again to go back to the device location. The radar's own coordinates stay saved while the box is on, so unticking it brings them back.
+
+Also choose a range ring (5, 10, 15, 20, 25, or 50), and whether to measure in km or miles. Then pick a data source, below.
+
+A radar set up on an older firmware, with its own coordinates, keeps them: the box starts unticked for it.
 
 ## Display options
 
