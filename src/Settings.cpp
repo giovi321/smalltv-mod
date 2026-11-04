@@ -1,6 +1,7 @@
 #include "Settings.h"
 #include "AtomicJson.h"
 #include "Platform.h"   // platformChipId() for the unique default hostname
+#include "features/theme/Languages.h"
 #include <LittleFS.h>
 
 static const char* CONFIG_PATH = "/config.json";
@@ -165,6 +166,7 @@ static String minToHhmm(uint16_t v) {
 void ClockSettings::setDefaults() {
   tz            = DEFAULT_TZ_NAME;
   tzPosix       = DEFAULT_TZ_POSIX;
+  lang          = "en";
   nightEnabled  = DEFAULT_NIGHT_ENABLED;
   nightStartMin = DEFAULT_NIGHT_START_MIN;
   nightEndMin   = DEFAULT_NIGHT_END_MIN;
@@ -174,6 +176,7 @@ void ClockSettings::setDefaults() {
 void ClockSettings::toJson(JsonObject o) const {
   o["tz"]           = tz;
   o["tzPosix"]      = tzPosix;
+  o["lang"]         = lang;
   o["nightEnabled"] = nightEnabled;
   o["nightStart"]   = minToHhmm(nightStartMin);
   o["nightEnd"]     = minToHhmm(nightEndMin);
@@ -183,6 +186,10 @@ void ClockSettings::toJson(JsonObject o) const {
 void ClockSettings::fromJson(JsonObjectConst o) {
   if (o["tz"].is<const char*>())          tz = o["tz"].as<String>();
   if (o["tzPosix"].is<const char*>())     tzPosix = o["tzPosix"].as<String>();
+  if (o["lang"].is<const char*>()) {
+    const char* code = o["lang"];
+    if (smalltv::languageIndex(code, strlen(code)) >= 0) lang = code;   // an unknown code keeps the old one
+  }
   if (o["nightEnabled"].is<bool>())       nightEnabled = o["nightEnabled"];
   if (o["nightStart"].is<const char*>())  nightStartMin = hhmmToMin(o["nightStart"], nightStartMin);
   if (o["nightEnd"].is<const char*>())    nightEndMin   = hhmmToMin(o["nightEnd"], nightEndMin);
