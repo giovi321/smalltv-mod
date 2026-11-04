@@ -441,6 +441,16 @@ function placePick(){var p=PLACES[parseInt(gv('locRes'))]; if(!p)return;
 function sunToggled(){if(gc('sunEnabled'))sc('autoBrightness',false)}
 function autoToggled(){if(gc('autoBrightness'))sc('sunEnabled',false)}
 function radarLocChanged(){var d=gc('radarUseDevice'); $('radarLat').disabled=d; $('radarLon').disabled=d}
+// The line under the schedule, from the settings (c) and the status reply (s).
+// null: the schedule is off, leave the hint alone. s.bl is the backlight level
+// 0..255; it reads -1 until the first write after boot (and is missing on an
+// older firmware), so it is left out until then instead of showing "-1%".
+function sunNowText(c,s){
+ if(!c||!c.sunEnabled)return null;
+ if(!s.sun)return (c.lat||c.lon)?'Waiting for the clock (NTP)...':'Set the device location above.';
+ var t='Today: '+s.sun+'. Fades start at sunrise and at sunset.';
+ if(s.bl>=0)t+=' Brightness now: '+Math.round(s.bl*100/255)+'%.';
+ return t}
 function numIn(v,def,lo,hi){var n=parseInt(v); return isNaN(n)?def:Math.min(hi,Math.max(lo,n))}
 // sun end
 function toast(m){var t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2200)}
@@ -808,7 +818,7 @@ function showStatus(s){
  $('dot').className='dot'+(s.connected?' ok':'');
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
  var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&(C.clock.nightEnabled||C.clock.sunEnabled))||C.mode==='theme'||!!(C.wg&&C.wg.enabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: enable night mode, the sun schedule, a theme clock, or WireGuard to start NTP':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
- var sn=$('sunNow'); if(sn&&C.clock&&C.clock.sunEnabled)sn.textContent=s.sun?('Today: '+s.sun+'. Fades start at sunrise and at sunset.'):(C.clock.lat||C.clock.lon?'Waiting for the clock (NTP)...':'Set the device location above.');
+ var sn=$('sunNow'),st=sunNowText(C.clock,s); if(sn&&st!==null)sn.textContent=st;
  var fw=$('fwVer'); if(fw)fw.textContent=s.fw+' '+s.version;
  // Surface the result of a boot-time GitHub update (ESP8266) once on first load,
  // so a failure that happened across the reboot is visible even if the original

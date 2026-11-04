@@ -105,6 +105,26 @@ vm.runInContext(code, context);
   context.radarLocChanged();
   assert.equal(nodes.radarLat.disabled, false);
 
+  // the status line under the schedule: today's times and the brightness now
+  const on = { sunEnabled: true, lat: 52.3676, lon: 4.9041 };
+  assert.equal(context.sunNowText({ sunEnabled: false }, { sun: '07:12-17:03', bl: 255 }), null);
+  assert.equal(context.sunNowText(null, {}), null);
+  assert.equal(context.sunNowText(on, { sun: '07:12-17:03', bl: 255 }),
+    'Today: 07:12-17:03. Fades start at sunrise and at sunset. Brightness now: 100%.');
+  assert.match(context.sunNowText(on, { sun: 'polar night', bl: 13 }), /^Today: polar night\..* Brightness now: 5%\.$/);
+  assert.match(context.sunNowText(on, { sun: '07:12-17:03', bl: 0 }), /Brightness now: 0%\.$/);
+  // bl is -1 until the first backlight write after boot: say nothing about it, not "-1%"
+  const early = context.sunNowText(on, { sun: '07:12-17:03', bl: -1 });
+  assert.ok(!/Brightness now/.test(early) && !/-1%/.test(early), early);
+  // an older firmware sends no bl at all
+  assert.ok(!/Brightness now/.test(context.sunNowText(on, { sun: '07:12-17:03' })));
+  // no times yet: waiting for the clock when there is a location, else ask for one
+  assert.equal(context.sunNowText(on, { sun: '', bl: 255 }), 'Waiting for the clock (NTP)...');
+  assert.equal(context.sunNowText({ sunEnabled: true, lat: 0, lon: 0 }, {}), 'Set the device location above.');
+  assert.equal(context.sunNowText({ sunEnabled: true, lat: 0, lon: 4.9 }, {}), 'Waiting for the clock (NTP)...');
+  // the page uses it for the line under the schedule
+  assert.match(html, /sunNowText\(C\.clock,s\)/);
+
   // reading the numbers: 0 is a real value for the fades and the lowest level
   assert.equal(context.numIn('0', 60, 0, 120), 0);
   assert.equal(context.numIn('', 60, 0, 120), 60);
