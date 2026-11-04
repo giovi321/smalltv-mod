@@ -1,5 +1,18 @@
 #include "SunTimes.h"
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
+// Fixed text stays in flash on the ESP8266 (as in JsonStream.h); elsewhere
+// PSTR() and snprintf_P() are the plain ones.
+#if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
+#include <pgmspace.h>
+#endif
+#ifndef PSTR
+#define PSTR(s) (s)
+#define snprintf_P snprintf
+#define strlen_P strlen
+#define memcpy_P memcpy
+#endif
 
 // ---- sun times --------------------------------------------------------------
 // Low-precision solar position from the Astronomical Almanac (good to about
@@ -85,6 +98,25 @@ SunTimes sunTimes(float lat, float lon, int year, int month, int day,
     if (ev == 0) out.rise = (int16_t)m; else out.set = (int16_t)m;
   }
   return out;
+}
+
+// Copy text from flash like snprintf(): cut to n bytes, return the full length.
+static size_t copyP(char* buf, size_t n, const char* p) {
+  size_t len = strlen_P(p);
+  if (n) {
+    size_t c = len < n - 1 ? len : n - 1;
+    memcpy_P(buf, p, c);
+    buf[c] = 0;
+  }
+  return len;
+}
+
+size_t sunTimesText(const SunTimes& t, char* buf, size_t n) {
+  if (t.kind == SUN_POLAR_DAY) return copyP(buf, n, PSTR("polar day"));
+  if (t.kind == SUN_POLAR_NIGHT) return copyP(buf, n, PSTR("polar night"));
+  int r = snprintf_P(buf, n, PSTR("%02d:%02d-%02d:%02d"), t.rise / 60, t.rise % 60,
+                     t.set / 60, t.set % 60);
+  return r < 0 ? 0 : (size_t)r;
 }
 
 int sunUtcOffsetMin(const struct tm& local, const struct tm& utc) {

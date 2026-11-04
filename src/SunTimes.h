@@ -6,6 +6,7 @@
 // native tests can use any date. Sun times are whole minutes; the curve
 // works in seconds so the fade is smooth.
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 #include <time.h>
 
@@ -28,6 +29,11 @@ struct SunTimes {
 // minute outside the polar circles.
 SunTimes sunTimes(float lat, float lon, int year, int month, int day,
                   int utcOffsetMin);
+
+// The text for the status reply: "07:12-17:03", "polar day" or "polar night".
+// Written like snprintf(): cut to n bytes, always ends in 0 (n > 0), returns
+// the length it would have had. The fixed text stays in flash on the ESP8266.
+size_t sunTimesText(const SunTimes& t, char* buf, size_t n);
 
 // UTC offset in minutes, from the same moment as local and UTC broken-down
 // time (localtime_r and gmtime_r of one time_t).

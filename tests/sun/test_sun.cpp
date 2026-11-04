@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static int g_failed = 0;
 static int g_checks = 0;
@@ -435,7 +436,34 @@ static void testResolve() {
   CHECK(resolveBrightness(in) == 0, "night level 0");
 }
 
+// The status line text (what clockSunText() sends in /api/status as "sun").
+// These are the bytes the old snprintf() calls in Clock.cpp wrote.
+static void testSunText() {
+  char b[24];
+  SunTimes t = {SUN_NORMAL, 7 * 60 + 12, 17 * 60 + 3};
+  size_t n = sunTimesText(t, b, sizeof(b));
+  CHECK(strcmp(b, "07:12-17:03") == 0 && n == 11, "normal day: '%s' %u", b, (unsigned)n);
+  t = {SUN_NORMAL, 5, 23 * 60 + 59};   // zero padding on both sides
+  sunTimesText(t, b, sizeof(b));
+  CHECK(strcmp(b, "00:05-23:59") == 0, "padding: '%s'", b);
+  t = {SUN_NORMAL, 23 * 60 + 50, 10};  // the sun sets after midnight
+  sunTimesText(t, b, sizeof(b));
+  CHECK(strcmp(b, "23:50-00:10") == 0, "after midnight: '%s'", b);
+  t = {SUN_POLAR_DAY, 0, 0};
+  n = sunTimesText(t, b, sizeof(b));
+  CHECK(strcmp(b, "polar day") == 0 && n == 9, "polar day: '%s'", b);
+  t = {SUN_POLAR_NIGHT, 0, 0};
+  n = sunTimesText(t, b, sizeof(b));
+  CHECK(strcmp(b, "polar night") == 0 && n == 11, "polar night: '%s'", b);
+  // The longest text fits the 24 bytes WebPortal gives it; a short buffer is cut, never overrun.
+  char small[6] = "xxxxx";
+  t = {SUN_POLAR_NIGHT, 0, 0};
+  sunTimesText(t, small, sizeof(small));
+  CHECK(strcmp(small, "polar") == 0, "cut to the buffer: '%s'", small);
+}
+
 int main() {
+  testSunText();
   testReferenceTable();
   testSunProperties();
   testUtcOffset();

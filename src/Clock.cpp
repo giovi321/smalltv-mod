@@ -155,9 +155,7 @@ bool clockSunText(const Settings& s, char* buf, size_t n) {
   struct tm l;
   const SunTimes* t = sunToday(s, l);
   if (!t) return false;
-  if (t->kind == SUN_POLAR_DAY) snprintf(buf, n, "polar day");
-  else if (t->kind == SUN_POLAR_NIGHT) snprintf(buf, n, "polar night");
-  else snprintf(buf, n, "%02d:%02d-%02d:%02d", t->rise / 60, t->rise % 60, t->set / 60, t->set % 60);
+  sunTimesText(*t, buf, n);
   return true;
 }
 
