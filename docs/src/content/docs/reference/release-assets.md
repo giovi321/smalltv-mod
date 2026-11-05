@@ -11,9 +11,9 @@ Get them from the [Releases page](https://github.com/giovi321/smalltv-mod/releas
 
 | File | Board | Use it for |
 |------|-------|-----------|
-| `smalltv-mod-firmware.bin` | SmallTV and SmallTV-ultra (ESP8266) | The normal install and every later update |
+| `smalltv-mod-firmware.bin` | SmallTV, SmallTV-ultra and SDPro (ESP8266) | The normal install and every later update |
 | `smalltv-mod-firmware-lean.bin` | Same ESP8266 boards | The same device when it needs more heap. Home Assistant screens and the usage meter are compiled out |
-| `smalltv-mod-loader.bin` | SmallTV-ultra (ESP8266) | One-time first install when the stock updater rejects the full image |
+| `smalltv-mod-loader.bin` | SmallTV-ultra and SDPro (ESP8266) | One-time first install when the stock updater rejects the full image |
 | `smalltv-mod-firmware-c2.bin` | SmallTV (ESP32-C2 / ESP8684) | Updates, once this firmware is already running |
 | `smalltv-mod-firmware-c2.factory.bin` | SmallTV (ESP32-C2 / ESP8684) | The first install, over USB-C |
 | `smalltv-mod-firmware-esp32.bin` | NM-TV-154 (classic ESP32) | Updates, once this firmware is already running |
@@ -39,7 +39,7 @@ The `<target>` suffix names the board. No suffix at all means the original ESP82
 
 | Suffix | Board |
 |--------|-------|
-| none | SmallTV and SmallTV-ultra (ESP8266), all features |
+| none | SmallTV, SmallTV-ultra and SDPro (ESP8266), all features |
 | `-lean` | The same ESP8266 boards, without Home Assistant screens or the usage meter |
 | `-c2` | SmallTV with the ESP32-C2 / ESP8684 chip |
 | `-esp32` | NM-TV-154, classic ESP32, 4 MB flash |

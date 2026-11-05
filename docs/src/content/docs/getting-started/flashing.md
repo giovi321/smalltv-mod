@@ -72,6 +72,23 @@ The loader path does not erase the flash, so the ESP8266's stored RF settings fr
 
 If the loader ever will not come back up, flash over the serial header instead. The board is a plain ESP-12F, so the [UART recovery](#uart-header-for-recovery-or-a-direct-install) steps above apply directly: `esptool.py --port COM5 write_flash 0x0 smalltv-mod-firmware.bin`.
 
+## SDPro Smart Weather Clock
+
+Not yet confirmed on a unit ([issue #76](https://github.com/giovi321/smalltv-mod/issues/76)). The SDPro is an unbranded SmallTV-ultra clone with `SDPro_V1.x` firmware. A [teardown](https://github.com/michaeldale/smartclock-oss/blob/main/docs/specifications/hardware.md) shows the same ESP-12 (ESP8266), 4 MB flash, ST7789 panel and pin map as the SmallTV, so `smalltv-mod-firmware.bin` is the image it runs.
+
+Two things in the stock firmware decide the install:
+
+- The update page refuses a file whose name does not start with `SDP`. The check runs only in the browser, so renaming the file is enough
+- The stock flash layout keeps a 3 MB filesystem, which leaves an upload about 550 KB. `smalltv-mod-firmware.bin` (about 830 KB) and `smalltv-mod-firmware-lean.bin` (about 675 KB) do not fit; `smalltv-mod-loader.bin` (about 316 KB) does
+
+So the install is the SmallTV-ultra's two steps with a renamed loader:
+
+1. Rename `smalltv-mod-loader.bin` to `SDP_loader.bin` and upload it through the stock update page.
+2. Join the open `SmallTV-Loader` access point and browse to `http://192.168.4.1/update`. The screen stays dark while the loader runs; it has no display code.
+3. Upload `smalltv-mod-firmware.bin` there. On first boot the firmware formats its filesystem, since that area still holds part of the stock volume, and opens the usual `SmallTV-Setup` portal.
+
+The USB-C port is power only and the unit has no button, so a failed flash can only be recovered over the ESP-12's UART pads (TX, RX, GPIO0, GND, 3V3, EN; GPIO0 to GND for flash mode). Find them and back up the stock image (`esptool.py --port COM5 read_flash 0x0 0x400000 stock-backup.bin`) before step 1. The [UART recovery](#uart-header-for-recovery-or-a-direct-install) steps then apply as for any ESP-12.
+
 ## SmallTV (ESP32-C2 / ESP8684)
 
 The ESP32-C2 has no OTA path from the stock firmware, so the first install goes over the USB-C cable. The onboard CH340C handles it with auto-reset, so no button is needed. You need a system Python with esptool (`pip install esptool`).

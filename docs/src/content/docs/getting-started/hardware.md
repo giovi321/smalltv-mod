@@ -28,6 +28,10 @@ The two chips on the ESP32-C2 board are the giveaway. The main SoC is marked `ES
 
 The "Ultra" units (branded Ultra-Vx.x.x) are this same ESP-12F board, just with different stock firmware and a different flash layout. They run this firmware fine, but the first install needs the loader step in [Flashing](/smalltv-mod/getting-started/flashing/#smalltv-ultra-stock-updater-says-not-enough-space).
 
+![The SDPro Smart Weather Clock running its stock firmware](/smalltv-mod/assets/product-sdpro.png)
+
+The SDPro Smart Weather Clock, an unbranded SmallTV-ultra clone sold on AliExpress and Temu with `SDPro_V1.x` firmware, is the same board again according to a [teardown](https://github.com/michaeldale/smartclock-oss/blob/main/docs/specifications/hardware.md): an ESP-12 with 4 MB flash, the same ST7789 panel, and the pin map below unchanged. Its USB-C port is power only and it has no button. It is not yet confirmed on a unit running this firmware ([issue #76](https://github.com/giovi321/smalltv-mod/issues/76)). The install is in [Flashing](/smalltv-mod/getting-started/flashing/#sdpro-smart-weather-clock).
+
 Product photos show each unit running its stock firmware, not this one, and the on-screen style varies by model and firmware version (a weather clock, a ticker, and so on). Match your device's screen and the tell-tale signs to identify the model before picking a binary.
 
 | | |

@@ -19,7 +19,7 @@
 
 The GeekMagic SmallTV is a cheap desk gadget: a little cube with a 1.54" colour screen, an ESP inside, and a USB-C port. This firmware throws away the stock apps and turns it into three things you actually watch. It shows a **stock and crypto ticker** with prices, change, and a sparkline. It flips into a **Claude usage meter** with an animated mascot and your 5-hour and 7-day usage bars. And it becomes a **live plane radar** centred on your location, pulled from a free public feed. One image carries all three; you switch between them in a built-in web UI, and you update over WiFi.
 
-This firmware builds four images from one codebase, covering five devices. The original SmallTV runs an **ESP8266**; the **SmallTV-ultra** is the same ESP-12F hardware and screen, but its stock "Ultra" firmware and flash partitions block a normal OTA of this image, so it takes a two-step loader install (see [Flashing](#flashing)); a second version sold under the same "smart weather clock" look uses an **ESP32-C2 (ESP8684)** instead. A third build targets the **NMMiner NM-TV-154** (PCB marked "NM-TV-Miner"), a classic-ESP32 BTC lottery miner in the same cube with the same screen, confirmed working by a community tester in [issue #1](https://github.com/giovi321/smalltv-mod/issues/1). A fourth build targets the **GeekMagic SmallTV Pro**, a classic ESP32 with 8 MB flash and a touch button, confirmed working on hardware. Pick yours below.
+This firmware builds four images from one codebase, covering six devices. The original SmallTV runs an **ESP8266**; the **SmallTV-ultra** is the same ESP-12F hardware and screen, but its stock "Ultra" firmware and flash partitions block a normal OTA of this image, so it takes a two-step loader install (see [Flashing](#flashing)). The **SDPro Smart Weather Clock**, an unbranded SmallTV-ultra clone sold on AliExpress and Temu with `SDPro_V1.x` firmware, is the same ESP8266 hardware again according to a teardown, and installs the same way; it is not yet confirmed on a unit ([issue #76](https://github.com/giovi321/smalltv-mod/issues/76)). A second version sold under the same "smart weather clock" look uses an **ESP32-C2 (ESP8684)** instead. A third build targets the **NMMiner NM-TV-154** (PCB marked "NM-TV-Miner"), a classic-ESP32 BTC lottery miner in the same cube with the same screen, confirmed working by a community tester in [issue #1](https://github.com/giovi321/smalltv-mod/issues/1). A fourth build targets the **GeekMagic SmallTV Pro**, a classic ESP32 with 8 MB flash and a touch button, confirmed working on hardware. Pick yours below.
 
 <p align="center">
   <img src="docs/public/assets/screen.svg" alt="The SmallTV running its three modes: stock ticker, Claude usage, and plane radar" width="900" />
@@ -33,15 +33,15 @@ This firmware builds four images from one codebase, covering five devices. The o
 
 Check the board before you build, because the variants flash differently.
 
-| | SmallTV (ESP8266) | SmallTV-ultra | SmallTV (ESP32-C2) | NM-TV-154 (ESP32) | SmallTV Pro (ESP32) |
-|---|---|---|---|---|---|
-| Photo | <img src="docs/public/assets/product-8266.png" alt="The SmallTV (ESP8266)" width="240"> | <img src="docs/public/assets/product-ultra.png" alt="The SmallTV-ultra" width="240"> | <img src="docs/public/assets/product-c2.png" alt="The SmallTV (ESP32-C2)" width="240"> | <img src="docs/public/assets/product-esp32.png" alt="The NM-TV-154 (ESP32)" width="240"> | <img src="docs/public/assets/product-pro.png" alt="The GeekMagic SmallTV Pro" width="240"> |
-| MCU | ESP-12F (ESP8266), 4 MB flash | same ESP-12F (ESP8266), 4 MB flash | ESP32-C2 / ESP8684, 4 MB flash | ESP32-WROOM-32E, 4 MB flash | classic ESP32, 8 MB flash |
-| Build env | `smalltv`, or `smalltv_lean` | `smalltv` (same image, `smalltv_loader` to install) | `smalltv_c2` | `smalltv_esp32`, or `smalltv_esp32_wg` | `smalltv_esp32_8mb` |
-| Display | 1.54" 240×240 IPS ST7789 | same panel | same panel, RGB order | same panel | same panel |
-| Flashing | OTA from the stock web UI, or UART header | two-step [loader](#flashing) then OTA, or UART | USB-C via the onboard CH340C (esptool) | USB via esptool | OTA from the stock web UI, or UART header |
-| WireGuard VPN | no, the chip has neither the flash nor the heap | no, same chip | yes | yes, in the separate `-esp32-wg` image; the default image leaves it out to keep flash headroom | yes, the 8 MB layout has room to spare |
-| Tell-tale | ESP8266 module, no USB-serial chip | stock firmware branded "Ultra", OTA of this image fails with "Not Enough Space" | CH340C chip next to the USB-C port | PCB reads "NM-TV-Miner" | sold as "SmallTV Pro", touch button on top |
+| | SmallTV (ESP8266) | SmallTV-ultra | SDPro Smart Weather Clock | SmallTV (ESP32-C2) | NM-TV-154 (ESP32) | SmallTV Pro (ESP32) |
+|---|---|---|---|---|---|---|
+| Photo | <img src="docs/public/assets/product-8266.png" alt="The SmallTV (ESP8266)" width="240"> | <img src="docs/public/assets/product-ultra.png" alt="The SmallTV-ultra" width="240"> | <img src="docs/public/assets/product-sdpro.png" alt="The SDPro Smart Weather Clock" width="240"> | <img src="docs/public/assets/product-c2.png" alt="The SmallTV (ESP32-C2)" width="240"> | <img src="docs/public/assets/product-esp32.png" alt="The NM-TV-154 (ESP32)" width="240"> | <img src="docs/public/assets/product-pro.png" alt="The GeekMagic SmallTV Pro" width="240"> |
+| MCU | ESP-12F (ESP8266), 4 MB flash | same ESP-12F (ESP8266), 4 MB flash | ESP-12 (ESP8266), 4 MB flash, from a teardown | ESP32-C2 / ESP8684, 4 MB flash | ESP32-WROOM-32E, 4 MB flash | classic ESP32, 8 MB flash |
+| Build env | `smalltv`, or `smalltv_lean` | `smalltv` (same image, `smalltv_loader` to install) | `smalltv` (same image, `smalltv_loader` to install) | `smalltv_c2` | `smalltv_esp32`, or `smalltv_esp32_wg` | `smalltv_esp32_8mb` |
+| Display | 1.54" 240×240 IPS ST7789 | same panel | same panel and pin map | same panel, RGB order | same panel | same panel |
+| Flashing | OTA from the stock web UI, or UART header | two-step [loader](#flashing) then OTA, or UART | the same two steps with the loader renamed to `SDP…`, or UART | USB-C via the onboard CH340C (esptool) | USB via esptool | OTA from the stock web UI, or UART header |
+| WireGuard VPN | no, the chip has neither the flash nor the heap | no, same chip | no, same chip | yes | yes, in the separate `-esp32-wg` image; the default image leaves it out to keep flash headroom | yes, the 8 MB layout has room to spare |
+| Tell-tale | ESP8266 module, no USB-serial chip | stock firmware branded "Ultra", OTA of this image fails with "Not Enough Space" | stock firmware `SDPro_V1.x`, whose update page refuses a file name not starting with `SDP`; USB-C is power only | CH340C chip next to the USB-C port | PCB reads "NM-TV-Miner" | sold as "SmallTV Pro", touch button on top |
 
 The screens in the photos above are each unit's **stock firmware**, not this one, and they differ by model and firmware version (the ultra ships as a weather clock, the original as a ticker, and so on). Use the on-screen look as a first clue to which model you are holding, then confirm with the tell-tale row, because the binary and the install method differ per model. If your board has a **CH340C** chip beside the USB-C port and the main chip reads **ESP8684**, you have the ESP32-C2 model. Full teardown photos and pin maps are in [Hardware and variants](https://giovi321.github.io/smalltv-mod/getting-started/hardware/).
 
@@ -82,9 +82,9 @@ Eleven files come with each release. Pick by board first, then by whether you ar
 
 | File | Board | Use it for |
 |------|-------|-----------|
-| `smalltv-mod-firmware.bin` | SmallTV, SmallTV-ultra (ESP8266) | The normal install and every later update |
+| `smalltv-mod-firmware.bin` | SmallTV, SmallTV-ultra, SDPro (ESP8266) | The normal install and every later update |
 | `smalltv-mod-firmware-lean.bin` | Same ESP8266 boards | The same device when it needs more heap. HA screens and the usage meter are compiled out |
-| `smalltv-mod-loader.bin` | SmallTV-ultra (ESP8266) | One-time first install when the stock updater rejects the full image |
+| `smalltv-mod-loader.bin` | SmallTV-ultra, SDPro (ESP8266) | One-time first install when the stock updater rejects the full image |
 | `smalltv-mod-firmware-c2.bin` | SmallTV (ESP32-C2) | Updates |
 | `smalltv-mod-firmware-c2.factory.bin` | SmallTV (ESP32-C2) | First install over USB-C |
 | `smalltv-mod-firmware-esp32.bin` | NM-TV-154 (ESP32) | Updates |
@@ -105,6 +105,8 @@ The right method depends on your board. The steps below are the short version; t
 **SmallTV (ESP8266).** The stock firmware exposes an OTA updater, so you can install this without opening the device. Find its IP, browse to `http://<device-ip>/update`, and upload `smalltv-mod-firmware.bin`, or `smalltv-mod-firmware-lean.bin` for the build that trades Home Assistant screens and the usage meter for 8,732 bytes of heap. Back up the stock image first if you might want it back.
 
 **SmallTV-ultra.** Same ESP8266 hardware, but the stock "Ultra" firmware reserves most of the flash for image storage, so its OTA slot is too small for `smalltv-mod-firmware.bin` and rejects it with `Not Enough Space`. Install in two steps, no soldering: flash `smalltv-mod-loader.bin` at `http://<device-ip>/update` (it fits the small slot), join the open `SmallTV-Loader` AP it opens at `192.168.4.1`, then upload `smalltv-mod-firmware.bin` at `http://192.168.4.1/update`. UART is the fallback (`esptool write_flash 0x0 smalltv-mod-firmware.bin`).
+
+**SDPro Smart Weather Clock.** Not yet confirmed on a unit; a teardown shows the same ESP8266 board and pins ([issue #76](https://github.com/giovi321/smalltv-mod/issues/76)). Its stock update page checks only, in the browser, that the file name starts with `SDP`, and it takes at most about 550 KB, so the full image does not fit. Rename `smalltv-mod-loader.bin` to `SDP_loader.bin`, upload it through the stock update page, then continue at `http://192.168.4.1/update` as for the SmallTV-ultra. The USB-C port is power only and the unit has no button, so a failed flash can only be recovered over the ESP-12 UART pads. Find them, and back up the stock image (`esptool read_flash 0x0 0x400000 stock-backup.bin`), before you start.
 
 **SmallTV (ESP32-C2).** Flash over the USB-C cable with esptool, which talks to the onboard CH340C. Auto-reset works, so no button is needed. Back up the stock image first, then write `smalltv-mod-firmware-c2.factory.bin` from the [Releases](../../releases) page:
 
