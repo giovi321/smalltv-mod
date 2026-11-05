@@ -58,12 +58,12 @@ That single image carries everything the ESP8266 needs, so there is no separate 
 
 The SmallTV-ultra is the same ESP-12F (ESP8266) as the original SmallTV: same 4 MB flash, the same 1.54" 240×240 ST7789 panel, and the same pin map. Only its stock firmware differs. The "Ultra" firmware (for example Ultra-V9.0.50) reserves most of the flash for image and GIF storage, which leaves its OTA updater a small app slot. Uploading `smalltv-mod-firmware.bin` at `/update` fails with `Update error: ERROR[4]: Not Enough Space`, even though the flash has plenty of free user space, because the full image does not fit that small slot.
 
-The fix is a two-step install through a tiny loader, no soldering. The loader is a ~312 KB image that does fit the stock slot. Once running it uses this firmware's own 4m1m flash layout, whose app region is large, so the full image fits on the second hop.
+The fix is a two-step install through a tiny loader, no soldering. The loader is a ~306 KB image that does fit the stock slot. Once running it uses this firmware's own 4m1m flash layout, whose app region is large, so the full image fits on the second hop.
 
 1. Get `smalltv-mod-loader.bin` from the [Releases page](https://github.com/giovi321/smalltv-mod/releases).
 2. Browse to `http://<device-ip>/update` and upload `smalltv-mod-loader.bin`. It fits the stock slot. The device reboots into the loader.
 3. The loader opens an open WiFi access point named `SmallTV-Loader`, and its screen shows the network name and the address. Join it and browse to `http://192.168.4.1/update`.
-4. Upload `smalltv-mod-firmware.bin` there. It fits because the loader uses this firmware's flash layout, which gives the sketch about 1,020 KB against an image of roughly 694 KB. The device reboots into the full smalltv-mod.
+4. Upload `smalltv-mod-firmware.bin` there. It fits because the loader uses this firmware's flash layout, which gives the sketch about 1,020 KB against an image of roughly 694 KB. The screen shows the upload progress, then the device reboots into the full smalltv-mod. Keep it powered until smalltv-mod's own screen appears.
 5. It comes up in the usual `SmallTV-Setup` captive portal for WiFi. From here it is a normal ESP8266 smalltv-mod device.
 
 After this first install, normal OTA works from the System tab, because this firmware's layout has room for two sketch copies. You only need the loader once.
@@ -79,7 +79,7 @@ Confirmed working on a unit by a community tester ([issue #76](https://github.co
 Two things in the stock firmware decide the install:
 
 - The update page refuses a file whose name does not start with `SDP`. The check runs only in the browser, so renaming the file is enough
-- The stock flash layout keeps a 3 MB filesystem, which leaves an upload about 550 KB. `smalltv-mod-firmware.bin` (about 830 KB) and `smalltv-mod-firmware-lean.bin` (about 675 KB) do not fit; `smalltv-mod-loader.bin` (about 319 KB) does
+- The stock flash layout keeps a 3 MB filesystem, which leaves an upload about 550 KB. `smalltv-mod-firmware.bin` (about 830 KB) and `smalltv-mod-firmware-lean.bin` (about 675 KB) do not fit; `smalltv-mod-loader.bin` (about 314 KB) does
 
 So the install is the SmallTV-ultra's two steps with a renamed loader:
 

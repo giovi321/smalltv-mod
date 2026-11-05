@@ -9,10 +9,12 @@
 // flash layout, whose sketch region is large, so ITS /update then accepts the
 // full firmware the stock updater refused. Two hops, no UART needed.
 //
-// The screen says where to go (network and address), so a dark panel is no
-// longer mistaken for a bricked device. It is drawn with a few raw ST7789
-// commands and a 5x7 font instead of a graphics library, to keep the image
-// small.
+// The screen says where to go (network and address), shows a progress bar
+// during the upload and the result, so a dark panel is no longer mistaken for
+// a bricked device. It is drawn with a few raw ST7789 commands and a 5x7 font
+// instead of a graphics library; together with the small /update handler below,
+// which replaces ESP8266HTTPUpdateServer, the image ends up smaller than the
+// earlier one without a screen.
 //
 // WiFi creds are compile-time only (-DLOADER_SSID / -DLOADER_PASS), never in
 // the repo. Without them it falls back to an open "SmallTV-Loader" AP at
@@ -20,8 +22,8 @@
 #ifdef LOADER_BUILD
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-#include <ESP8266HTTPUpdateServer.h>
 #include <SPI.h>
+#include <Updater.h>
 #include "board_esp8266.h"
 #include "loader_font.h"
 
@@ -32,14 +34,15 @@
 #define LOADER_PASS ""
 #endif
 
-static ESP8266WebServer       server(80);
-static ESP8266HTTPUpdateServer updater;
+static ESP8266WebServer server(80);
 
 // ---- Status screen (ST7789 240x240, SPI mode 3) ----------------------------
 #define C_BLACK  0x0000
 #define C_WHITE  0xFFFF
 #define C_GRAY   0x8410
 #define C_YELLOW 0xFFE0
+#define C_GREEN  0x07E0
+#define C_RED    0xF800
 #define SCR_W    240
 #define BL_ON    (TFT_BL_DEFAULT_INVERTED ? LOW : HIGH)
 #define BL_OFF   (TFT_BL_DEFAULT_INVERTED ? HIGH : LOW)
@@ -120,6 +123,100 @@ static void scrHome(const char* net, const char* url) {
   scrText(204, 1, C_GRAY, PSTR("and upload the firmware"));
 }
 
+static void scrFail(const char* why) {
+  scrClear();
+  scrText(70, 2, C_RED, PSTR("Update failed"));
+  scrText(110, 1, C_WHITE, why);
+  scrText(150, 1, C_GRAY, PSTR("Nothing was changed. Try again."));
+}
+
+static void scrProgress(uint8_t pct) {
+  char buf[5];
+  snprintf_P(buf, sizeof(buf), PSTR("%u%%"), pct);
+  scrFill(21, 101, (198 * pct) / 100, 18, C_GREEN);
+  scrFill(84, 134, 72, 16, C_BLACK);
+  scrText(134, 2, C_WHITE, buf);
+}
+
+static void scrBusy() {
+  scrClear();
+  scrText(40, 2, C_WHITE, PSTR("Updating"));
+  scrFill(20, 100, 200, 1, C_WHITE);
+  scrFill(20, 119, 200, 1, C_WHITE);
+  scrFill(20, 100, 1, 20, C_WHITE);
+  scrFill(219, 100, 1, 20, C_WHITE);
+  scrText(190, 2, C_YELLOW, PSTR("Do not unplug"));
+  scrProgress(0);
+}
+
+// ---- /update ---------------------------------------------------------------
+// Firmware only. The same Updater calls as ESP8266HTTPUpdateServer (begin with
+// the free sketch space, write, end(true), restart), without its filesystem
+// form: a filesystem image has no use on a one-way loader, and the form
+// confused people. CORS headers kept as the library sends them.
+static const char kPage[] PROGMEM =
+  "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+  "<meta name='viewport' content='width=device-width,initial-scale=1'></head><body>"
+  "<form method='POST' action='' enctype='multipart/form-data'>Firmware:<br>"
+  "<input type='file' accept='.bin,.bin.gz' name='firmware'> "
+  "<input type='submit' value='Update Firmware'></form></body></html>";
+static const char kSuccess[] PROGMEM =
+  "<META http-equiv=\"refresh\" content=\"15;URL=/\">Update Success! Rebooting...";
+
+static bool    g_ok  = false;   // last upload was written and verified by Update.end()
+static uint8_t g_pct = 0;
+
+static void corsHeaders() {
+  server.sendHeader(F("Access-Control-Allow-Headers"), F("*"));
+  server.sendHeader(F("Access-Control-Allow-Origin"), F("*"));
+}
+
+static void handleUpload() {
+  HTTPUpload& up = server.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    g_ok  = false;
+    g_pct = 0;
+    if (Update.isRunning()) Update.end();   // drop anything a previous attempt left open
+    Serial.printf_P(PSTR("Update: %s\n"), up.filename.c_str());
+    scrBusy();
+    uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+    Update.begin(maxSketchSpace, U_FLASH);   // a failure stays in Update.getError()
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (!Update.hasError()) Update.write(up.buf, up.currentSize);   // a short write sets the error
+    if (up.contentLength && !Update.hasError()) {   // whole request, so the bar ends a few hundred bytes short of 100
+      uint32_t pct = (uint32_t)up.totalSize * 100u / up.contentLength;
+      if (pct > 100) pct = 100;
+      if (pct != g_pct) { g_pct = pct; scrProgress(pct); }
+    }
+  } else if (up.status == UPLOAD_FILE_END) {
+    g_ok = Update.end(true);   // true: size = bytes received; on an error it only resets, so a retry works
+    Serial.printf_P(PSTR("Update %s: %u\n"), g_ok ? "ok" : "failed", up.totalSize);
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    Update.end();
+    scrFail(PSTR("upload aborted"));
+  }
+}
+
+static void handleUpdateDone() {
+  corsHeaders();
+  if (!g_ok) {
+    String err = Update.hasError() ? Update.getErrorString() : String(F("no firmware received"));
+    scrFail(err.c_str());
+    server.send(200, F("text/html"), String(F("Update error: ")) + err);
+    return;
+  }
+  // Leave "Do not unplug" up: after the restart the boot loader still copies
+  // the new image into place, and the panel may go dark while it does.
+  scrFill(84, 134, 72, 16, C_BLACK);
+  scrText(150, 2, C_GREEN, PSTR("Done, restarting"));
+  scrText(214, 1, C_GRAY, PSTR("until the new firmware starts"));
+  server.client().setNoDelay(true);
+  server.send_P(200, PSTR("text/html"), kSuccess);
+  delay(100);
+  server.client().stop();
+  ESP.restart();
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println(F("\nsmalltv-mod loader"));
@@ -143,7 +240,13 @@ void setup() {
   String ip = joined ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
   Serial.println(ip);
   scrHome(joined ? ssid : "SmallTV-Loader", (ip + F("/update")).c_str());
-  updater.setup(&server);                 // serves /update (GET form + POST handler)
+
+  server.on(F("/update"), HTTP_GET, [] { server.send_P(200, PSTR("text/html"), kPage); });
+  server.on(F("/update"), HTTP_OPTIONS, [] {
+    corsHeaders();
+    server.send(200, F("text/html"), F("y"));
+  });
+  server.on(F("/update"), HTTP_POST, handleUpdateDone, handleUpload);
   server.begin();
 }
 
