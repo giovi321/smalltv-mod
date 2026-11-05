@@ -74,7 +74,7 @@ If the loader ever will not come back up, flash over the serial header instead. 
 
 ## SDPro Smart Weather Clock
 
-Not yet confirmed on a unit ([issue #76](https://github.com/giovi321/smalltv-mod/issues/76)). The SDPro is an unbranded SmallTV-ultra clone with `SDPro_V1.x` firmware. A [teardown](https://github.com/michaeldale/smartclock-oss/blob/main/docs/specifications/hardware.md) shows the same ESP-12 (ESP8266), 4 MB flash, ST7789 panel and pin map as the SmallTV, so `smalltv-mod-firmware.bin` is the image it runs.
+Confirmed working on a unit by a community tester ([issue #76](https://github.com/giovi321/smalltv-mod/issues/76)). The SDPro is an unbranded SmallTV-ultra clone with `SDPro_V1.x` firmware. A [teardown](https://github.com/michaeldale/smartclock-oss/blob/main/docs/specifications/hardware.md) shows the same ESP-12 (ESP8266), 4 MB flash, ST7789 panel and pin map as the SmallTV, so `smalltv-mod-firmware.bin` is the image it runs.
 
 Two things in the stock firmware decide the install:
 
