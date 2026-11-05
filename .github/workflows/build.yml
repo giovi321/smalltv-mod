@@ -19,11 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # No token left in .git/config for the later steps to read.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -35,7 +35,7 @@ jobs:
       # The workflow file is in the key too: it pins the toolchain, so a change
       # here is a toolchain change and deserves a fresh entry.
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.platformio
@@ -198,7 +198,7 @@ jobs:
       # artifacts, and the step that reports sizes is the one that fails here.
       - name: Upload build artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smalltv-mod-firmware
           path: dist/
@@ -215,7 +215,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: smalltv-mod-firmware
           path: dist
@@ -225,7 +225,7 @@ jobs:
       # afterwards to write proper notes keeps whatever you put there: the action
       # only sets the body when it creates the release.
       - name: Attach to release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:
           files: dist/*
           generate_release_notes: true
