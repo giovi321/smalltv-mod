@@ -286,7 +286,8 @@ timezone applies. In a `"spec": 2` theme they follow the device language
 | `{YYYY}` | Year |
 
 A theme with `"spec": 2` also accepts these tokens, so one text can use the
-union of what this firmware and SmallTV Pomodoro offer:
+union of what this firmware and SmallTV Pomodoro offer. They need firmware
+v3.4.0 or later:
 
 | Token | Value |
 | --- | --- |
@@ -315,7 +316,7 @@ without it.
 
 #### Localized text
 
-The device has a language setting (Settings, Clock & night mode, Language;
+Localized text needs firmware v3.4.0 or later. The device has a language setting (Settings, Clock & night mode, Language;
 `clock.lang` in the settings file). It takes `en`, `pt`, `es`, `fr`, `de` or `it`
 and defaults to `en`. In a `"spec": 2` theme:
 
@@ -432,7 +433,8 @@ zero makes the rectangle temporarily invisible, regardless of `cornerRadius`.
 
 #### Arcs, hands and tick marks (spec 2)
 
-Three more shapes exist only in a theme with `"spec": 2`. A spec 1 theme that
+Three more shapes exist only in a theme with `"spec": 2`, on firmware v3.4.0
+or later. A spec 1 theme that
 uses one is refused with `arc, hand and ticks need "spec": 2`, and a spec 1
 theme installs exactly as before. All three are drawn in `stroke` alone, with no
 `fill`, and take an optional `strokeWidth` of 1–32 (default 1).

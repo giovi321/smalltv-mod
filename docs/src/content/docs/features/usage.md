@@ -74,7 +74,7 @@ IMPORTANT: mDNS is link-local and does not cross routers, subnets, or VLANs. If 
 
 ## Prompt status from Claude Code
 
-The stats screen can also show whether Claude Code is working right now. It appears in the top-right corner, next to the header:
+The stats screen can also show whether Claude Code is working right now. It needs firmware v3.4.0 or later, and clawdmeter-daemon v1.2.0 or later for the one-step setup. It appears in the top-right corner, next to the header:
 
 - **Running**: three orange dots that hop in turn while a prompt is being processed.
 - **Done**: when the prompt finishes, the panel flashes orange with a large `DONE` for 1.5 s. A small `DONE` badge then stays in the corner.

@@ -5,7 +5,7 @@ description: Let the screen follow the sun. It fades down at sunset, stays dim t
 
 The screen can follow the sun instead of the clock. It stays at the normal brightness by day, fades down after sunset, rests at a low level through the night, and fades back up after sunrise. The device works out sunrise and sunset itself from your location and the date. Nothing is fetched for it.
 
-It lives in the **Clock & night mode** card of the **Display** tab. It is off by default.
+It lives in the **Clock & night mode** card of the **Display** tab. It is off by default. It needs firmware v3.4.0 or later.
 
 ## Set the device location
 
