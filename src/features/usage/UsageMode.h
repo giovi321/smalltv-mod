@@ -30,6 +30,14 @@ class UsageMode : public DisplayMode {
  private:
   bool contentChanged(const UsageData& u) const;
   void rememberContent(const UsageData& u);
+  bool serviceFlash();
+
+  // Prompt activity: the last state seen, so the switch to DONE flashes the
+  // panel once (and a wake or mode re-entry does not flash it again).
+  uint8_t  lastAct_ = 0;
+  bool     flashing_ = false;
+  uint32_t flashStartMs_ = 0;
+  int8_t   flashPhase_ = -1;
 
   uint32_t usageSampled_ = 0;              // lastOkMs already fed to the mascot tracker
   uint32_t usageRenderedOk_ = 0xFFFFFFFF;

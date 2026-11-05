@@ -23,6 +23,30 @@ bool usageFresh(uint32_t withinMs) {
   return g_usage.valid && (millis() - g_usage.lastOkMs) <= withinMs;
 }
 
+// ---- prompt activity ---------------------------------------------------------
+// Kept apart from g_usage: usageInit() clears that on every settings save.
+static UsageActivity g_act = ACT_IDLE;
+static uint32_t      g_actSinceMs = 0;
+
+bool usageSetActivity(const String& state) {
+  UsageActivity a;
+  if (state == "running")   a = ACT_RUNNING;
+  else if (state == "done") a = ACT_DONE;
+  else if (state == "idle") a = ACT_IDLE;
+  else return false;
+  g_act = a;
+  g_actSinceMs = millis();
+  return true;
+}
+
+UsageActivity usageActivity() {
+  uint32_t age = millis() - g_actSinceMs;
+  if ((g_act == ACT_RUNNING && age > USAGE_ACT_RUNNING_MS) ||
+      (g_act == ACT_DONE && age > USAGE_ACT_DONE_MS))
+    g_act = ACT_IDLE;
+  return g_act;
+}
+
 // ---- parse: usage contract -------------------------------------------------
 // { "s":29, "sr":142, "w":4, "wr":9876, "st":"allowed", "ok":true }
 //   s  = 5h utilization %        sr = minutes until 5h reset

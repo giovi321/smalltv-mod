@@ -197,6 +197,63 @@ static void drawUsage(const UsageData& u, bool fullRepaint, bool hide5h) {
   }
 }
 
+// Prompt activity indicator, in the free header space right of "CLAUDE": three
+// pulsing dots while a prompt runs, an accent DONE badge once it finished. The
+// box spans x=166..221; the status flag dot sits just right of it at x=223..233,
+// so neither ever paints over the other.
+#define ACT_X     166
+#define ACT_Y     7
+#define ACT_W     56
+#define ACT_H     22
+#define C_ACCDIM  gfxTint(0x5984)   // dimmed terra-cotta 0x5a3124, resting dots
+
+static UsageActivity s_actShown = ACT_IDLE;
+static int8_t        s_dotPhase = -1;    // -1 = dots not drawn yet
+static uint32_t      s_dotNextMs = 0;
+
+// `force` repaints after a full-screen clear; otherwise only a state change or
+// the next dot frame draws anything.
+static void drawActivity(bool force) {
+  Arduino_GFX* gfx = gfxDev();
+  if (!gfx) return;
+  UsageActivity a = usageActivity();
+  if (force || a != s_actShown) {
+    gfx->fillRect(ACT_X, ACT_Y, ACT_W, ACT_H, C_BLACK);
+    s_actShown = a;
+    s_dotPhase = -1;
+    if (a == ACT_DONE) {
+      gfx->fillRoundRect(ACT_X, ACT_Y, ACT_W, ACT_H, 6, C_ACCENT);
+      gfx->setTextSize(2);
+      gfx->setTextColor(C_BLACK);
+      gfx->setCursor(ACT_X + (ACT_W - gfxTextW("DONE", 2)) / 2 + 1, ACT_Y + 4);
+      gfx->print("DONE");
+    }
+  }
+  if (a != ACT_RUNNING) return;
+
+  uint32_t now = millis();
+  if (s_dotPhase >= 0 && (int32_t)(now - s_dotNextMs) < 0) return;
+  s_dotNextMs = now + 220;
+  s_dotPhase = (int8_t)((s_dotPhase + 1) % 4);   // 0..2 = that dot is up, 3 = all rest
+  for (int i = 0; i < 3; i++) {
+    int cx = ACT_X + 10 + i * 18;
+    bool up = (i == s_dotPhase);
+    gfx->fillRect(cx - 5, ACT_Y, 11, ACT_H, C_BLACK);
+    gfx->fillCircle(cx, ACT_Y + (up ? 8 : 12), 4, up ? C_ACCENT : C_ACCDIM);
+  }
+}
+
+// One frame of the DONE flash: the whole panel in the accent colour with a big
+// DONE, or black between the blinks.
+#define FLASH_FRAME_MS  250
+#define FLASH_FRAMES    6     // on, off, on, off, on, off = 1.5 s
+static void drawFlashFrame(bool on) {
+  Arduino_GFX* gfx = gfxDev();
+  if (!gfx) return;
+  gfx->fillScreen(on ? C_ACCENT : C_BLACK);
+  if (on) gfxDrawCentered("DONE", 98, 6, C_BLACK);
+}
+
 // Idle animation: full-screen mascot, diffed cell-by-cell for a flicker-free draw.
 static void drawMascot(const uint8_t* cells, const uint16_t* palette, bool restart) {
   Arduino_GFX* gfx = gfxDev();
@@ -258,6 +315,8 @@ void UsageMode::begin(const Settings& s) {
   needRender_ = true;
   contentPrimed_ = false;
   layoutPrimed_ = false;
+  lastAct_ = usageActivity();   // a DONE from before entering the mode does not flash
+  flashing_ = false;
 }
 
 void UsageMode::invalidate(const Settings& s) {
@@ -270,7 +329,38 @@ void UsageMode::invalidate(const Settings& s) {
   usageForceRefresh();
 }
 
+// Blinks the panel when a prompt finishes, so it is noticed as a notification.
+// Non-blocking: one frame per call, then the normal screen is repainted with
+// the DONE badge. Returns true while the flash owns the panel.
+bool UsageMode::serviceFlash() {
+  uint8_t act = usageActivity();
+  if (act == ACT_DONE && lastAct_ != ACT_DONE) {
+    flashing_ = true;
+    flashStartMs_ = millis();
+    flashPhase_ = -1;
+  }
+  lastAct_ = act;
+  if (!flashing_) return false;
+
+  int phase = (int)((millis() - flashStartMs_) / FLASH_FRAME_MS);
+  if (phase >= FLASH_FRAMES) {
+    flashing_ = false;
+    // Same as wake(): bring the whole layout back, the badge with it.
+    needRender_ = true;
+    layoutPrimed_ = false;
+    showingMascot_ = false;
+    return false;
+  }
+  if (phase != flashPhase_) {
+    flashPhase_ = (int8_t)phase;
+    drawFlashFrame(phase % 2 == 0);
+  }
+  return true;
+}
+
 void UsageMode::service(const Settings& s) {
+  if (serviceFlash()) return;
+
   // Pull mode: poll the daemon when a Usage URL is set. Push mode: leave it blank
   // and the daemon POSTs to /api/usage (for networks where the device can't reach
   // the PC). Either way usageGet() drives the render below.
@@ -300,11 +390,16 @@ void UsageMode::service(const Settings& s) {
         needRender_ = true;
       }
     }
+    bool cleared = false;
     if (needRender_) {
       drawUsage(u, fullRepaint, s.usage.hide5h);
+      cleared = fullRepaint;
       layoutPrimed_ = true;
       needRender_ = false;
     }
+    // Stats screen only: the idle mascot covers the whole panel, and while a
+    // prompt runs the daemon is up anyway, so the stats are what is showing.
+    drawActivity(cleared);
   } else {
     if (!showingMascot_) {
       showingMascot_ = true;
