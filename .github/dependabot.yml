@@ -1,0 +1,38 @@
+# The PlatformIO libraries and platforms in platformio.ini are not covered:
+# Dependabot has no PlatformIO support, so those pins move by hand.
+version: 2
+updates:
+  # The workflow actions. They matter most: the release job runs one with a
+  # write token. Commit-SHA pins are bumped to the new release's commit.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # A release has to be two weeks old before it is proposed, so a hijacked
+    # version has time to be found and yanked first. Same below.
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The documentation site (Astro/Starlight), built by docs.yml.
+  - package-ecosystem: npm
+    directory: /docs
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      docs:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+
+  # tools/requirements-theme.txt (CI's theme tests) and requirements-mdi.txt.
+  - package-ecosystem: pip
+    directory: /tools
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 5
