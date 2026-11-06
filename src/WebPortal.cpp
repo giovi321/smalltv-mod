@@ -87,8 +87,8 @@ static bool guardRequest() {
 }
 
 // ---- optional web UI password ---------------------------------------------
-// Off by default. When on, every handler below starts with this line and every
-// page and endpoint needs the credentials. Digest, not basic, so the password
+// Off by default. While a password is stored, every handler below starts with
+// this line and every page and endpoint needs the credentials. Digest, not basic, so the password
 // is never sent over a plain-HTTP LAN. Two deliberate exceptions:
 //   - the captive-portal probes, which a phone fires before anyone can type a
 //     password and which only ever redirect,
@@ -97,7 +97,7 @@ static bool guardRequest() {
 // Returns true when the request may proceed; on false it has already answered.
 static bool requireAuth() {
   if (!guardRequest()) return false;
-  if (!S->auth.enabled || !S->auth.pass.length()) return true;
+  if (!S->auth.pass.length()) return true;   // a stored password is the lock
   if (server.authenticate(S->auth.user.c_str(), S->auth.pass.c_str())) return true;
   server.requestAuthentication(HTTPAuthMethod::DIGEST_AUTH, AUTH_REALM,
                                "Authentication required");
@@ -567,7 +567,7 @@ static void handleUpdateUpload() {
     if (up.status != UPLOAD_FILE_START) Update.end();
     return;
   }
-  if (S->auth.enabled && S->auth.pass.length() &&
+  if (S->auth.pass.length() &&
       !server.authenticate(S->auth.user.c_str(), S->auth.pass.c_str())) {
     if (up.status != UPLOAD_FILE_START) Update.end();
     return;

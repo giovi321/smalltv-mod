@@ -240,33 +240,41 @@ void ButtonSettings::fromJson(JsonObjectConst o) {
 // Web UI password slice
 // ===========================================================================
 void AuthSettings::setDefaults() {
-  enabled = false;
   user = DEFAULT_AUTH_USER;
   pass = "";
 }
 
 void AuthSettings::toJson(JsonObject o, bool includeSecrets) const {
-  // Never enable in the saved config without a password to check against; a
-  // blank one would lock the page with a credential nobody can supply.
-  o["enabled"] = enabled && pass.length() > 0;
+  // "enabled" is no setting any more: it mirrors the password. It is still
+  // written (and sent to the page) so that older firmware, which reads it, and
+  // older pages treat a locked device as locked.
+  o["enabled"] = pass.length() > 0;
   o["user"]    = user;
   o["passSet"] = pass.length() > 0;
   if (includeSecrets) o["pass"] = pass;
 }
 
+// One parser for the stored file, a save from the page and an import.
+// A stored password is what locks the page. Rules:
+//  - "removePass": true takes the password off. It is the only way to do so;
+//    a blank "pass" keeps the stored one, as everywhere else in this file.
+//  - "enabled": false next to a "pass" means that password was never in force
+//    (older firmware let you store one with the box unticked). It is ignored,
+//    so an update does not start locking a device whose owner may have
+//    forgotten it. On its own, "enabled" (true or false) changes nothing: an
+//    old page or script cannot unlock or lock the device with it.
+//  - A password with no "enabled" key counts (a hand-edited file).
 void AuthSettings::fromJson(JsonObjectConst o) {
   if (o["user"].is<const char*>()) user = o["user"].as<String>();
-  // Blank keeps the stored password, as everywhere else in this file.
-  if (o["pass"].is<const char*>()) {
+  if (o["removePass"].is<bool>() && o["removePass"].as<bool>()) pass = "";
+  bool neverInForce = o["enabled"].is<bool>() && !o["enabled"].as<bool>();
+  if (!neverInForce && o["pass"].is<const char*>()) {
     String p = o["pass"].as<String>();
     if (p.length()) pass = p;
   }
-  if (o["enabled"].is<bool>()) enabled = o["enabled"];
   if (user.length() >= MAX_AUTH_USER_LEN) user.remove(MAX_AUTH_USER_LEN - 1);
   if (pass.length() >= MAX_AUTH_PASS_LEN) pass.remove(MAX_AUTH_PASS_LEN - 1);
   if (!user.length()) user = DEFAULT_AUTH_USER;
-  // Same guard as toJson, for a config imported by hand.
-  if (!pass.length()) enabled = false;
 }
 
 // ===========================================================================

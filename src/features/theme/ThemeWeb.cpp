@@ -147,7 +147,7 @@ void receiveUpload() {
     uploadError = "";
     uploaded = 0;
     uploadEnded = false;
-    uploadAllowed = allowed() && (!settings->auth.enabled || !settings->auth.pass.length() || server->authenticate(settings->auth.user.c_str(), settings->auth.pass.c_str()));
+    uploadAllowed = allowed() && (!settings->auth.pass.length() || server->authenticate(settings->auth.user.c_str(), settings->auth.pass.c_str()));
     if (!uploadAllowed) return;
     if (!up.filename.endsWith(".stheme")) {
       uploadError = "Expected a .stheme file";
