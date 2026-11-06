@@ -658,8 +658,6 @@ function radarSrcChanged(){if(!$('radarSource'))return;var v=$('radarSource').va
 function collect(){
  var o={mode:gv('mode'),
   carouselSec:parseInt(gv('carouselSec'))||30,
-  carouselTicker:gc('carouselTicker'), carouselUsage:gc('carouselUsage'), carouselRadar:gc('carouselRadar'),
-  carouselHa:gc('carouselHa'), carouselTheme:gc('carouselTheme'),
   brightness:parseInt(gv('brightness'))||0,
   rotation:parseInt(gv('rotation')),
   autoBrightness:gc('autoBrightness'),
@@ -668,6 +666,10 @@ function collect(){
   display:{colorOrder:gv('colorOrder')||'auto', invert:gc('colorInvert'),
    rGain:parseInt(gv('rGain'))||100, gGain:parseInt(gv('gGain'))||100, bGain:parseInt(gv('bGain'))||100},
   wifi:collectWifi()};
+ // Carousel flags: hideFeat removed the box of a feature this build lacks.
+ // Send a flag only for a box that is there, so a save leaves the stored
+ // value of a missing feature alone (gc() would answer false for it).
+ Object.keys(CAROPT).forEach(function(k){var id=CAROPT[k]; if($(id))o[id]=gc(id)});
  // Web UI password: same blank-keeps-stored rule as everywhere else. The
  // firmware refuses to enable it without a stored password to check against.
  if($('authEnabled')){var _a={enabled:gc('authEnabled'), user:gv('authUser')||'admin'};

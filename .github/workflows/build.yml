@@ -122,6 +122,7 @@ jobs:
           sh tests/theme/run.sh
           node tests/theme/test_webui.js
           node tests/theme/test_webui_poll.js
+          node tests/theme/test_webui_carousel.js
 
       # Sunrise and sunset worked out on the device, the dimming curve and its
       # overlap with night mode. The settings test needs ArduinoJson (from
