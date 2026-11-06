@@ -62,7 +62,7 @@ The fix is a two-step install through a tiny loader, no soldering. The loader is
 
 1. Get `smalltv-mod-loader.bin` from the [Releases page](https://github.com/giovi321/smalltv-mod/releases).
 2. Browse to `http://<device-ip>/update` and upload `smalltv-mod-loader.bin`. It fits the stock slot. The device reboots into the loader.
-3. The loader opens an open WiFi access point named `SmallTV-Loader`, and its screen shows the network name and the address. Join it and browse to `http://192.168.4.1/update`.
+3. The loader opens an open WiFi access point named `SmallTV-Loader`, and its screen shows the network name and the address. Join it and browse to `http://192.168.4.1`; the upload page opens there.
 4. Upload `smalltv-mod-firmware.bin` there. It fits because the loader uses this firmware's flash layout, which gives the sketch about 1,020 KB against an image of roughly 694 KB. The screen shows the upload progress, then the device reboots into the full smalltv-mod. Keep it powered until smalltv-mod's own screen appears.
 5. It comes up in the usual `SmallTV-Setup` captive portal for WiFi. From here it is a normal ESP8266 smalltv-mod device.
 
@@ -84,7 +84,7 @@ Two things in the stock firmware decide the install:
 So the install is the SmallTV-ultra's two steps with a renamed loader:
 
 1. Rename `smalltv-mod-loader.bin` to `SDP_loader.bin` and upload it through the stock update page.
-2. Join the open `SmallTV-Loader` access point and browse to `http://192.168.4.1/update`. The loader's screen shows the network name and the address.
+2. Join the open `SmallTV-Loader` access point and browse to `http://192.168.4.1`, where the upload page opens. The loader's screen shows the network name and the address.
 3. Upload `smalltv-mod-firmware.bin` there. On first boot the firmware formats its filesystem, since that area still holds part of the stock volume, and opens the usual `SmallTV-Setup` portal.
 
 The USB-C port is power only and the unit has no button, so a failed flash can only be recovered over the ESP-12's UART pads (TX, RX, GPIO0, GND, 3V3, EN; GPIO0 to GND for flash mode). Find them and back up the stock image (`esptool.py --port COM5 read_flash 0x0 0x400000 stock-backup.bin`) before step 1. The [UART recovery](#uart-header-for-recovery-or-a-direct-install) steps then apply as for any ESP-12.

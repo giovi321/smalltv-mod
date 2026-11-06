@@ -63,7 +63,7 @@ Two caveats if you publish your own combination. `UPDATE_ASSET` still points at 
 
 ## The smalltv_loader env
 
-`smalltv_loader` (source `src/loader.cpp`) builds a minimal ESP8266 image: WiFi, a web OTA endpoint at `/update` and a fixed status screen, nothing else. Its only job is the two-step [SmallTV-ultra install](/smalltv-mod/getting-started/flashing/#smalltv-ultra-stock-updater-says-not-enough-space), where the stock Ultra layout rejects the full image. The loader is small enough to fit that stock slot, and it uses this firmware's own 4m1m flash layout (`eagle.flash.4m1m.ld`), so its own `/update` slot is large enough to then accept the full `smalltv-mod-firmware.bin`.
+`smalltv_loader` (source `src/loader.cpp`) builds a minimal ESP8266 image: WiFi, a web OTA page at `/` (also at `/update`) and a fixed status screen, nothing else. Its only job is the two-step [SmallTV-ultra install](/smalltv-mod/getting-started/flashing/#smalltv-ultra-stock-updater-says-not-enough-space), where the stock Ultra layout rejects the full image. The loader is small enough to fit that stock slot, and it uses this firmware's own 4m1m flash layout (`eagle.flash.4m1m.ld`), so its own `/update` slot is large enough to then accept the full `smalltv-mod-firmware.bin`.
 
 ```bash
 pio run -e smalltv_loader
