@@ -153,11 +153,12 @@ static void scrBusy() {
 // Firmware only. The same Updater calls as ESP8266HTTPUpdateServer (begin with
 // the free sketch space, write, end(true), restart), without its filesystem
 // form: a filesystem image has no use on a one-way loader, and the form
-// confused people. CORS headers kept as the library sends them.
+// confused people. CORS headers kept as the library sends them. The form is
+// served at / and /update and always posts to /update.
 static const char kPage[] PROGMEM =
   "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
   "<meta name='viewport' content='width=device-width,initial-scale=1'></head><body>"
-  "<form method='POST' action='' enctype='multipart/form-data'>Firmware:<br>"
+  "<form method='POST' action='/update' enctype='multipart/form-data'>Firmware:<br>"
   "<input type='file' accept='.bin,.bin.gz' name='firmware'> "
   "<input type='submit' value='Update Firmware'></form></body></html>";
 static const char kSuccess[] PROGMEM =
@@ -165,6 +166,8 @@ static const char kSuccess[] PROGMEM =
 
 static bool    g_ok  = false;   // last upload was written and verified by Update.end()
 static uint8_t g_pct = 0;
+
+static void sendPage() { server.send_P(200, PSTR("text/html"), kPage); }
 
 static void corsHeaders() {
   server.sendHeader(F("Access-Control-Allow-Headers"), F("*"));
@@ -234,14 +237,17 @@ void setup() {
   }
   if (!joined) {
     WiFi.mode(WIFI_AP);
-    WiFi.softAP("SmallTV-Loader");        // open AP -> browse to 192.168.4.1/update
+    WiFi.softAP("SmallTV-Loader");        // open AP -> browse to 192.168.4.1
   }
 
   String ip = joined ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
   Serial.println(ip);
-  scrHome(joined ? ssid : "SmallTV-Loader", (ip + F("/update")).c_str());
+  scrHome(joined ? ssid : "SmallTV-Loader", ip.c_str());
 
-  server.on(F("/update"), HTTP_GET, [] { server.send_P(200, PSTR("text/html"), kPage); });
+  // The bare address opens the upload form; /update keeps working for the
+  // existing instructions and links.
+  server.on(F("/"), HTTP_GET, sendPage);
+  server.on(F("/update"), HTTP_GET, sendPage);
   server.on(F("/update"), HTTP_OPTIONS, [] {
     corsHeaders();
     server.send(200, F("text/html"), F("y"));
