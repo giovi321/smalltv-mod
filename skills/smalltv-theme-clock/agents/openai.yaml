@@ -1,0 +1,4 @@
+interface:
+  display_name: "SmallTV theme clock"
+  short_description: "Design a smalltv-mod clock face and build an installable .stheme with a preview"
+  default_prompt: "Make me a SmallTV theme clock"
