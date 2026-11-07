@@ -15,7 +15,8 @@
 // supplies the values; this file knows nothing of the firmware, so a native
 // test can compare it with the old way, byte for byte.
 //
-// Call order: writeStatusHead(), then writeStatusTickers() if the build has
+// Call order: writeStatusHead(), then writeStatusCrash() if there is a crash
+// record, writeStatusTickers() if the build has
 // the ticker, writeStatusRadar() if it has the radar, and writeStatusEnd().
 #include "JsonStream.h"
 
@@ -46,6 +47,14 @@ struct StatusData {
   int bl = 0;                   // backlight level now, 0..255
   uint32_t heap = 0, maxblk = 0, contstk = 0, uptime = 0;
   StatusWg wg;
+};
+// The record of the last crash (Platform.h). Only written when there is one.
+// The register strings are left out when empty.
+struct StatusCrash {
+  const char *reason = "", *fw = "";
+  const char *exccause = "", *epc = "", *addr = "";
+  bool hasUptime = false;
+  uint32_t uptime = 0;
 };
 struct StatusTicker {
   const char* symbol = "";
@@ -122,6 +131,18 @@ template <class Out> void writeStatusHead(Out& out, const StatusData& d) {
     if (w.endpointIp[0]) member(out, PSTR(",\"endpointIp\":"), w.endpointIp);
     if (w.lastHandshake) member(out, PSTR(",\"lastHandshake\":"), w.lastHandshake);
   }
+  jsonout::raw(out, PSTR("}"));
+}
+
+// `,"lastCrash":{...}`, added after the 3.2.1 keys: nothing that read the reply before reads it.
+template <class Out> void writeStatusCrash(Out& out, const StatusCrash& k) {
+  using statusout::member;
+  member(out, PSTR(",\"lastCrash\":{\"reason\":"), k.reason);
+  member(out, PSTR(",\"fw\":"), k.fw);
+  if (k.exccause[0]) member(out, PSTR(",\"exccause\":"), k.exccause);
+  if (k.epc[0]) member(out, PSTR(",\"epc\":"), k.epc);
+  if (k.addr[0]) member(out, PSTR(",\"addr\":"), k.addr);
+  if (k.hasUptime) member(out, PSTR(",\"uptime\":"), k.uptime);
   jsonout::raw(out, PSTR("}"));
 }
 
