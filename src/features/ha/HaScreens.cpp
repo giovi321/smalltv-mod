@@ -3,13 +3,19 @@
 #if WITH_HA
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <new>
 #include <pgmspace.h>
 
 static const char* HA_PATH = "/ha_screens.json";
 
 // Packed [0, g_count), sorted by slot name — iteration order is the carousel
 // order (lexicographic), which the docs rely on (a "zenergy" slot sorts last).
-static HaScreen g_screens[HA_MAX_SCREENS];
+// One block of HA_MAX_SCREENS screens (5,792 B on the ESP8266), taken at boot
+// by haScreensAlloc() and null until then, or for good when Home Assistant is
+// off or the heap had no room. While it is null g_count stays 0, so the
+// readers (live count, screen at, dirty flag, clear) need no check; the
+// functions that would write into it check for null first.
+static HaScreen* g_screens = nullptr;
 static uint8_t  g_count = 0;
 static bool     g_loaded = false;
 static bool     g_dirty = false;        // renderer flag
@@ -260,6 +266,7 @@ static void deleteAt(uint8_t idx) {
 }
 
 void haScreensApply(const char* slot, const uint8_t* payload, size_t len) {
+  if (!g_screens) return;   // no store: drop the message before it is parsed
   if (!slot || !slot[0] || strlen(slot) >= HA_SLOT_LEN) return;
 
   // Delete first, before any JSON parse: an empty retained payload removes the
@@ -441,6 +448,7 @@ void haScreensService() {
 }
 
 void haScreensReload() {
+  if (!g_screens) return;   // no store: the saved file is left alone
   if (g_persistDue) { g_persistDue = false; persistNow(); }  // don't lose a pending change
   g_count = 0;
   File f = LittleFS.open(HA_PATH, "r");
@@ -464,8 +472,24 @@ void haScreensReload() {
   g_dirty = true;
 }
 
+bool haScreensAlloc() {
+  if (g_screens) return true;
+  // The nothrow form: this core has no exceptions, and a plain `new` that
+  // fails panics. A failure comes back as null instead.
+  g_screens = new (std::nothrow) HaScreen[HA_MAX_SCREENS];
+  return g_screens != nullptr;
+}
+
+void haScreensFree() {
+  delete[] g_screens;
+  g_screens = nullptr;
+  g_count = 0;
+  g_loaded = false;
+  g_dirty = false;
+}
+
 void haScreensBegin() {
-  if (g_loaded) return;
+  if (g_loaded || !g_screens) return;
   g_loaded = true;
   haScreensReload();
 }

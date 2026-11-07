@@ -17,6 +17,17 @@ Open the settings page and find the MQTT card. Enter your broker's host, port (1
 
 The device identifies itself by its hostname, the same name you see in the web UI and browse to as `<hostname>.local`. That name appears in every topic below; the examples use `smalltv`.
 
+### Switching it on and off needs a restart
+
+Home Assistant is on when a broker host is set, and off when the host is blank. There is no other switch. The screen store and the MQTT receive buffer are big for the ESP8266, so the device takes that memory once, at boot, and only when a host is set. A device with a blank host never takes it, and keeps the memory for everything else.
+
+- Changing from one host to another takes effect at once.
+- Filling in a host where there was none, or clearing it, takes effect after the next restart. Press **Reboot** in the System tab. The Status tab shows a Home Assistant line ("restart the device") until you do. A device that already had a host set keeps working after an update, with no action.
+- If the heap has no room for it at boot, Home Assistant stays off and the Status tab says so ("not enough memory"). The device does not crash. A restart tries again. To stop it trying, clear the host.
+- After a crash the device starts in safe mode without Home Assistant, and the Status tab says that too.
+
+The Status reply (`GET /api/status`) carries an `ha` field only in those cases: `memory`, `safe`, or `reboot`. When everything is as set, the field is not there.
+
 ## The MQTT contract
 
 | Topic | Direction | What it carries |

@@ -33,7 +33,7 @@ function makePage(fields){
  const requests=[],toasts=[];
  let confirmAnswer=true,confirmAsked=[],fail=null;
  const ctx={document,C:{},parseInt,parseFloat,Object,JSON,Promise,collectWifi:()=>[],
-  toast:m=>toasts.push(m),loadStatus:()=>{},
+  toast:m=>toasts.push(m),loadStatus:()=>{},haNote:()=>'',   // saveAll() adds the Home Assistant note
   confirm:m=>{confirmAsked.push(m);return confirmAnswer},
   j:(url,opt)=>{requests.push({url,opt,body:opt&&opt.body?JSON.parse(opt.body):null});
    return fail?Promise.reject(new Error(fail)):Promise.resolve({ok:true,reboot:false})}};

@@ -23,6 +23,7 @@
 #endif
 #include "SettingsTransaction.h"
 #if WITH_HA
+#include "HaBoot.h"
 #include "HaScreens.h"
 #include "MqttClient.h"
 #endif
@@ -226,6 +227,12 @@ static void handleStatus() {
   d.sun = sunText;                       // today's sunrise-sunset; left out when empty
   d.bl = appBacklightSteps();            // backlight level now, 0..255
   d.wg = wgStatus();                     // tunnel state (compiledIn=false where it isn't built)
+#if WITH_HA
+  // Only when Home Assistant is not as set: no room at boot, safe mode, or
+  // switched on or off since boot (a restart does it). Left out otherwise.
+  const char* haNote = haProblem(haWanted(*S));
+  d.ha = haNote ? haNote : "";
+#endif
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
@@ -336,6 +343,12 @@ static void handlePostConfig() {
   JsonDocument res;
   res["ok"] = true;
   res["reboot"] = wifiChanged;
+#if WITH_HA
+  // Switching Home Assistant on or off (filling or clearing the broker host)
+  // takes effect at the next restart, when its memory is taken or given back.
+  // Tell the page, so it says so; it does not restart the device by itself.
+  if (const char* haNote = haProblem(haWanted(*S))) res["ha"] = haNote;
+#endif
   sendJson(res);
 
   // After the response, not before: a browser reaching the device *through* the

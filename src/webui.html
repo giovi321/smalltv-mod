@@ -366,7 +366,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <div><label>Password <span class="muted">(optional)</span></label><input id="haBrokerPass" type="password" autocomplete="new-password" placeholder="(unchanged)"></div>
    </div>
    <div style="margin-top:10px"><button class="btn sec" onclick="haClearScreens()">Clear screens</button></div>
-   <small class="hint">Plain TCP, not TLS — keep the broker on your LAN. Leave the host blank to switch the feature off. The device subscribes to <code>smalltv/&lt;hostname&gt;/screen/&lt;slot&gt;</code>: publish a screen there as <b>retained</b> JSON and it joins the on-screen rotation; an empty retained payload deletes it. Screens survive a reboot, and the broker's retained copies repopulate them on reconnect. Like the other passwords here, a blank password field keeps the stored one.</small>
+   <small class="hint">Plain TCP, not TLS — keep the broker on your LAN. Leave the host blank to switch the feature off. <b>Switching it on or off needs a restart</b> (System tab): the device takes the memory for it at boot, and only when a host is set. Changing from one host to another takes effect at once. The device subscribes to <code>smalltv/&lt;hostname&gt;/screen/&lt;slot&gt;</code>: publish a screen there as <b>retained</b> JSON and it joins the on-screen rotation; an empty retained payload deletes it. Screens survive a reboot, and the broker's retained copies repopulate them on reconnect. Like the other passwords here, a blank password field keeps the stored one.</small>
    <small class="hint"><b>Clear screens</b> wipes every screen off the device and deletes the broker's retained copies, so screens from a deleted Home Assistant automation stop coming back on every reconnect. It only covers slots the device currently knows about; if the broker is unreachable the device side is still wiped.</small>
   </div>
  </section>
@@ -762,7 +762,7 @@ function collect(){
 function saveAll(){var bad=authProblem();if(bad){toast(bad);return}
  var typed=!!gv('authPass');
  j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect())})
- .then(function(r){if(!r.ok){toast(r.error||'Save failed');return}if(typed)authShow(true);toast(r.reboot?'Saved — rebooting...':'Saved');if(r.reboot)setTimeout(function(){location.reload()},6000);loadStatus()})
+ .then(function(r){if(!r.ok){toast(r.error||'Save failed');return}if(typed)authShow(true);toast(r.reboot?'Saved — rebooting...':(haNote(r.ha)?'Saved. '+haNote(r.ha):'Saved'));if(r.reboot)setTimeout(function(){location.reload()},6000);loadStatus()})
  .catch(function(e){toast('Save failed: '+e.message)})}
 
 function saveWifi(){
@@ -838,6 +838,15 @@ function loadStatus(){
 function statusNext(){clearTimeout(statusTimer);statusTimer=0;if(!document.hidden)statusTimer=setTimeout(loadStatus,STATUS_MS)}
 document.addEventListener('visibilitychange',function(){
  if(document.hidden){clearTimeout(statusTimer);statusTimer=0}else loadStatus()});
+// Home Assistant is on when a broker host is set. Its memory is taken at boot,
+// so switching it on or off needs a restart; the device reports why it is not
+// as set (the "ha" field of /api/status and of a save's reply).
+function haNote(c){
+ if(c==='reboot')return 'Restart the device to switch Home Assistant on or off.';
+ if(c==='memory')return 'Off: there was not enough memory at boot. Restart the device to try again, or clear the broker host.';
+ if(c==='safe')return 'Off: the device is in safe mode after a crash. Restart it.';
+ return '';
+}
 function showStatus(s){
  $('dot').className='dot'+(s.connected?' ok':'');
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
@@ -857,6 +866,7 @@ function showStatus(s){
   (s.wifiFail?kv('Last join failure',s.wifiFail):'')+
   kv('Free heap',s.heap+' B'+(s.maxblk?' ('+s.maxblk+' B largest block)':''))+
   kv('Uptime',fmtUp(s.uptime))+kv('Last reset',s.reset||'-')+
+  (haNote(s.ha)?kv('Home Assistant',haNote(s.ha)):'')+
   ((s.wg&&s.wg.compiledIn)?kv('VPN',s.wg.held?'held':(s.wg.up?'up':(s.wg.enabled?'connecting':'off'))):'')+
   (s.radar?kv('Radar',radarLine(s.radar)):'');
  var wgs=$('wgStatus'); if(wgs)wgs.textContent=wgLine(s.wg);

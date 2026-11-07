@@ -61,6 +61,13 @@ struct HaScreen {
   uint8_t  bitmap[HA_BITMAP_POOL];
 };
 
+// The store itself is taken from the heap once, at boot, and only when Home
+// Assistant is wanted (HaBoot.h). Until then, and after a failed allocation, it
+// does not exist: every function below then does nothing and answers "empty"
+// (no screens, nothing to clear, nothing dirty), so no caller needs a check.
+bool haScreensAlloc();     // take the store (HA_MAX_SCREENS screens, ONE block); false: no heap
+void haScreensFree();      // give it back (also: forget what it held)
+
 void haScreensBegin();     // load /ha_screens.json (idempotent)
 void haScreensService();   // debounced persist; call every loop tick
 void haScreensReload();    // re-read the persisted file (settings re-applied)

@@ -69,6 +69,7 @@ static std::string reference(const Case& c) {
   o["clockFresh"] = d.clockFresh;
   if (d.sun[0]) o["sun"] = std::string(d.sun);
   o["bl"] = d.bl;
+  if (d.ha[0]) o["ha"] = d.ha;
   fillWg(o["wg"].to<JsonObject>(), d.wg);
   if (c.tickersCompiled) {
     JsonArray arr = o["tickers"].to<JsonArray>();
@@ -180,6 +181,7 @@ static std::vector<Case> cases() {
   full.d.clockFresh = false;
   full.d.sun = "06:58-16:42";
   full.d.bl = 255;
+  full.d.ha = "memory";
   full.d.wg.compiledIn = true;
   full.d.wg.enabled = full.d.wg.up = true;
   full.d.wg.stage = 3;
@@ -249,8 +251,8 @@ int main() {
     }
     // Where the sun fields sit is fixed: after clockFresh, before wg.
     if (std::string(c.name) == "full" &&
-        want.find("\"clockFresh\":false,\"sun\":\"06:58-16:42\",\"bl\":255,\"wg\":{") == std::string::npos) {
-      std::fprintf(stderr, "sun and bl are not between clockFresh and wg:\n%s\n", want.c_str());
+        want.find("\"clockFresh\":false,\"sun\":\"06:58-16:42\",\"bl\":255,\"ha\":\"memory\",\"wg\":{") == std::string::npos) {
+      std::fprintf(stderr, "sun, bl and ha are not between clockFresh and wg:\n%s\n", want.c_str());
       return 1;
     }
     if (std::string(c.name) == "no-sun-lit" && (want.find("\"sun\"") != std::string::npos ||
