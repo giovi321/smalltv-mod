@@ -41,6 +41,7 @@ The ESP8266 runs a theme with about 6.5 KB of heap free, and a failed allocation
 - Keep unrelated changes, such as a fix to settings storage, in their own pull request
 - `src/webui.html` is the source of the web UI. After editing it, run `python tools/gzip_webui.py` and commit the regenerated `src/webui.h` in the same commit
 - A new setting gets a default in `Settings::setDefaults()` and appears in both `settingsToJson()` and `settingsApplyJson()`, so it survives the backup and restore in the System tab
+- A change to the theme format (manifest rules, limits, tokens, sources, the package or STI format, the renderer) updates `skills/smalltv-theme-clock/scripts/stheme.py` and its references in the same pull request. `tests/theme/test_skill_parity.py` checks the packer, validator and renderer against the firmware
 - Do not change `FW_VERSION` in `src/config.h`. The maintainer bumps it at release time
 - Never commit credentials, API keys, WiFi passwords or captures from a real device
 

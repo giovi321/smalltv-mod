@@ -1,0 +1,301 @@
+{
+ "spec": "auto",
+ "theme": {
+  "id": "analog-test",
+  "name": "Analog Test",
+  "author": "t",
+  "version": "1.0.0"
+ },
+ "display": {
+  "width": 240,
+  "height": 240,
+  "background": "#0b1420"
+ },
+ "layers": [
+  {
+   "id": "bg",
+   "type": "image",
+   "x": 0,
+   "y": 0,
+   "source": "images/bg.png"
+  },
+  {
+   "id": "minor",
+   "type": "shape",
+   "shape": "ticks",
+   "x": 120,
+   "y": 120,
+   "radius": 112,
+   "count": 60,
+   "length": 4,
+   "stroke": "#7f93ab"
+  },
+  {
+   "id": "major",
+   "type": "shape",
+   "shape": "ticks",
+   "x": 120,
+   "y": 120,
+   "radius": 112,
+   "count": 12,
+   "length": 12,
+   "stroke": "#e9edf4",
+   "strokeWidth": 3
+  },
+  {
+   "id": "secarc",
+   "type": "shape",
+   "shape": "arc",
+   "x": 120,
+   "y": 120,
+   "radius": 100,
+   "start": 0,
+   "sweep": 0,
+   "stroke": "#47c2ff",
+   "strokeWidth": 6,
+   "bind": {
+    "sweep": {
+     "source": "time.second",
+     "input": [
+      0,
+      60
+     ],
+     "output": [
+      0,
+      360
+     ]
+    },
+    "stroke": {
+     "source": "time.second",
+     "stops": [
+      {
+       "at": 0,
+       "value": "#35c46a"
+      },
+      {
+       "at": 30,
+       "value": "#f0b429"
+      },
+      {
+       "at": 50,
+       "value": "#e5484d"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "arc2",
+   "type": "shape",
+   "shape": "arc",
+   "x": 120,
+   "y": 120,
+   "radius": 80,
+   "start": -45,
+   "sweep": -200,
+   "stroke": "#233145",
+   "strokeWidth": 30
+  },
+  {
+   "id": "badge",
+   "type": "image",
+   "x": 100,
+   "y": 150,
+   "source": "images/badge.png"
+  },
+  {
+   "id": "greet",
+   "type": "text",
+   "x": 120,
+   "y": 70,
+   "anchor": "center",
+   "size": 12,
+   "color": "#e9edf4",
+   "value": {
+    "en": "{WEEKDAY}",
+    "de": "Heute {WD} {DD}. {MON}"
+   }
+  },
+  {
+   "id": "ampm",
+   "type": "text",
+   "x": 120,
+   "y": 160,
+   "anchor": "center",
+   "size": 8,
+   "color": "#0b1420",
+   "value": "{hh}:{MM} {AMPM} {H}/{MO}"
+  },
+  {
+   "id": "hour-am",
+   "type": "shape",
+   "shape": "hand",
+   "x": 120,
+   "y": 120,
+   "length": 55,
+   "tail": 10,
+   "angle": 0,
+   "stroke": "#e9edf4",
+   "strokeWidth": 6,
+   "bind": {
+    "angle": {
+     "source": "time.secondOfDay",
+     "input": [
+      0,
+      43200
+     ],
+     "output": [
+      0,
+      360
+     ]
+    },
+    "x": {
+     "source": "time.hour",
+     "input": [
+      11,
+      12
+     ],
+     "output": [
+      120,
+      479
+     ]
+    }
+   }
+  },
+  {
+   "id": "hour-pm",
+   "type": "shape",
+   "shape": "hand",
+   "x": -240,
+   "y": 120,
+   "length": 55,
+   "tail": 10,
+   "angle": 0,
+   "stroke": "#e9edf4",
+   "strokeWidth": 6,
+   "bind": {
+    "angle": {
+     "source": "time.secondOfDay",
+     "input": [
+      43200,
+      86400
+     ],
+     "output": [
+      0,
+      360
+     ]
+    },
+    "x": {
+     "source": "time.hour",
+     "input": [
+      11,
+      12
+     ],
+     "output": [
+      -240,
+      120
+     ]
+    }
+   }
+  },
+  {
+   "id": "minute",
+   "type": "shape",
+   "shape": "hand",
+   "x": 120,
+   "y": 120,
+   "length": 85,
+   "tail": 14,
+   "angle": 0,
+   "stroke": "#e9edf4",
+   "strokeWidth": 4,
+   "bind": {
+    "angle": {
+     "source": "time.minute",
+     "input": [
+      0,
+      60
+     ],
+     "output": [
+      0,
+      360
+     ]
+    }
+   }
+  },
+  {
+   "id": "second",
+   "type": "shape",
+   "shape": "hand",
+   "x": 120,
+   "y": 120,
+   "length": 95,
+   "tail": 20,
+   "angle": 0,
+   "stroke": "#ff5a47",
+   "strokeWidth": 1,
+   "bind": {
+    "angle": {
+     "source": "time.second",
+     "input": [
+      0,
+      60
+     ],
+     "output": [
+      0,
+      360
+     ]
+    }
+   }
+  },
+  {
+   "id": "moon",
+   "type": "shape",
+   "shape": "circle",
+   "x": 120,
+   "y": 200,
+   "radius": 4,
+   "fill": "#e9edf4",
+   "bind": {
+    "radius": {
+     "source": "time.moon",
+     "input": [
+      0,
+      15
+     ],
+     "output": [
+      1,
+      8
+     ]
+    }
+   }
+  },
+  {
+   "id": "dot",
+   "type": "animation",
+   "x": 114,
+   "y": 114,
+   "width": 12,
+   "height": 12,
+   "source": "animations/dot",
+   "frames": 4,
+   "fps": 6,
+   "loop": true
+  },
+  {
+   "id": "temp",
+   "type": "text",
+   "x": 10,
+   "y": 226,
+   "size": 8,
+   "color": "#7f93ab",
+   "value": "{device.temperature}C",
+   "scroll": {
+    "width": 60,
+    "mode": "bounce",
+    "speed": 20,
+    "pause": 300
+   }
+  }
+ ]
+}

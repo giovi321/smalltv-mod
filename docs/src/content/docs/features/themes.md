@@ -80,6 +80,24 @@ fails is listed with its error and checked again each time. Selecting a theme
 always runs the full validation. The `<id>.meta` files that firmware 3.1.0
 and 3.1.1 wrote, one per theme, are removed when the device starts.
 
+## Create with an AI agent
+
+The repository includes a skill in the [Agent Skills format](https://agentskills.io/),
+[`skills/smalltv-theme-clock`](https://github.com/giovi321/smalltv-mod/tree/main/skills/smalltv-theme-clock).
+Describe the clock you want. The agent asks a few questions (digital or analog, 12 or 24
+hours, date, live data, colors), writes the source folder, and builds the `.stheme` with a
+PNG and animated GIF preview. Where it runs on your network, it can also install the theme
+on the TV.
+
+To use it, copy the `skills/smalltv-theme-clock` folder into your agent's skills directory,
+or zip it (one top-level `smalltv-theme-clock/` folder) for apps that take skill uploads.
+
+The skill ships its own pure-Python packer, validator and renderer (Python 3.9+ and Pillow),
+so it needs no compiler or PlatformIO. Its packages are byte-identical to
+`tools/smalltv_theme.py build` and its previews match the firmware renderer pixel for pixel.
+It uses spec 1 unless the design needs a spec 2 feature. Its default palette is the one from
+`examples/themes/live-status`.
+
 ## Create a source theme
 
 ```text
