@@ -675,7 +675,7 @@ function authRemove(){
   .catch(function(e){toast('Could not remove the password: '+e.message)})}
 // password end
 function collect(){
- var o={mode:gv('mode'),
+ var o={
   carouselSec:parseInt(gv('carouselSec'))||30,
   brightness:parseInt(gv('brightness'))||0,
   rotation:parseInt(gv('rotation')),
@@ -689,6 +689,10 @@ function collect(){
  // Send a flag only for a box that is there, so a save leaves the stored
  // value of a missing feature alone (gc() would answer false for it).
  Object.keys(CAROPT).forEach(function(k){var id=CAROPT[k]; if($(id))o[id]=gc(id)});
+ // Mode: hideFeat removed the entry of a feature this build lacks. If the
+ // device stored that mode, the list shows nothing and gv() answers ''. Send
+ // a mode only when the list offers one, so the save keeps the stored mode.
+ var md=gv('mode'); if(md)o.mode=md;
  // Web UI password: same blank-keeps-stored rule as everywhere else. A saved
  // password is the lock, so there is no "enabled" to send; removing it is its
  // own request (authRemove). saveAll() checks the two fields match first.
