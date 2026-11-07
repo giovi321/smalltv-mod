@@ -29,6 +29,12 @@
 #include <Arduino.h>
 #include "Settings.h"
 
+// The client and its receive buffer (MQTT_MAX_PACKET_SIZE bytes) are taken from
+// the heap once, at boot, only when Home Assistant is wanted (HaBoot.h). Without
+// them mqttLoop() and the publish helpers do nothing and report "not connected".
+bool mqttAlloc();                    // build the client; false: no heap (nothing is kept)
+void mqttFree();                     // drop it (harmless when there is none)
+
 void mqttBegin(Settings& s);         // arm; connects from the loop, not here
 void mqttLoop();                     // call every main-loop tick, after netLoop()
 

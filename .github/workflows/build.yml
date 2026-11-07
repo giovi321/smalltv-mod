@@ -158,6 +158,18 @@ jobs:
       - name: Test status reply
         run: sh tests/status/run.sh
 
+      # Home Assistant takes its memory (screen store, MQTT client) once at
+      # boot, only when a broker host is set, and stays off with a reason when
+      # the heap says no. The real store and client code run on the host
+      # against stand-in core headers and a heap that can run out; the web
+      # page text and the wiring of setup() are checked on the sources. Needs
+      # ArduinoJson (from the firmware build above) and node.
+      - name: Test Home Assistant boot allocation
+        run: |
+          sh tests/ha/run.sh
+          node tests/ha/test_webui_ha.js
+          node tests/ha/test_wiring.js
+
       - name: Test web request guard
         run: |
           c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc tests/test_webguard.cpp -o /tmp/smalltv-webguard-tests

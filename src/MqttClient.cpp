@@ -3,6 +3,7 @@
 #include "config.h"
 #if WITH_HA
 #include <PubSubClient.h>
+#include <new>
 #include "Platform.h"   // brings in WiFi.h / ESP8266WiFi.h per target
 #include "Net.h"
 #include "HaScreens.h"
@@ -29,7 +30,10 @@ extern void appRelease();
 
 static Settings*    S = nullptr;
 static WiFiClient   g_tcp;
-static PubSubClient g_mqtt(g_tcp);
+// The client and its receive buffer (MQTT_MAX_PACKET_SIZE bytes, taken by its
+// constructor) come from mqttAlloc() at boot, only when Home Assistant is
+// wanted. Null otherwise: mqttLoop(), mqttConnected() and mqttPublish() check.
+static PubSubClient* g_mqtt = nullptr;
 
 static uint32_t g_backoffMs   = MQTT_RETRY_MIN_MS;
 static uint32_t g_nextAttempt = 0;
@@ -65,7 +69,7 @@ static bool brokerChanged() {
 static void publishState() {
   char buf[4];
   snprintf(buf, sizeof(buf), "%u", (unsigned)S->brightness);
-  if (g_mqtt.publish(g_stateTopic, buf, /*retained=*/true))
+  if (g_mqtt->publish(g_stateTopic, buf, /*retained=*/true))
     g_pubBrightness = (int)S->brightness;
 }
 
@@ -84,7 +88,7 @@ static void publishDiscovery() {
     S->hostname.c_str(), g_setTopic, g_stateTopic, g_availTopic,
     S->hostname.c_str(), S->hostname.c_str());
   if (n < 0 || (size_t)n >= sizeof(payload)) return;
-  g_mqtt.publish(g_discTopic, payload, /*retained=*/true);
+  g_mqtt->publish(g_discTopic, payload, /*retained=*/true);
 }
 
 // Brightness command: a plain integer 0..100 (NOT JSON). Non-numeric payloads
@@ -125,9 +129,30 @@ static void onMessage(char* topic, uint8_t* payload, unsigned int len) {
   haScreensApply(slash + 1, payload, len);
 }
 
+bool mqttAlloc() {
+  if (g_mqtt) return true;
+  // The nothrow form: this core has no exceptions, and a plain `new` that
+  // fails panics.
+  g_mqtt = new (std::nothrow) PubSubClient(g_tcp);
+  // PubSubClient's constructor takes its buffer with malloc and says nothing
+  // when that fails: the buffer size reads 0. Without the buffer every
+  // message would be dropped, so that counts as no memory.
+  if (g_mqtt && !g_mqtt->getBufferSize()) {
+    delete g_mqtt;
+    g_mqtt = nullptr;
+  }
+  if (!g_mqtt) return false;
+  g_mqtt->setCallback(onMessage);
+  return true;
+}
+
+void mqttFree() {
+  delete g_mqtt;
+  g_mqtt = nullptr;
+}
+
 void mqttBegin(Settings& s) {
   S = &s;
-  g_mqtt.setCallback(onMessage);
   snprintf(g_availTopic, sizeof(g_availTopic), "smalltv/%s/availability", S->hostname.c_str());
   snprintf(g_screenSub, sizeof(g_screenSub), "smalltv/%s/screen/+", S->hostname.c_str());
   snprintf(g_stateTopic, sizeof(g_stateTopic), "smalltv/%s/brightness", S->hostname.c_str());
@@ -136,11 +161,11 @@ void mqttBegin(Settings& s) {
            "homeassistant/number/smalltv_%s_brightness/config", S->hostname.c_str());
 }
 
-bool mqttConnected() { return g_mqtt.connected(); }
+bool mqttConnected() { return g_mqtt && g_mqtt->connected(); }
 
 bool mqttPublish(const char* topic, const char* payload, bool retained) {
-  if (!g_mqtt.connected()) return false;
-  return g_mqtt.publish(topic, payload, retained);
+  if (!mqttConnected()) return false;
+  return g_mqtt->publish(topic, payload, retained);
 }
 
 void mqttLoop() {
@@ -156,24 +181,29 @@ void mqttLoop() {
     return saveSettings(*S);
   });
 
+  // No client: Home Assistant was off at boot (no broker host then), or the
+  // heap had no room, or this is safe mode. A host set since then waits for
+  // the next boot, which is when the memory is taken (HaBoot.h).
+  if (!g_mqtt) return;
+
   // No broker configured: the feature is off. Dropping an existing connection
   // here is what turns a cleared broker host into a clean disconnect.
   if (!S->ha.brokerHost.length()) {
-    if (g_mqtt.connected()) g_mqtt.disconnect();
+    if (g_mqtt->connected()) g_mqtt->disconnect();
     g_connHost[0] = 0;    // counts as "changed" when a host is set again
     return;
   }
 
   // Only connect while the station is up (never in AP/setup mode).
   if (netMode() != NET_STA || !netConnected()) {
-    if (g_mqtt.connected()) g_mqtt.disconnect();
+    if (g_mqtt->connected()) g_mqtt->disconnect();
     return;
   }
 
-  if (g_mqtt.connected()) {
-    if (brokerChanged()) g_mqtt.disconnect();   // reconnect below, next tick
+  if (g_mqtt->connected()) {
+    if (brokerChanged()) g_mqtt->disconnect();   // reconnect below, next tick
     else {
-      g_mqtt.loop();
+      g_mqtt->loop();
       // An HA restart ("online" on homeassistant/status) re-sends the
       // discovery config and forces a state republish.
       if (g_haOnline) {
@@ -204,11 +234,11 @@ void mqttLoop() {
   strlcpy(g_connUser, S->ha.brokerUser.c_str(), sizeof(g_connUser));
   strlcpy(g_connPass, S->ha.brokerPass.c_str(), sizeof(g_connPass));
 
-  g_mqtt.setServer(g_connHost, g_connPort);
+  g_mqtt->setServer(g_connHost, g_connPort);
   // PubSubClient::connect() registers the LWT (retained "offline") and does a
   // synchronous TCP connect — a dead broker IP can stall the loop for the
   // TCP timeout here, once per backoff interval.
-  if (!g_mqtt.connect(S->hostname.c_str(),
+  if (!g_mqtt->connect(S->hostname.c_str(),
                       g_connUser[0] ? g_connUser : nullptr,
                       g_connPass[0] ? g_connPass : nullptr,
                       g_availTopic, 0, true, "offline")) {
@@ -218,14 +248,14 @@ void mqttLoop() {
   g_backoffMs = MQTT_RETRY_MIN_MS;
   // Both availability messages are retained, so a `mosquitto_sub -C 1` always
   // gets the current state immediately (docs verify it that way).
-  g_mqtt.publish(g_availTopic, "online", /*retained=*/true);
+  g_mqtt->publish(g_availTopic, "online", /*retained=*/true);
   // Brightness entity: discovery config + current state, both retained.
   publishDiscovery();
   publishState();
-  g_mqtt.subscribe(g_screenSub);
-  g_mqtt.subscribe(g_setTopic);
-  g_mqtt.subscribe("homeassistant/status");
-  g_mqtt.loop();
+  g_mqtt->subscribe(g_screenSub);
+  g_mqtt->subscribe(g_setTopic);
+  g_mqtt->subscribe("homeassistant/status");
+  g_mqtt->loop();
 }
 
 #endif  // WITH_HA

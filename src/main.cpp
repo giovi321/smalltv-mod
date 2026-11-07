@@ -37,6 +37,7 @@
 #include "RadarMode.h"
 #endif
 #if WITH_HA
+#include "HaBoot.h"
 #include "HaMode.h"
 #include "MqttClient.h"
 #endif
@@ -328,6 +329,14 @@ void setup() {
   Serial.println("[boot] settings");
   settingsBegin();
   loadSettings(g_settings);
+
+#if WITH_HA
+  // Home Assistant's memory (the screen store and the MQTT client) is taken
+  // here, before the display, the Wi-Fi and the web server fragment the heap,
+  // and only when a broker host is set. If the heap says no, or this is safe
+  // mode, Home Assistant stays off and /api/status says why.
+  haBoot(haWanted(g_settings), g_safeMode);
+#endif
 
   Serial.println("[boot] display");
   gfxBegin(g_settings);
