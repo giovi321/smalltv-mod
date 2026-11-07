@@ -37,7 +37,8 @@ vm.createContext(context);vm.runInContext(code,context);
  const saveCode=html.slice(html.indexOf('function saveAll('),html.indexOf('// wifi networks'));
  let saveToast='';
  const saveContext={j:async()=>{throw new Error('not enough memory')},collect:()=>({}),collectWifi:()=>[],
-  toast:message=>saveToast=message,loadStatus:()=>{},setTimeout,JSON};
+  toast:message=>saveToast=message,loadStatus:()=>{},setTimeout,JSON,
+  authProblem:()=>'',gv:()=>''};   // saveAll() checks the password fields first
  vm.createContext(saveContext);vm.runInContext(saveCode,saveContext);
  for(const save of ['saveAll','saveWifi']){
   saveToast='';saveContext[save]();await new Promise(resolve=>setImmediate(resolve));

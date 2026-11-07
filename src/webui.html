@@ -396,10 +396,12 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <small class="hint">The export is the device's <code>config.json</code>, including WiFi passwords and the WireGuard private key in clear text; treat the file accordingly. Import applies everything and reboots.</small>
   </div>
   <div class="card"><h2>Password</h2>
-   <div class="chk"><input id="authEnabled" type="checkbox"><label>Ask for a password to open this page</label></div>
+   <div id="authState" class="muted"></div>
    <label>Username</label><input id="authUser" type="text" autocomplete="off" placeholder="admin">
    <label>Password</label><input id="authPass" type="password" autocomplete="new-password" placeholder="(unchanged)">
-   <small class="hint">Off by default, which leaves the page open to anyone on your network. Turning it on puts the settings page, the API, and the firmware upload behind HTTP digest auth, so the password itself is never sent over the wire. The clawdmeter daemon's push endpoint stays open, because it has no way to send a password and it only writes the numbers on the screen. <b>There is no password recovery.</b> Forget it and the only way back in is to reflash the device over USB or the UART header, so write it down before you save.</small>
+   <label>Password again</label><input id="authPass2" type="password" autocomplete="new-password" placeholder="(unchanged)">
+   <button id="authRemoveBtn" class="btn danger" style="display:none;margin-top:8px" onclick="authRemove()">Remove password</button>
+   <small class="hint">Off by default, which leaves the page open to anyone on your network. A saved password locks it: the settings page, the API, and the firmware upload then sit behind HTTP digest auth, so the password itself is never sent over the wire. Type the new password twice; if the two fields differ, nothing is saved. Leave both blank to keep the stored password. "Remove password" opens the page again. The clawdmeter daemon's push endpoint stays open, because it has no way to send a password and it only writes the numbers on the screen. <b>There is no password recovery.</b> Forget it and the only way back in is to reflash the device over USB or the UART header, so write it down before you save.</small>
   </div>
   <div class="card"><h2>Maintenance</h2>
    <button class="btn sec" onclick="reboot()">Reboot</button>
@@ -604,8 +606,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('radarMinAlt',r.minAltFt!=null?r.minAltFt:0);
  renderAps(r.airports||[]);
  var au=c.auth||{};
- sc('authEnabled',!!au.enabled); sv('authUser',au.user||'admin');
- var apw=$('authPass'); if(apw){apw.value='';apw.placeholder=au.passSet?'(unchanged)':'set a password';}
+ sv('authUser',au.user||'admin'); authShow(!!au.passSet);
  var ap=$('apPass'); if(ap){ap.value='';ap.placeholder=c.apPassSet?'(unchanged)':'(open)';}
  sc('apOpen',!c.apPassSet); apOpenChanged();
 })}
@@ -655,6 +656,24 @@ function radarSrcChanged(){if(!$('radarSource'))return;var v=$('radarSource').va
  :(v==='adsbfi') ?'The device fetches <b>adsb.fi</b> directly over HTTPS (no key, ~1 req/s). Fine on the ESP32, but adsb.fi now sits behind Cloudflare and sends TLS records too large for the ESP8266 — pick adsb.lol or the webhook there.'
  :'The device requests <code>?lat=..&amp;lon=..&amp;dist=..</code> from your LAN proxy, which pre-filters the feed to a small JSON. Most reliable on the ESP8266.';}
 
+// password begin (the Password card; tested by tests/auth/test_webui.js)
+function authProblem(){
+ if(gv('authPass')!==gv('authPass2'))return 'The two passwords are not the same. Nothing was saved.';
+ return ''}
+// Shows what the device says: is a password set? Clears both fields.
+function authShow(set){
+ var b=$('authRemoveBtn');if(b)b.style.display=set?'':'none';
+ sv('authPass','');sv('authPass2','');
+ var p=$('authPass');if(p)p.placeholder=set?'(unchanged)':'set a password';
+ var p2=$('authPass2');if(p2)p2.placeholder=set?'(unchanged)':'type it again';
+ var s=$('authState');if(s)s.textContent=set?'A password is set: this page asks for it.':'No password is set: anyone on your network can open this page.'}
+// Its own request: a blank field only ever keeps the stored password.
+function authRemove(){
+ if(!confirm('Remove the password? Anyone on your network will be able to open this page.'))return;
+ j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({auth:{removePass:true}})})
+  .then(function(){authShow(false);toast('Password removed: the page is open again')})
+  .catch(function(e){toast('Could not remove the password: '+e.message)})}
+// password end
 function collect(){
  var o={mode:gv('mode'),
   carouselSec:parseInt(gv('carouselSec'))||30,
@@ -670,9 +689,10 @@ function collect(){
  // Send a flag only for a box that is there, so a save leaves the stored
  // value of a missing feature alone (gc() would answer false for it).
  Object.keys(CAROPT).forEach(function(k){var id=CAROPT[k]; if($(id))o[id]=gc(id)});
- // Web UI password: same blank-keeps-stored rule as everywhere else. The
- // firmware refuses to enable it without a stored password to check against.
- if($('authEnabled')){var _a={enabled:gc('authEnabled'), user:gv('authUser')||'admin'};
+ // Web UI password: same blank-keeps-stored rule as everywhere else. A saved
+ // password is the lock, so there is no "enabled" to send; removing it is its
+ // own request (authRemove). saveAll() checks the two fields match first.
+ if($('authUser')){var _a={user:gv('authUser')||'admin'};
   var _ap2=gv('authPass'); if(_ap2)_a.pass=_ap2; o.auth=_a;}
  // Only send apPass when there is something to say: the typed value, or an
  // explicit empty string when the user asked for an open hotspot. Sending the
@@ -739,8 +759,10 @@ function collect(){
  }
  return o;
 }
-function saveAll(){j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect())})
- .then(function(r){if(!r.ok){toast(r.error||'Save failed');return}toast(r.reboot?'Saved — rebooting...':'Saved');if(r.reboot)setTimeout(function(){location.reload()},6000);loadStatus()})
+function saveAll(){var bad=authProblem();if(bad){toast(bad);return}
+ var typed=!!gv('authPass');
+ j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect())})
+ .then(function(r){if(!r.ok){toast(r.error||'Save failed');return}if(typed)authShow(true);toast(r.reboot?'Saved — rebooting...':'Saved');if(r.reboot)setTimeout(function(){location.reload()},6000);loadStatus()})
  .catch(function(e){toast('Save failed: '+e.message)})}
 
 function saveWifi(){

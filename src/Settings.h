@@ -99,11 +99,11 @@ struct ClockSettings {
 
 // ---- Web UI password slice (device-wide) -----------------------------------
 // Off by default: the settings page is open on the LAN, as it always was.
-// Turning it on puts every page and every API endpoint behind HTTP digest auth,
-// with the exceptions listed in WebPortal.cpp. Like the other secrets here, the
-// password reaches the config file and the settings export, never the web API.
+// A stored password is what locks it: every page and every API endpoint is then
+// behind HTTP digest auth, with the exceptions listed in WebPortal.cpp. There is
+// no separate on/off switch. Like the other secrets here, the password reaches
+// the config file and the settings export, never the web API.
 struct AuthSettings {
-  bool   enabled;
   String user;
   String pass;
 
