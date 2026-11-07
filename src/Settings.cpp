@@ -671,7 +671,9 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
            : m.equalsIgnoreCase("radar")    ? MODE_RADAR
            : m.equalsIgnoreCase("usage")    ? MODE_USAGE
            : m.equalsIgnoreCase("ha")       ? MODE_HA
-           : m.equalsIgnoreCase("carousel") ? MODE_CAROUSEL : MODE_STOCKS;
+           : m.equalsIgnoreCase("carousel") ? MODE_CAROUSEL
+           : m.equalsIgnoreCase("stocks")   ? MODE_STOCKS
+           : s.mode;   // empty or unknown: a save that names no mode keeps the stored one
   }
   if (root["themeId"].is<const char*>()) {
     String id = root["themeId"].as<String>();
