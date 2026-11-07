@@ -15,6 +15,17 @@
   <a href="https://giovi321.github.io/smalltv-mod/"><img src="https://img.shields.io/badge/Read_the_docs-2563eb?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Read the documentation"></a>
 </p>
 
+<p align="center"><b>Related projects</b></p>
+
+<div align="center">
+<table>
+  <tr>
+    <td align="center"><a href="https://giovi321.github.io/smalltv-studio/"><img src="https://img.shields.io/badge/SmallTV_Studio-1f2937?style=for-the-badge&amp;logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgLTYgNzAgNzAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0ic21hbGx0di1zdHVkaW8iPgogIDxyZWN0IHg9IjciIHk9IjEzIiB3aWR0aD0iNTAiIGhlaWdodD0iMzgiIHJ4PSI2IiBmaWxsPSJub25lIiBzdHJva2U9IiMyMmM1NWUiIHN0cm9rZS13aWR0aD0iMyIvPgogIDxwb2x5bGluZSBwb2ludHM9IjE1LDM4IDIzLDMwIDMwLDM0IDM3LDIyIDQ0LDI4IDUwLDIwIiBmaWxsPSJub25lIiBzdHJva2U9IiMyMmM1NWUiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8%2BCiAgPHBhdGggZD0iTTI0IDUxIEwyNCA1NyBNNDAgNTEgTDQwIDU3IiBzdHJva2U9IiMyMmM1NWUiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8%2BCiAgPHBhdGggZD0iTTIwIDU3IEwyOCA1NyBNMzYgNTcgTDQ0IDU3IiBzdHJva2U9IiMyMmM1NWUiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8%2BCiAgPHBvbHlnb24gcG9pbnRzPSI1MCwyMCA1OC4xMywxOC4yMyA1MS43NywxMS44NyIgZmlsbD0iI2Y1Yzc4ZSIvPgogIDxwb2x5Z29uIHBvaW50cz0iNTAsMjAgNTMuNDksMTkuMjQgNTAuNzYsMTYuNTEiIGZpbGw9IiMyMmM1NWUiLz4KICA8cG9seWdvbiBwb2ludHM9IjU4LjEzLDE4LjIzIDYzLjc5LDEyLjU4IDU3LjQyLDYuMjEgNTEuNzcsMTEuODciIGZpbGw9IiNmNTllMGIiLz4KICA8cG9seWdvbiBwb2ludHM9IjYzLjc5LDEyLjU4IDY1LjkxLDEwLjQ1IDU5LjU1LDQuMDkgNTcuNDIsNi4yMSIgZmlsbD0iIzk0YTNiOCIvPgogIDxwb2x5Z29uIHBvaW50cz0iNjUuOTEsMTAuNDUgNjguNzQsNy42MyA2Mi4zNywxLjI2IDU5LjU1LDQuMDkiIGZpbGw9IiNmNDcyYjYiLz4KPC9zdmc%2BCg%3D%3D" alt="SmallTV Studio"></a><br><sub>Browser editor for theme clocks</sub></td>
+    <td align="center"><a href="https://github.com/giovi321/clawdmeter-daemon"><img src="https://img.shields.io/badge/clawdmeter--daemon-1f2937?style=for-the-badge&amp;logo=claude&amp;logoColor=d97757" alt="clawdmeter-daemon"></a><br><sub>Sends your Claude usage to the device</sub></td>
+  </tr>
+</table>
+</div>
+
 > Not affiliated with GeekMagic or Anthropic. This firmware replaces the stock firmware entirely.
 
 The GeekMagic SmallTV is a cheap desk gadget: a little cube with a 1.54" colour screen, an ESP inside, and a USB-C port. This firmware throws away the stock apps and turns it into three things you actually watch. It shows a **stock and crypto ticker** with prices, change, and a sparkline. It flips into a **Claude usage meter** with an animated mascot and your 5-hour and 7-day usage bars. And it becomes a **live plane radar** centred on your location, pulled from a free public feed. One image carries all three; you switch between them in a built-in web UI, and you update over WiFi.
@@ -83,7 +94,7 @@ Eleven files come with each release. Pick by board first, then by whether you ar
 | File | Board | Use it for |
 |------|-------|-----------|
 | `smalltv-mod-firmware.bin` | SmallTV, SmallTV-ultra, SDPro (ESP8266) | The normal install and every later update |
-| `smalltv-mod-firmware-lean.bin` | Same ESP8266 boards | The same device when it needs more heap. HA screens and the usage meter are compiled out |
+| `smalltv-mod-firmware-lean.bin` | Same ESP8266 boards | The same device when it needs more heap. HA screens, the usage meter and theme clocks are compiled out |
 | `smalltv-mod-loader.bin` | SmallTV-ultra, SDPro (ESP8266) | One-time first install when the stock updater rejects the full image |
 | `smalltv-mod-firmware-c2.bin` | SmallTV (ESP32-C2) | Updates |
 | `smalltv-mod-firmware-c2.factory.bin` | SmallTV (ESP32-C2) | First install over USB-C |
@@ -102,7 +113,7 @@ Or [build it yourself](#building-from-source).
 
 The right method depends on your board. The steps below are the short version; the [Flashing guide](https://giovi321.github.io/smalltv-mod/getting-started/flashing/) covers recovery, backups, and troubleshooting.
 
-**SmallTV (ESP8266).** The stock firmware exposes an OTA updater, so you can install this without opening the device. Find its IP, browse to `http://<device-ip>/update`, and upload `smalltv-mod-firmware.bin`, or `smalltv-mod-firmware-lean.bin` for the build that trades Home Assistant screens and the usage meter for 8,732 bytes of heap. Back up the stock image first if you might want it back.
+**SmallTV (ESP8266).** The stock firmware exposes an OTA updater, so you can install this without opening the device. Find its IP, browse to `http://<device-ip>/update`, and upload `smalltv-mod-firmware.bin`, or `smalltv-mod-firmware-lean.bin` for the build that trades Home Assistant screens, the usage meter and theme clocks for about 8 KB more heap. Back up the stock image first if you might want it back.
 
 **SmallTV-ultra.** Same ESP8266 hardware, but the stock "Ultra" firmware reserves most of the flash for image storage, so its OTA slot is too small for `smalltv-mod-firmware.bin` and rejects it with `Not Enough Space`. Install in two steps, no soldering: flash `smalltv-mod-loader.bin` at `http://<device-ip>/update` (it fits the small slot), join the open `SmallTV-Loader` AP it opens at `192.168.4.1`, then upload `smalltv-mod-firmware.bin` at `http://192.168.4.1/update`. UART is the fallback (`esptool write_flash 0x0 smalltv-mod-firmware.bin`).
 
@@ -156,7 +167,7 @@ Requires [PlatformIO](https://platformio.org/). Pick the env for your board:
 
 ```bash
 pio run -e smalltv                 # ESP8266
-pio run -e smalltv_lean            # ESP8266, without HA screens or the usage meter
+pio run -e smalltv_lean            # ESP8266, without HA screens, the usage meter or theme clocks
 pio run -e smalltv_c2              # ESP32-C2
 pio run -e smalltv_esp32           # NM-TV-154 (classic ESP32)
 pio run -e smalltv_esp32_wg        # the same, with the WireGuard client

@@ -17,7 +17,7 @@ The stock GeekMagic firmware exposes an OTA updater at `/update` that accepts an
 2. Browse to `http://<device-ip>/update`.
 3. Upload `smalltv-mod-firmware.bin`. It reboots into this firmware.
 
-Upload `smalltv-mod-firmware-lean.bin` instead if you want the build without Home Assistant screens and the usage meter, which leaves more heap for the radar and the cash.ch tickers. Both files install the same way and you can swap between them later. See [Which release file to download](/smalltv-mod/reference/release-assets/).
+Upload `smalltv-mod-firmware-lean.bin` instead if you want the build without Home Assistant screens, the usage meter and theme clocks, which leaves more heap for the radar and the cash.ch tickers. Both files install the same way and you can swap between them later. See [Which release file to download](/smalltv-mod/reference/release-assets/).
 
 Back up the stock firmware first if you want the option to return to it. The stock image is not redistributed here, so read it off your own device over the UART header before you overwrite it.
 

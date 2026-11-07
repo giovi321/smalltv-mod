@@ -43,7 +43,7 @@ Product photos show each unit running its stock firmware, not this one, and the 
 | WireGuard VPN | not available on this chip |
 | Build env | `smalltv`, or `smalltv_lean` |
 
-Two images are published for this board. `smalltv-mod-firmware.bin` carries every feature. `smalltv-mod-firmware-lean.bin` is the same code with Home Assistant screens and the usage meter compiled out, which leaves the heap 8,732 bytes larger. That matters here and on no other board, because the ESP8266 shares one 80 KB arena between static allocations and the heap, and the radar and cash.ch fetches both refuse to start a TLS handshake when it runs short. [Which release file to download](/smalltv-mod/reference/release-assets/) covers when to pick which.
+Two images are published for this board. `smalltv-mod-firmware.bin` carries every feature. `smalltv-mod-firmware-lean.bin` is the same code with Home Assistant screens, the usage meter and theme clocks compiled out, which leaves about 8 KB more heap. That matters here and on no other board, because the ESP8266 shares one 80 KB arena between static allocations and the heap, and the radar and cash.ch fetches both refuse to start a TLS handshake when it runs short. [Which release file to download](/smalltv-mod/reference/release-assets/) covers when to pick which.
 
 ### Pin map
 

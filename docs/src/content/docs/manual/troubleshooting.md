@@ -47,11 +47,12 @@ This is the original ESP8266 model running short of memory. Both features check 
 
 Since 2.12.1 the Status tab has a **Radar** line naming the last poll's outcome; `skipped, low heap` is this case, spelled out. The largest free block is shown next to Free heap on the same page. When the block sits under 16,000, memory is the cause and no amount of changing the data source will help, because the device never gets as far as sending a request.
 
-Three things bring it back, in the order worth trying:
+Four things bring it back, in the order worth trying:
 
-1. Install `smalltv-mod-firmware-lean.bin` from the [Releases page](https://github.com/giovi321/smalltv-mod/releases). Same code, with Home Assistant screens and the usage meter compiled out, which leaves the heap 8,732 bytes larger. Upload it in the System tab like any other update; your settings carry over. See [Which release file to download](/smalltv-mod/reference/release-assets/)
-2. Improve the WiFi signal. A weak link means constant retransmissions, and the queues holding them come out of the same memory. A device sitting at -75 dBm has noticeably less heap free than the same device close to the access point
-3. Switch the radar to a **Custom webhook** over plain HTTP. The memory check only guards the HTTPS path, so a LAN proxy sidesteps it entirely. [Plane radar](/smalltv-mod/features/radar/) has the setup
+1. If you do not use Home Assistant screens, leave **Broker host** blank in the Home Assistant tab and restart the device. From v3.5.0 the standard image then never takes the memory for the screen store and the MQTT client, about 6.5 KB
+2. Install `smalltv-mod-firmware-lean.bin` from the [Releases page](https://github.com/giovi321/smalltv-mod/releases). Same code, with Home Assistant screens, the usage meter and theme clocks compiled out, which leaves about 8 KB more heap than the standard image with Home Assistant off. Upload it in the System tab like any other update; your settings carry over. See [Which release file to download](/smalltv-mod/reference/release-assets/)
+3. Improve the WiFi signal. A weak link means constant retransmissions, and the queues holding them come out of the same memory. A device sitting at -75 dBm has noticeably less heap free than the same device close to the access point
+4. Switch the radar to a **Custom webhook** over plain HTTP. The memory check only guards the HTTPS path, so a LAN proxy sidesteps it entirely. [Plane radar](/smalltv-mod/features/radar/) has the setup
 
 A busy office or lab network makes this worse than a quiet home one. Broadcast and multicast traffic all gets buffered by the device, so the same firmware on the same hardware can work on one network and go quiet on another.
 
@@ -120,6 +121,8 @@ If you exported a settings backup beforehand (System tab, "Export settings"), im
 
 Rare, but if it happens: the device restarted after an internal fault, and stays on this screen instead of trying to redraw whatever crashed it. It shows a fault code and its IP address, and the settings page and firmware update are still reachable at that address. Reinstalling the latest firmware version through the System tab normally clears it, and no settings are lost by doing so.
 
+From v3.5.0 the Status tab also keeps a **Last crash** line after such a restart: the reason, the fault registers (not for an abort or a stack overflow, where the chip records none), the firmware version that crashed and how long it had been up. It stays through normal restarts until you press **clear** next to it or unplug the device. `GET /api/status` carries the same record as `lastCrash`, and `POST /api/crash/clear` clears it. Include that line when you report the crash.
+
 ## Updating from GitHub fails
 
 - On the original ESP8266 model, firmware version 2.6.1 and earlier cannot update themselves due to a bug in that version's updater; a broken updater cannot fix itself. Update that device once by hand as described in [Flashing](/smalltv-mod/getting-started/flashing/#after-the-first-flash), and the automatic updater works normally afterwards.
@@ -135,4 +138,4 @@ The device refuses two kinds of request, so that a web page on the internet cann
 
 ## Something else
 
-Open an issue on the project's [GitHub page](https://github.com/giovi321/smalltv-mod/issues) with your board type (from the chip badge in the settings page header), the firmware version (Status tab), and what you tried.
+Open an issue on the project's [GitHub page](https://github.com/giovi321/smalltv-mod/issues) with your board type (from the chip badge in the settings page header), the firmware version (Status tab), the **Last crash** line if the Status tab shows one (v3.5.0 or later), and what you tried.

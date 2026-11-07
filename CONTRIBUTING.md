@@ -28,7 +28,7 @@ A board-specific limit is accepted only where the hardware cannot support the fe
 
 ## ESP8266 memory and untrusted input
 
-The ESP8266 runs a theme with about 6.5 KB of heap free, and a failed allocation reboots the device. Theme packages, settings imports and HTTP requests come from outside, so code that reads them must stay within that budget whatever the input.
+The ESP8266 runs a theme with about 7 KB of heap free when Home Assistant is on (about 14 KB with it off; standard image with Pixel Room, 3.5.0), and a failed allocation reboots the device. Theme packages, settings imports and HTTP requests come from outside, so code that reads them must stay within that budget whatever the input.
 
 - No single heap block grows with the input. Store data per item in small blocks, as `BlockList` does for layers, or cap the total and reserve it exactly
 - Constant tables and long strings go in flash: `PROGMEM` or `F()` on the ESP8266

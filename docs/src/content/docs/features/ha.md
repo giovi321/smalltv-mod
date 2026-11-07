@@ -5,7 +5,7 @@ description: Full screens pushed from Home Assistant over MQTT as small JSON dra
 
 The other features are things the device fetches itself. This one is the opposite: you publish a small JSON document to an MQTT topic, and the device draws it as a full 240×240 screen and keeps it in the carousel. A temperature warning, a door-left-open reminder, the day's energy total. Anything Home Assistant can template, the panel can show.
 
-This feature is not in `smalltv-mod-firmware-lean.bin`. That ESP8266 image compiles it out to free 7,668 bytes of heap, and the web UI hides the tab when it is missing. Use `smalltv-mod-firmware.bin` on an ESP8266 that needs HA screens, or any of the ESP32 images.
+This feature is not in `smalltv-mod-firmware-lean.bin`. That ESP8266 image compiles it out, and the web UI hides the tab when it is missing. Use `smalltv-mod-firmware.bin` on an ESP8266 that needs HA screens, or any of the ESP32 images. From v3.5.0 the standard image takes Home Assistant's memory only when a broker host is set (see [below](#switching-it-on-and-off-needs-a-restart)), so a device that does not use it gets most of that memory back without the lean image.
 
 Because every screen is a retained message, the broker holds the last copy. The device can reboot, Home Assistant can reboot, and the screens come back on their own.
 
@@ -19,7 +19,7 @@ The device identifies itself by its hostname, the same name you see in the web U
 
 ### Switching it on and off needs a restart
 
-Home Assistant is on when a broker host is set, and off when the host is blank. There is no other switch. The screen store and the MQTT receive buffer are big for the ESP8266, so the device takes that memory once, at boot, and only when a host is set. A device with a blank host never takes it, and keeps the memory for everything else.
+From firmware v3.5.0, Home Assistant is on when a broker host is set, and off when the host is blank. There is no other switch. The screen store and the MQTT receive buffer are big for the ESP8266, so the device takes that memory once, at boot, and only when a host is set. A device with a blank host never takes it, and keeps the memory for everything else.
 
 - Changing from one host to another takes effect at once.
 - Filling in a host where there was none, or clearing it, takes effect after the next restart. Press **Reboot** in the System tab. The Status tab shows a Home Assistant line ("restart the device") until you do. A device that already had a host set keeps working after an update, with no action.
