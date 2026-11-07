@@ -239,6 +239,20 @@ static void handleStatus() {
   StatusSink sink;
   smalltv::PieceWriter<128> out(sink);
   smalltv::writeStatusHead(out, d);
+  PlatformCrashRecord cr;   // last crash, kept in RTC memory until cleared or power-cycled
+  if (platformCrashRecordGet(cr)) {
+    char cause[12], epc[12], addr[12];
+    snprintf(cause, sizeof cause, "0x%x", (unsigned)cr.exccause);
+    snprintf(epc, sizeof epc, "0x%08x", (unsigned)cr.epc1);
+    snprintf(addr, sizeof addr, "0x%08x", (unsigned)cr.excvaddr);
+    smalltv::StatusCrash k;
+    k.reason = cr.reason;
+    k.fw = cr.fw;
+    if (cr.hasRegisters) { k.exccause = cause; k.epc = epc; k.addr = addr; }
+    k.hasUptime = cr.uptimeKnown;
+    k.uptime = cr.uptimeS;
+    smalltv::writeStatusCrash(out, k);
+  }
 #if WITH_TICKER
   smalltv::writeStatusTickers(out, stocksCount(), statusTicker);
 #endif
@@ -377,6 +391,12 @@ static void handleReboot() {
   if (!requireAuth()) return;
   server.send(200, "application/json", "{\"ok\":true}");
   scheduleReboot(400);
+}
+
+static void handleCrashClear() {
+  if (!requireAuth()) return;
+  platformCrashRecordClear();
+  server.send(200, "application/json", "{\"ok\":true}");
 }
 
 static void handleFactory() {
@@ -630,6 +650,7 @@ void webPortalBegin(Settings& settings) {
   server.on("/api/scan", HTTP_GET, handleScan);
   server.on("/api/reboot", HTTP_POST, handleReboot);
   server.on("/api/factory", HTTP_POST, handleFactory);
+  server.on("/api/crash/clear", HTTP_POST, handleCrashClear);
   server.on("/api/refresh", HTTP_POST, handleRefresh);
   server.on("/api/export", HTTP_GET, handleExport);
   server.on("/api/import", HTTP_POST, handleImport);
