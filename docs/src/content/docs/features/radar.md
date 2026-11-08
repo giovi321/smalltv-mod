@@ -20,6 +20,7 @@ A radar set up on an older firmware, with its own coordinates, keeps them: the b
 The Radar tab's **What to show** card tunes what appears. Alongside the two settings below it carries independent toggles for the callsign and altitude labels, the speed vectors, and the rim dots for traffic beyond the outer ring.
 
 - **Marker and label size** (Small, Medium, Large) scales the triangles, markers, and text together. Medium is the default. Large reads from across the room; Small keeps a busy sky uncluttered.
+- **Radar lines**, **Aircraft info**, **Airport labels**, and **General text** independently set the one-pixel grid, callsign/altitude text, airport names, and compass/distance/count text. **Reset colors to defaults** fills the controls with the original palette: dark gray (`#424142`) for lines, blue (`#0082ff`) for airport names, and medium gray (`#848284`) for the other text; save settings to apply. Aircraft and airport markers keep their distinct colors. These radar-only settings are included in backups. Older backups with one shared color retain that color for all four groups.
 - **Hide aircraft below (ft)** drops ground and low traffic. Set it to `500` and planes taxiing at the airport disappear; `0` shows everything.
 - Callsigns are placed nearest first, and any label that would overlap one already on screen is skipped, so a crowded scope stays legible. The triangle still shows even when its label was dropped.
 
@@ -49,7 +50,7 @@ GET https://opendata.adsb.fi/api/v3/lat/<lat>/lon/<lon>/dist/<nm>
 
 On the ESP8266, HTTPS is tight on RAM, and the deciding factor is the TLS record size the server uses. The device probes the server's Maximum Fragment Length support so its buffer can stay at 512 bytes; without MFLN it has to fall back to 4 KB, and if the server then sends a record larger than that, the read fails part-way through and the scope stays empty.
 
-adsb.fi moved behind Cloudflare in August 2026. Cloudflare does not negotiate MFLN and ramps its record size up on large responses, so **direct adsb.fi no longer works on the ESP8266**. A 50 nm response is around 50 KB and the connection breaks mid-stream. adsb.lol still honours MFLN, which is why it is the ESP8266 default.
+adsb.fi moved behind Cloudflare in August 2026. Cloudflare does not negotiate MFLN and ramps its record size up on large responses, so **large direct adsb.fi responses can fail on the ESP8266** when a TLS record exceeds that fallback buffer. Small responses may still succeed. adsb.lol is the configured ESP8266 default, but current testing also found no MFLN negotiation there and TLS records larger than the 4 KB fallback buffer. On an ESP8266, use a local receiver or LAN webhook when direct HTTPS fails.
 
 The ESP32 boards use mbedTLS with dynamically sized buffers and are unaffected, so either feed works there.
 
@@ -59,10 +60,11 @@ If your chosen feed ever goes behind a CDN too, switch to the other one or to th
 
 Start at the **Radar** line in the Status tab. Since 2.12.1 it reports what the last poll actually did: `ok` with an aircraft count, `skipped, low heap`, `connect failed`, `http error` with the code, `parse failed`, `no aircraft in feed`, or `all filtered out` when traffic was there but your minimum-altitude setting dropped it. The same detail is in `/api/status` under `radar`.
 
-Two of those stages have known causes on the ESP8266:
+These stages have known causes on the ESP8266:
 
 - `skipped, low heap`: the radar refuses to start a TLS handshake unless a 16,000-byte contiguous block is free (shown in the Status tab next to Free heap). Install `smalltv-mod-firmware-lean.bin`, which compiles out Home Assistant screens and the usage meter, or use the webhook below, which is plain HTTP and skips the check. See [Which release file to download](/smalltv-mod/reference/release-assets/).
-- `no aircraft in feed` on every poll while flightradar shows a full sky: before 2.12.1 this is what a device pointed at adsb.fi showed after Cloudflare fronted that feed, because Cloudflare's chunked responses misparsed as empty. 2.12.1 requests HTTP/1.0, which cannot be chunked; on older firmware, switch the source to adsb.lol.
+- `no aircraft in feed` on every poll while flightradar shows a full sky: older firmware could misparse chunked responses as empty. Radar requests now use HTTP/1.1 and decode chunked bodies before parsing JSON.
+- `http error, HTTP 426` with adsb.lol: firmware requesting HTTP/1.0 can be rejected by this feed. Rebuild with the HTTP/1.1 radar fix, or use a LAN webhook. Direct HTTPS can still exceed the ESP8266 TLS buffer even after the HTTP/1.1 fix.
 
 ### Custom webhook, a LAN proxy
 
@@ -73,3 +75,20 @@ GET <webhookUrl>?lat=<lat>&lon=<lon>&dist=<km>
 ```
 
 It expects the same `{"ac":[ ... ]}` shape both feeds return, with these fields per aircraft: `lat`, `lon`, `track`, `gs`, `flight`, `hex`, `alt_baro`. The proxy does the filtering and the TLS handshake, which is the most reliable setup on the ESP8266.
+
+### Local readsb / dump1090 receiver
+
+The Custom webhook source can also read a receiver's `aircraft.json` directly
+on your LAN over plain HTTP, without a proxy or an external API. For example,
+use `http://<receiver>:1090/data/aircraft.json` for an adsb.im feeder's tar1090
+service. The radar accepts the receiver's `aircraft` array as well as the
+public APIs' `ac` array, retaining only the plotted fields. The receiver serves
+its local aircraft list; the webhook's appended lat/lon/dist query parameters
+do not filter that static JSON file. Reception coverage determines which
+flights are available.
+
+The Status page includes the JSON parser error and any recorded BearSSL error when a direct feed fails. These diagnostics do not resolve the ESP8266 TLS record-size limits. Under **Screen**, a separate **Startup text color** controls secondary boot and Wi-Fi/setup text; its original gray default is `#848284`. Radar colors are independent.
+
+**Aircraft markers** sets the color of airplane symbols and off-screen aircraft dots independently of their text labels. It defaults to the original red (`#ff0000`); Reset colors to defaults also restores this red. Heading vectors and the radar error indicator retain their original colors.
+
+Radar body reads wait up to the configured HTTP timeout for the next data byte, including between HTTP chunks. This prevents brief TLS packet gaps on ESP32 from being mistaken for end-of-input (`IncompleteInput`).

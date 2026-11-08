@@ -273,6 +273,14 @@ int main() {
     assert(small.pieces == (want.size() + 4) / 5);
     checked++;
   }
+  {  // Parser and TLS diagnostics survive even five-byte output chunks.
+    StatusRadar r;
+    r.stage = "parse failed"; r.parseError = "IncompleteInput"; r.tlsError = 7;
+    StringSink sink;
+    PieceWriter<5> out(sink); writeStatusRadar(out, r); out.flush();
+    assert(sink.text.find("\"parseError\":\"IncompleteInput\"") != std::string::npos);
+    assert(sink.text.find("\"tlsError\":7") != std::string::npos);
+  }
   {  // lastCrash: after the 3.2.1 keys, registers left out when empty
     StatusCrash k;
     k.reason = "Exception"; k.fw = "3.2.1"; k.exccause = "0x1d"; k.epc = "0x40201234"; k.addr = "0x00000000";

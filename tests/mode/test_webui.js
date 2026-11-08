@@ -70,4 +70,61 @@ for(const [feat,m] of [['radar','radar'],['usage','usage'],['ha','ha'],['ticker'
  els.mode.value='usage';
  assert.strictEqual(ctx.collect().mode,'usage');
 }
-console.log('mode save page tests passed');
+
+// Independent radar colors, legacy loading, and resetting without saving.
+{
+ const {ctx,els}=makePage();
+ els.radar={};
+ const groups=[['markerColor','radarMarkerColor','#ff0000'],['lineColor','radarLineColor','#424142'],['aircraftColor','radarAircraftColor','#848284'],['airportColor','radarAirportColor','#0082ff'],['labelColor','radarLabelColor','#848284']];
+ for(const [,id] of groups)els[id]={value:''};
+ ctx.radarLocChanged=()=>{};ctx.radarSrcChanged=()=>{};
+ const loadRadar=between(' var r=c.radar||{};', ' renderAps(r.airports||[]);');
+ function load(radar){ctx.c={radar};vm.runInContext(loadRadar,ctx);}
+ load({uiColor:'#12abef'});
+ for(const [key,id] of groups)assert.strictEqual(els[id].value,key==='markerColor'?'#ff0000':'#12abef','legacy color loads');
+ load({markerColor:'#abcdef',lineColor:'#010203',aircraftColor:'#123456',airportColor:'#0082ff',labelColor:'#ffffff'});
+ for(const [key,id] of groups)assert.strictEqual(els[id].value,ctx.c.radar[key],key+' loads');
+ els.radarMarkerColor.value='#00ff00';
+ els.radarLineColor.value='#000000';
+ els.radarAircraftColor.value='#de8400';
+ els.radarAirportColor.value='#f08000';
+ els.radarLabelColor.value='#abcdef';
+ const saved=ctx.collect().radar;
+ assert.strictEqual(saved.markerColor,'#00ff00');
+ assert.strictEqual(saved.lineColor,'#000000');
+ assert.strictEqual(saved.aircraftColor,'#de8400');
+ assert.strictEqual(saved.airportColor,'#f08000');
+ assert.strictEqual(saved.labelColor,'#abcdef');
+ assert.ok(!('uiColor' in saved),'save uses the separate keys');
+ load({});
+ for(const [,id,def] of groups)assert.strictEqual(els[id].value,def,'default loads');
+ vm.runInContext(between('function radarResetColors(){','function esc('),ctx);
+ for(const [,id] of groups)els[id].value='#123456';
+ ctx.radarResetColors();
+ for(const [key,id,def] of groups){
+  assert.strictEqual(els[id].value,def,'reset fills picker');
+  assert.strictEqual(ctx.collect().radar[key],def,'reset saves after Save settings');
+ }
+}
+console.log('mode and radar color page tests passed');
+
+// The status row exposes parser and TLS failures instead of only "parse failed".
+{
+ const ctx={};vm.createContext(ctx);
+ vm.runInContext(between('function radarLine(r){','function wgLine(w){'),ctx);
+ const line=ctx.radarLine({stage:'parse failed',http:200,parseError:'IncompleteInput',tlsError:7});
+ assert.ok(line.includes('JSON IncompleteInput'));
+ assert.ok(line.includes('TLS error 7'));
+ assert.ok(!ctx.radarLine({stage:'idle'}).includes('JSON'));
+ const cached=ctx.radarLine({count:24,error:true,stage:'parse failed',http:200,parseError:'IncompleteInput'});
+ assert.ok(cached.includes('24 aircraft'));
+ assert.ok(cached.includes('parse failed'),'cached aircraft must not hide the failure stage');
+ assert.ok(!ctx.radarLine({count:24,error:false,stage:'ok'}).includes('parse failed'));
+}
+
+{
+ const {ctx,els}=makePage();
+ els.startupTextColor={value:'#ffffff'};
+ assert.strictEqual(ctx.collect().startupTextColor,'#ffffff');
+ assert.ok(html.includes('id="startupTextColor" type="color"'));
+}

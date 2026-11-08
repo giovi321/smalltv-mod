@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <stdio.h>
 #include <string.h>
+#include <string>
 
 FSClass LittleFS;
 EspClass ESP;
@@ -81,12 +82,118 @@ static void testImport() {
   CHECK(s.hostname == "smalltv-test-2", "the rest of the import applies");
 }
 
+// Radar color defaults, partial updates, validation and backup/import.
+static std::string radarColor(const Settings& s, const char* key = "lineColor") {
+  JsonDocument doc;
+  settingsToJson(s, doc.to<JsonObject>(), false);
+  return doc["radar"][key] | "missing";
+}
+static void testRadarColor() {
+  Settings s; s.setDefaults();
+  CHECK(radarColor(s) == "#424142", "radar color persistence");
+  apply(s, R"({"radar":{"rangeKm":25}})");
+  CHECK(radarColor(s) == "#424142", "radar color persistence");
+  apply(s, R"({"radar":{"uiColor":"#12ABef"}})");
+  CHECK(radarColor(s) == "#12abef", "radar color persistence");
+  apply(s, R"({"brightness":75,"radar":{"showLabels":false}})");
+  CHECK(radarColor(s) == "#12abef", "radar color persistence");
+  CHECK(s.brightness == 75 && !s.radar.showLabels, "radar color persistence");
+  JsonDocument backup;
+  settingsToJson(s, backup.to<JsonObject>(), true);
+  Settings restored; restored.setDefaults();
+  settingsApplyJson(restored, backup.as<JsonObjectConst>());
+  CHECK(radarColor(restored) == "#12abef", "radar color persistence");
+  const char* invalid[] = {
+    R"({"radar":{"uiColor":"#fff"}})",
+    R"({"radar":{"uiColor":"ffffff"}})",
+    R"({"radar":{"uiColor":"#12345g"}})",
+    R"({"radar":{"uiColor":"#1234567"}})",
+    R"({"radar":{"uiColor":"# 12345"}})",
+    R"({"radar":{"uiColor":""}})",
+    R"({"radar":{"uiColor":-1}})",
+    R"({"radar":{"uiColor":16777216}})",
+    R"({"radar":{"uiColor":true}})",
+    R"({"radar":{"uiColor":null}})",
+    R"({"radar":{"uiColor":[]}})"
+  };
+  for (const char* json : invalid) { apply(s, json); CHECK(radarColor(s) == "#12abef", "radar color persistence"); }
+  apply(s, R"({"radar":{"uiColor":"#000000"}})"); CHECK(radarColor(s) == "#000000", "radar color persistence");
+  apply(s, R"({"radar":{"uiColor":"#FFFFFF"}})"); CHECK(radarColor(s) == "#ffffff", "radar color persistence");
+}
+
+static void testSeparateRadarColors() {
+  Settings s; s.setDefaults();
+  CHECK(radarColor(s, "lineColor") == "#424142", "default grid");
+  CHECK(radarColor(s, "aircraftColor") == "#848284", "default aircraft info");
+  CHECK(radarColor(s, "labelColor") == "#848284", "default general text");
+  CHECK(radarColor(s, "airportColor") == "#0082ff", "default airport blue");
+  apply(s, R"({"radar":{"uiColor":"#123456"}})");
+  for (const char* key : {"lineColor", "aircraftColor", "airportColor", "labelColor"})
+    CHECK(radarColor(s, key) == "#123456", "legacy color migrates to every group");
+  apply(s, R"({"radar":{"lineColor":"#000000","aircraftColor":"#12ABef","airportColor":"#bb0011","labelColor":"#FFFFFF"}})");
+  CHECK(radarColor(s, "lineColor") == "#000000", "independent grid");
+  CHECK(radarColor(s, "aircraftColor") == "#12abef", "independent aircraft info");
+  CHECK(radarColor(s, "labelColor") == "#ffffff", "independent labels");
+  CHECK(radarColor(s, "airportColor") == "#bb0011", "independent airports");
+  apply(s, R"({"radar":{"lineColor":"#010203"}})");
+  CHECK(radarColor(s, "lineColor") == "#010203", "partial grid update");
+  CHECK(radarColor(s, "aircraftColor") == "#12abef", "aircraft info preserved");
+  CHECK(radarColor(s, "labelColor") == "#ffffff", "labels preserved");
+  CHECK(radarColor(s, "airportColor") == "#bb0011", "airport color preserved");
+  apply(s, R"({"radar":{"lineColor":"#12345g","aircraftColor":false,"airportColor":"#xyzxyz","labelColor":"# 12345"}})");
+  CHECK(radarColor(s, "lineColor") == "#010203", "invalid grid rejected");
+  CHECK(radarColor(s, "aircraftColor") == "#12abef", "invalid aircraft info rejected");
+  CHECK(radarColor(s, "labelColor") == "#ffffff", "invalid labels rejected");
+  CHECK(radarColor(s, "airportColor") == "#bb0011", "invalid airport color rejected");
+  JsonDocument backup; settingsToJson(s, backup.to<JsonObject>(), true);
+  Settings restored; restored.setDefaults(); settingsApplyJson(restored, backup.as<JsonObjectConst>());
+  CHECK(radarColor(restored, "lineColor") == "#010203", "grid backup/import");
+  CHECK(radarColor(restored, "aircraftColor") == "#12abef", "aircraft backup/import");
+  CHECK(radarColor(restored, "labelColor") == "#ffffff", "label backup/import");
+  CHECK(radarColor(restored, "airportColor") == "#bb0011", "airport backup/import");
+  apply(s, R"({"radar":{"uiColor":"#222222","lineColor":"#333333"}})");
+  CHECK(radarColor(s, "lineColor") == "#333333", "specific color overrides legacy");
+  CHECK(radarColor(s, "aircraftColor") == "#222222", "legacy fallback for other groups");
+}
+
+static void testStartupColor() {
+  Settings s; s.setDefaults();
+  CHECK(s.startupTextColor == 0x848284, "original startup gray");
+  apply(s, R"({"startupTextColor":"#ffffff"})");
+  CHECK(s.startupTextColor == 0xffffff, "startup color accepted");
+  apply(s, R"({"brightness":90,"startupTextColor":"#12345g"})");
+  CHECK(s.startupTextColor == 0xffffff, "invalid startup color preserves value");
+  JsonDocument backup; settingsToJson(s, backup.to<JsonObject>(), true);
+  CHECK(std::string(backup["startupTextColor"].as<const char*>()) == "#ffffff", "startup exported");
+  Settings restored; restored.setDefaults(); settingsApplyJson(restored, backup.as<JsonObjectConst>());
+  CHECK(restored.startupTextColor == 0xffffff, "startup backup/import");
+}
+
+static void testMarkerColor() {
+  Settings s; s.setDefaults();
+  CHECK(radarColor(s, "markerColor") == "#ff0000", "original marker red");
+  apply(s, R"({"radar":{"markerColor":"#12ABef"}})");
+  CHECK(radarColor(s, "markerColor") == "#12abef", "marker color accepted");
+  CHECK(radarColor(s, "aircraftColor") == "#848284", "marker independent of text");
+  apply(s, R"({"radar":{"uiColor":"#222222","markerColor":"#12345g"}})");
+  CHECK(radarColor(s, "markerColor") == "#12abef", "invalid marker and legacy text preserve marker");
+  apply(s, R"({"brightness":90})");
+  CHECK(radarColor(s, "markerColor") == "#12abef", "partial save preserves marker");
+  JsonDocument backup; settingsToJson(s, backup.to<JsonObject>(), true);
+  Settings restored; restored.setDefaults(); settingsApplyJson(restored, backup.as<JsonObjectConst>());
+  CHECK(radarColor(restored, "markerColor") == "#12abef", "marker backup/import");
+}
+
 int main() {
   testNamesSetTheMode();
   testEmptyMode();
   testUnknownMode();
   testNoModeOrOtherType();
   testImport();
+  testRadarColor();
+  testSeparateRadarColors();
+  testStartupColor();
+  testMarkerColor();
   printf("%d checks, %d failed\n", g_checks, g_failed);
   return g_failed ? 1 : 0;
 }

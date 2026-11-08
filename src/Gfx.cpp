@@ -50,6 +50,7 @@ class Arduino_ST7789_SmallTV : public Arduino_ST7789 {
 // Per-channel gain in percent, 100 = untouched. Kept as plain bytes so the
 // all-default case is a single comparison on the hot drawing path.
 static uint8_t g_rGain = 100, g_gGain = 100, g_bGain = 100;
+static uint16_t g_startupTextColor = C_GRAY;
 
 uint16_t gfxTint(uint16_t c) {
   if (g_rGain == 100 && g_gGain == 100 && g_bGain == 100) return c;
@@ -123,6 +124,8 @@ void gfxSetRotation(uint8_t r) {
 }
 
 void gfxApplyColors(const Settings& s) {
+  uint32_t rgb = s.startupTextColor;
+  g_startupTextColor = RGB565(rgb >> 16, rgb >> 8, rgb & 0xFF);
   g_rGain = s.display.rGain;
   g_gGain = s.display.gGain;
   g_bGain = s.display.bGain;
@@ -160,7 +163,7 @@ void gfxBoot(const char* line1, const char* line2) {
   if (!gfx) return;
   gfx->fillScreen(C_BLACK);
   gfxDrawCentered(line1, 95, 3, C_WHITE);
-  if (line2 && line2[0]) gfxDrawCentered(line2, 130, 2, C_GRAY);
+  if (line2 && line2[0]) gfxDrawCentered(line2, 130, 2, g_startupTextColor);
 }
 
 void gfxApInfo(const char* ssid, const char* pass, const char* ip, const char* why) {
@@ -168,15 +171,15 @@ void gfxApInfo(const char* ssid, const char* pass, const char* ip, const char* w
   gfx->fillScreen(C_BLACK);
   gfxDrawCentered("SETUP MODE", 18, 3, C_YELLOW);
   if (why && why[0]) gfxDrawCentered(why, 44, gfxFitSize(why, 232, 2), C_RED);
-  gfxDrawCentered("Join WiFi:", 64, 2, C_GRAY);
+  gfxDrawCentered("Join WiFi:", 64, 2, g_startupTextColor);
   gfxDrawCentered(ssid, 88, gfxFitSize(ssid, 232, 3), C_WHITE);
   if (pass && pass[0]) {
-    gfxDrawCentered("Password:", 124, 2, C_GRAY);
+    gfxDrawCentered("Password:", 124, 2, g_startupTextColor);
     gfxDrawCentered(pass, 146, gfxFitSize(pass, 232, 2), C_WHITE);
   } else {
-    gfxDrawCentered("(open network)", 124, 2, C_GRAY);
+    gfxDrawCentered("(open network)", 124, 2, g_startupTextColor);
   }
-  gfxDrawCentered("Then open:", 182, 2, C_GRAY);
+  gfxDrawCentered("Then open:", 182, 2, g_startupTextColor);
   String url = String("http://") + ip;
   gfxDrawCentered(url.c_str(), 206, gfxFitSize(url.c_str(), 232, 2), C_GREEN);
 }
@@ -185,14 +188,14 @@ void gfxStaInfo(const char* ssid, const char* ip, const char* host) {
   if (!gfx) return;
   gfx->fillScreen(C_BLACK);
   gfxDrawCentered("CONNECTED", 18, 3, C_GREEN);
-  gfxDrawCentered("Network:", 62, 2, C_GRAY);
+  gfxDrawCentered("Network:", 62, 2, g_startupTextColor);
   gfxDrawCentered(ssid && ssid[0] ? ssid : "-", 84, gfxFitSize(ssid, 232, 3), C_WHITE);
-  gfxDrawCentered("Open in browser:", 126, 2, C_GRAY);
+  gfxDrawCentered("Open in browser:", 126, 2, g_startupTextColor);
   // IP shown big (always fits at size 2); mDNS name below as a friendlier option.
   gfxDrawCentered(ip && ip[0] ? ip : "-", 150, gfxFitSize(ip, 232, 3), C_GREEN);
   if (host && host[0]) {
     String url = String("http://") + host + ".local";
-    gfxDrawCentered(url.c_str(), 188, gfxFitSize(url.c_str(), 232, 2), C_GRAY);
+    gfxDrawCentered(url.c_str(), 188, gfxFitSize(url.c_str(), 232, 2), g_startupTextColor);
   }
 }
 
@@ -209,10 +212,10 @@ void gfxCrash(const char* epc, const char* addr, const char* ip) {
   if (!gfx) return;
   gfx->fillScreen(C_BLACK);
   gfxDrawCentered("CRASH", 12, 4, C_RED);
-  gfxDrawCentered("epc", 60, 2, C_GRAY);
+  gfxDrawCentered("epc", 60, 2, g_startupTextColor);
   gfxDrawCentered(epc && epc[0] ? epc : "-", 80, 3, C_WHITE);
-  gfxDrawCentered("addr", 124, 2, C_GRAY);
+  gfxDrawCentered("addr", 124, 2, g_startupTextColor);
   gfxDrawCentered(addr && addr[0] ? addr : "-", 146, 2, C_WHITE);
-  gfxDrawCentered("OTA flash to fix:", 182, 2, C_GRAY);
+  gfxDrawCentered("OTA flash to fix:", 182, 2, g_startupTextColor);
   gfxDrawCentered(ip && ip[0] ? ip : "-", 204, 2, C_GREEN);
 }
