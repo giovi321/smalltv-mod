@@ -41,6 +41,7 @@ extern "C"
 #include "ESP8266mDNS.h"
 #include "LEAmDNS_lwIPdefs.h"
 #include "LEAmDNS_Priv.h"
+#include "LEAmDNS_Stream.h"  // smalltv-mod: handle response records one at a time
 
 namespace esp8266
 {
@@ -764,7 +765,25 @@ namespace MDNSImplementation
             stcMDNS_RRAnswer* pCollectedRRAnswers = 0;
             uint32_t          u32NumberOfAnswerRRs
                 = (p_MsgHeader.m_u16ANCount + p_MsgHeader.m_u16NSCount + p_MsgHeader.m_u16ARCount);
-            for (uint32_t an = 0; ((bResult) && (an < u32NumberOfAnswerRRs)); ++an)
+
+            // smalltv-mod: when only probes wait for answers (no service query), a record is
+            // processed right after it is read and freed before the next one is read. The core
+            // kept every record of the packet alive until the end; a big response could need
+            // several KB at once, and a failed 'new' resets the chip. Only the probe conflict
+            // check needs the records, and it looks at one record at a time. With service
+            // queries waiting, the records link up across each other (several passes in
+            // _processAnswers), so that case collects them all, as before.
+            const bool bStream = !_hasServiceQueriesWaitingForAnswers();
+            if (bStream)
+            {
+                bResult = mdnsHandleAnswersOneByOne<stcMDNS_RRAnswer>(
+                    u32NumberOfAnswerRRs,
+                    [this](stcMDNS_RRAnswer*& p_rpAnswer) { return _readRRAnswer(p_rpAnswer); },
+                    [this](const stcMDNS_RRAnswer& rRAnswer) {
+                        return _processAnswers(&rRAnswer);  // a list of one record
+                    });
+            }
+            for (uint32_t an = 0; ((!bStream) && (bResult) && (an < u32NumberOfAnswerRRs)); ++an)
             {
                 stcMDNS_RRAnswer* pRRAnswer = 0;
                 if (((bResult = _readRRAnswer(pRRAnswer))) && (pRRAnswer))
