@@ -1,0 +1,7 @@
+{
+  "name": "ESP8266mDNS",
+  "version": "1.2.0",
+  "description": "ESP8266 Arduino core 3.1.2 LEAmDNS, with one change (see README-SMALLTV.md)",
+  "frameworks": "arduino",
+  "platforms": "espressif8266"
+}
