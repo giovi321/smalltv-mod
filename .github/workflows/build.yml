@@ -143,6 +143,11 @@ jobs:
       - name: Test mode of a save
         run: sh tests/mode/run.sh
 
+      # The mDNS library copy in lib/: a response is handled one record at a
+      # time (peak: one record alive), and _parseResponse uses that loop.
+      - name: Test mDNS answer handling
+        run: sh tests/mdns/run.sh
+
       # Mutated packages, theme manifests and imported settings through the
       # real parsers, 32-bit with ASan and UBSan. A fixed seed and 2000 cases
       # per target keep the step short and repeatable; see tests/fuzz/README.md
