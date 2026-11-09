@@ -6,8 +6,12 @@ every source file keeps its original license header.
 
 PlatformIO looks in the project's `lib/` before it looks at the framework's
 libraries, so this copy replaces the core's one for the ESP8266 builds.
-`library.json` limits it to `espressif8266`; the ESP32 builds do not see it
-(they use their own `ESPmDNS`).
+`library.json` says `espressif8266`, but PlatformIO's default
+`lib_compat_mode = soft` checks only the framework (`arduino`), not the
+platform, so that line alone does not keep the copy out of an ESP32 build. The
+ESP32 envs in `platformio.ini` list it in `lib_ignore` (from `[esp32_base]`);
+they use their own `ESPmDNS`. `tools/check_mdns_copy.py` fails in CI when an
+env of another platform lacks that line.
 
 ## What changed, and why
 
@@ -32,6 +36,21 @@ If a service query is waiting, the original code runs unchanged: the query
 answers are linked across records in several passes, so they need the whole
 list.
 
+One difference in behaviour. In the original, `_processAnswers()` saw all
+records of a packet in one call. In the copy it is called once per record, and
+a `false` from it stops the remaining records of that packet. That cannot
+happen here. In `LEAmDNS_Control.cpp` the function returns `false` in these
+places only: its list is null (line 875, never: it gets the address of a
+record), or `_processPTRAnswer` (line 994), `_processSRVAnswer` (1074),
+`_processTXTAnswer` (1146), `_processAAnswer` (1210) or `_processAAAAAnswer`
+(1299) returns `false`. Each of those returns `false` only for a null record
+pointer, which the loop never passes. `_processPTRAnswer` also assigns the
+result of `addAnswer()` (line 1043), and `addAnswer()` fails only for a null
+answer (`LEAmDNS_Structs.cpp`, line 2075), which the surrounding `if` rules
+out. The streaming path runs only when no service query waits, and then those
+functions find no query to update and return `true` straight away. What does
+stop the loop is a failed read of a record (`_readRRAnswer`), as in the core.
+
 `LEAmDNS_Stream.h` holds the loop as a small template without any Arduino
 include, so a host test (`tests/mdns/`) can run it with fake records.
 
@@ -48,6 +67,7 @@ every upstream file as the core ships it. `tools/check_mdns_copy.py` runs in CI
 after the firmware build (the build downloads the package) and fails when:
 
 - `platformio.ini` pins another espressif8266 platform, or none;
+- an env of another platform (ESP32) does not list `ESP8266mDNS` in `lib_ignore`;
 - a file of this copy other than `src/LEAmDNS_Control.cpp` differs from its
   recorded hash, is missing, or is not listed in `UPSTREAM.json`;
 - the installed `framework-arduinoespressif8266` has another version, or any of

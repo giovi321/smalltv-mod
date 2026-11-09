@@ -56,6 +56,69 @@ def walk(base):
     return out
 
 
+def parse_ini(text):
+    """{section: {key: value}}; a value keeps its continuation lines (joined
+    by newlines); comment lines are dropped. Enough for platformio.ini."""
+    secs, sec, key = {}, None, None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line[0] in ";#":
+            continue
+        if raw[0] not in " \t" and line[0] == "[" and line.endswith("]"):
+            sec, key = secs.setdefault(line[1:-1], {}), None
+        elif sec is None:
+            continue
+        elif raw[0] in " \t" and key is not None:
+            sec[key] += "\n" + line
+        elif "=" in line:
+            key, _, val = line.partition("=")
+            key = key.strip()
+            sec[key] = val.strip()
+    return secs
+
+
+REF_RE = re.compile(r"\$\{([^.}]+)\.([^}]+)\}")
+
+
+def ini_value(secs, name, key, depth=0):
+    """A key's value in a section or in what it extends, with ${sec.key}
+    references filled in; None when it is not set."""
+    if depth > 8 or name not in secs:
+        return None
+    sec = secs[name]
+    if key in sec:
+        return REF_RE.sub(
+            lambda m: ini_value(secs, m.group(1), m.group(2), depth + 1) or "",
+            sec[key])
+    for parent in re.split(r"[,\s]+", sec.get("extends", "")):
+        if parent:
+            val = ini_value(secs, parent, key, depth + 1)
+            if val is not None:
+                return val
+    return None
+
+
+def ini_problems(text):
+    """PlatformIO's default lib_compat_mode = soft checks only the framework,
+    not the platform, so library.json's "platforms" keeps nothing out. Every
+    env of another platform (the ESP32 ones) must name the copy in lib_ignore,
+    or the ESP8266 sources are compiled there and fail."""
+    secs = parse_ini(text)
+    probs = []
+    for name in sorted(secs):
+        if not name.startswith("env:"):
+            continue
+        platform = ini_value(secs, name, "platform")
+        if not platform or platform.startswith("espressif8266"):
+            continue
+        ignored = re.split(r"[,\s]+", ini_value(secs, name, "lib_ignore") or "")
+        if "ESP8266mDNS" not in ignored:
+            probs.append("[%s] does not run on the ESP8266 platform but has no "
+                         "'ESP8266mDNS' in lib_ignore; the copy in lib/ would "
+                         "be compiled for it" % name)
+    return probs
+
+
 def check(root, package, require_package):
     """Return a list of problems; empty means the copy still matches."""
     probs = []
@@ -89,6 +152,13 @@ def check(root, package, require_package):
         elif norm_platform(p) != norm_platform(want_platform):
             probs.append("platformio.ini pins '%s' but the copy was made for "
                          "'%s'" % (p, want_platform))
+
+    # 1b. no env of another platform compiles the copy
+    try:
+        with open(os.path.join(root, "platformio.ini")) as f:
+            probs.extend(ini_problems(f.read()))
+    except OSError:
+        pass  # already reported above
 
     # 2. the copy in lib/
     for rel, h in sorted(files.items()):

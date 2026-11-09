@@ -47,6 +47,7 @@ class Tree:
               ("[env:one]\nplatform = %s\nboard = x\n\n"
                "[env:two]\nplatform = %s\n\n"
                "[env:esp32]\nplatform = https://example.invalid/p.zip\n"
+               "lib_ignore = ESP8266mDNS\n"
                % (PLATFORM, PLATFORM)).encode())
         for rel, data in UPSTREAM.items():
             write(os.path.join(self.lib, rel), data)
@@ -119,6 +120,61 @@ class CheckTest(unittest.TestCase):
         probs = self.t.run()
         self.assertTrue(any("not pinned" in p or "no espressif8266" in p
                             for p in probs), probs)
+
+    # PlatformIO's default lib_compat_mode = soft checks the framework only, so
+    # library.json's "platforms" does not keep the copy out of an ESP32 build:
+    # every ESP32 env must name it in lib_ignore.
+    def ini(self, text):
+        write(os.path.join(self.t.root, "platformio.ini"),
+              (("[env:one]\nplatform = %s\n\n" % PLATFORM) + text).encode())
+
+    def test_esp32_env_without_lib_ignore_fails(self):
+        self.ini("[env:esp32]\nplatform = https://example.invalid/p.zip\n")
+        probs = self.t.run()
+        self.assertTrue(any("esp32" in p and "lib_ignore" in p for p in probs), probs)
+
+    def test_esp32_env_with_other_lib_ignore_fails(self):
+        self.ini("[env:esp32]\nplatform = https://example.invalid/p.zip\n"
+                 "lib_ignore = Something\n")
+        self.assertTrue(any("lib_ignore" in p for p in self.t.run()))
+
+    def test_esp32_env_lib_ignore_among_others_passes(self):
+        self.ini("[env:esp32]\nplatform = https://example.invalid/p.zip\n"
+                 "lib_ignore =\n\tSomething\n\tESP8266mDNS\n")
+        self.assertEqual(self.t.run(), [])
+
+    def test_esp32_env_lib_ignore_through_a_shared_section_passes(self):
+        self.ini("[base]\nlib_ignore = ESP8266mDNS\n\n"
+                 "[env:esp32]\nplatform = https://example.invalid/p.zip\n"
+                 "lib_ignore = ${base.lib_ignore}\n")
+        self.assertEqual(self.t.run(), [])
+
+    def test_shared_section_without_the_name_fails(self):
+        self.ini("[base]\nlib_ignore = Other\n\n"
+                 "[env:esp32]\nplatform = https://example.invalid/p.zip\n"
+                 "lib_ignore = ${base.lib_ignore}\n")
+        self.assertTrue(any("lib_ignore" in p for p in self.t.run()))
+
+    def test_extending_env_inherits_lib_ignore(self):
+        self.ini("[env:esp32]\nplatform = https://example.invalid/p.zip\n"
+                 "lib_ignore = ESP8266mDNS\n\n"
+                 "[env:esp32_b]\nextends = env:esp32\n")
+        self.assertEqual(self.t.run(), [])
+
+    def test_extending_env_of_an_unprotected_env_fails(self):
+        self.ini("[env:esp32]\nplatform = https://example.invalid/p.zip\n\n"
+                 "[env:esp32_b]\nextends = env:esp32\n")
+        probs = self.t.run()
+        self.assertTrue(any("esp32_b" in p for p in probs), probs)
+
+    def test_commented_out_lib_ignore_does_not_count(self):
+        self.ini("[env:esp32]\nplatform = https://example.invalid/p.zip\n"
+                 "; lib_ignore = ESP8266mDNS\n")
+        self.assertTrue(any("lib_ignore" in p for p in self.t.run()))
+
+    def test_esp8266_env_needs_no_lib_ignore(self):
+        self.ini("[env:lean]\nextends = env:one\n")
+        self.assertEqual(self.t.run(), [])
 
     def test_no_esp8266_env_fails(self):
         write(os.path.join(self.t.root, "platformio.ini"), b"[env:one]\n")
