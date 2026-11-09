@@ -39,3 +39,23 @@ include, so a host test (`tests/mdns/`) can run it with fake records.
 
 Identical to core 3.1.2. To compare, diff against
 `framework-arduinoespressif8266/libraries/ESP8266mDNS` of that core version.
+
+## CI check: the copy must match the pinned core
+
+`UPSTREAM.json` records the platform pin (`espressif8266 @ 4.2.1`), the
+framework package version (`3.30102.0`, which is core 3.1.2) and the SHA-256 of
+every upstream file as the core ships it. `tools/check_mdns_copy.py` runs in CI
+after the firmware build (the build downloads the package) and fails when:
+
+- `platformio.ini` pins another espressif8266 platform, or none;
+- a file of this copy other than `src/LEAmDNS_Control.cpp` differs from its
+  recorded hash, is missing, or is not listed in `UPSTREAM.json`;
+- the installed `framework-arduinoespressif8266` has another version, or any of
+  its `libraries/ESP8266mDNS` files differs from the recorded hash
+  (`LEAmDNS_Control.cpp` included: the record holds the original hash).
+
+Line endings are ignored. When it fails after a platform bump: diff the new
+core's `libraries/ESP8266mDNS` against this folder, re-apply the change to
+`_parseResponse` (or drop the copy if the core fixed it), then update the
+version and hashes in `UPSTREAM.json`. The check's own tests are
+`tests/mdns/test_check_copy.py`.

@@ -148,6 +148,17 @@ jobs:
       - name: Test mDNS answer handling
         run: sh tests/mdns/run.sh
 
+      # The same copy must still match the core it came from. This fails when
+      # the espressif8266 platform pin in platformio.ini changes, when an
+      # untouched file of the copy is edited, or when the installed
+      # framework-arduinoespressif8266 (downloaded by the build above) has other
+      # files or another version than lib/ESP8266mDNS/UPSTREAM.json records.
+      # The fix is to look at the library again, then update that file.
+      - name: Check the mDNS copy matches the pinned core
+        run: |
+          python3 -m unittest discover -s tests/mdns -p 'test_check_copy.py'
+          python3 tools/check_mdns_copy.py --require-package
+
       # Mutated packages, theme manifests and imported settings through the
       # real parsers, 32-bit with ASan and UBSan. A fixed seed and 2000 cases
       # per target keep the step short and repeatable; see tests/fuzz/README.md
