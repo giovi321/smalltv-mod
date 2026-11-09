@@ -1,0 +1,21 @@
+{
+  "core": "3.1.2",
+  "platform": "espressif8266 @ 4.2.1",
+  "framework_version": "3.30102.0",
+  "files": {
+    "keywords.txt": "d23e51a6a0cf8197fb5932c0c9e42cb458c41ecedabbcd2ca5aa7a8dd4e69756",
+    "library.properties": "d8489d4f3a28905642ced574892304a00554a402bbbcffb1f3b5858486741474",
+    "src/ESP8266mDNS.cpp": "b2a003eede98fec3744b0fa0a6dc203fdef1c00ace49e1e7922d5c0d3e8ae649",
+    "src/ESP8266mDNS.h": "f7a1c2ced7cb109cad4f102df895bf1fa1b86c7e8111d8e54ce5c9571ebc7d77",
+    "src/LEAmDNS.cpp": "d57ea67c4f35b27867627e90d22884df3dfd6c48435c1f7bc15b98286c740b58",
+    "src/LEAmDNS.h": "a6be69356ee4fec7921a403b8c085989526a3f3db5417ba1886c05a01eb250d2",
+    "src/LEAmDNS_Control.cpp": "360808065d2f33065b27e22e20016483181fcf2f37f5dfdf12b522a8dbb61c41",
+    "src/LEAmDNS_Helpers.cpp": "4d78d26ee6e7720cb55385d30f37993b533b09236f602ec3bea71685ef3d47b3",
+    "src/LEAmDNS_Priv.h": "db26ff205e9a39eba7b2a56d8608c50646ce07a740c7d07e6231771f30c4aebd",
+    "src/LEAmDNS_Structs.cpp": "6a6117f3ac2c1480935528854c666014782c81b1a4d2e99dcba404dcb0e9271e",
+    "src/LEAmDNS_Transfer.cpp": "34735d3043fa9d325f7a3cf3802d9b9b1dec6e89302881b9ecd0791acba5d7a7",
+    "src/LEAmDNS_lwIPdefs.h": "0bcc92a565669338dddcab9311f24c1674d4ec85d2e4ffe4ce843f8c8776a0d8"
+  },
+  "patched": ["src/LEAmDNS_Control.cpp"],
+  "added": ["README-SMALLTV.md", "library.json", "src/LEAmDNS_Stream.h"]
+}
