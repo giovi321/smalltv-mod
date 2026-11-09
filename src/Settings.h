@@ -180,6 +180,11 @@ struct RadarSettings {
   bool     showRimDots;   // aircraft beyond the ring as bearing dots on the rim
   uint8_t  uiScale;       // marker/text size: 0 = small, 1 = medium, 2 = large
   uint16_t minAltFt;      // hide aircraft below this altitude (ft); 0 = show all
+  uint32_t markerColor;   // RGB888 color for aircraft symbols and rim dots
+  uint32_t lineColor;     // RGB888 color for rings and crosshairs
+  uint32_t aircraftColor; // RGB888 color for callsign and altitude
+  uint32_t airportColor;  // RGB888 color for airport names
+  uint32_t labelColor;    // RGB888 color for compass and corner labels
 
   Airport airports[MAX_AIRPORTS];
   uint8_t airportCount;
