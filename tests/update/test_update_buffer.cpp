@@ -71,8 +71,11 @@ static void testMessage() {
   // A buffer that is too small never overruns and stays terminated.
   char tiny[16];
   std::memset(tiny, 'x', sizeof(tiny));
-  refusalText(tiny, sizeof(tiny), 19600, 3888);
+  n = refusalText(tiny, sizeof(tiny), 19600, 3888);
   CHECK(std::strlen(tiny) < sizeof(tiny));
+  CHECK(n == std::strlen(tiny));          // the length returned is what was written
+  CHECK(refusalText(nullptr, 10, 1, 1) == 0);
+  CHECK(refusalText(tiny, 0, 1, 1) == 0);
   // The longest text fits the 200 B the handler uses.
   n = refusalText(buf, sizeof(buf), 4294967295u, 4294967295u);
   CHECK(n < 190);

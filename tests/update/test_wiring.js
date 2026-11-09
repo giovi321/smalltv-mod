@@ -25,7 +25,7 @@ const done=body(portal,'static void handleUpdateDone() {');
 {
  const start=upload.indexOf('if (up.status == UPLOAD_FILE_START) {');
  assert.ok(start>=0,'START branch');
- const check=upload.indexOf('updatebuf::uploadCanStart(',start);
+ const check=upload.indexOf('if (!updatebuf::uploadCanStart(',start);   // asked, and a refusal acted on
  const begin=upload.indexOf('if (!Update.begin(',start);   // the call, not a comment
  assert.ok(check>start,'START asks uploadCanStart');
  assert.ok(begin>check,'uploadCanStart comes before Update.begin');

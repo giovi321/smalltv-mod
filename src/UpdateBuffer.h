@@ -27,6 +27,14 @@
 #include <stdint.h>
 #include <stdio.h>
 
+// On the device the format text stays in flash (about 150 B of static RAM
+// saved); on the host it is a plain snprintf.
+#if defined(ARDUINO)
+#define UPDATEBUF_SNPRINTF(buf, cap, fmt, ...) snprintf_P(buf, cap, PSTR(fmt), __VA_ARGS__)
+#else
+#define UPDATEBUF_SNPRINTF(buf, cap, fmt, ...) snprintf(buf, cap, fmt, __VA_ARGS__)
+#endif
+
 namespace updatebuf {
 
 constexpr uint32_t kSector = 4096;      // FLASH_SECTOR_SIZE
@@ -52,7 +60,7 @@ static inline bool uploadCanStart(uint32_t freeHeap, uint32_t maxBlock) {
 // The text the page shows when the upload is refused. Returns its length.
 static inline size_t refusalText(char* buf, size_t cap, uint32_t freeHeap, uint32_t maxBlock) {
   if (!buf || !cap) return 0;
-  int n = snprintf(buf, cap,
+  int n = UPDATEBUF_SNPRINTF(buf, cap,
       "Upload not started: not enough memory in one piece (largest free block %lu B, "
       "needed %lu B, free memory %lu B). Restart the device, then upload again.",
       (unsigned long)maxBlock, (unsigned long)blockNeeded(bufferWanted(freeHeap)),
