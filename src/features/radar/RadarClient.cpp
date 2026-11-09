@@ -230,7 +230,10 @@ static bool fetchUrl(const Settings& s, const String& url) {
   // chunk-size framing then reaches ArduinoJson, which reads the first hex
   // length as a bare number and reports a valid document with no "ac" in it —
   // an empty scope with HTTP 200 and no error anywhere.
-  http.useHTTP10(true);
+  // adsb.lol is the exception: it refuses 1.0 with "426 Upgrade Required" and
+  // answers 1.1 with a Content-Length body, not chunked, at every range. So
+  // only adsb.lol gets a 1.1 request; adsb.fi and the webhook keep 1.0.
+  http.useHTTP10(url.indexOf(ADSB_LOL_HOST) < 0);
   http.setTimeout(s.httpTimeout);
   http.setReuse(false);
   if (!http.begin(*client, url)) { g_stage = RADAR_CONNECT_FAIL; return false; }
