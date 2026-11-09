@@ -161,7 +161,8 @@ void ThemeMode::service(const Settings& s) {
         dataNextMs_.assign(theme.data.size(), 0);
         dataScheduled_.assign(theme.data.size(), false);
         dataValues_.clear();
-        dataAges_.reset(theme.data.size());
+        // Only a spec 2 theme can use "<source>.age"; a spec 1 theme gets none.
+        dataAges_.reset(theme.data.size(), theme.spec >= 2);
         dataCursor_ = 0;
       }
       engine_.setTheme(std::move(theme), millis());

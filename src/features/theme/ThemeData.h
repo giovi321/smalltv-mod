@@ -85,8 +85,11 @@ struct DataFetch {
 class DataAges {
  public:
   // Starts over for a theme with `count` sources: every age is unknown.
-  void reset(size_t count) {
-    ageMs_.assign(count, Unknown);
+  // `enabled` is false for a spec 1 theme: it has no "<source>.age" values, so
+  // no age is ever known for it and publish() has nothing to publish.
+  void reset(size_t count, bool enabled = true) {
+    ageMs_.assign(enabled ? count : 0, Unknown);
+    published_.assign(count, Unpublished);   // the first publish() looks at every source
     started_ = false;
   }
   // Moves every known age on to `now`. The first call after reset() only sets
@@ -109,9 +112,16 @@ class DataAges {
   // Brings the "<source>.age" entries of `values` up to date and tells whether
   // anything changed. A source that declares a field called "age" of its own
   // keeps it: nothing is added for that source.
-  bool publish(const std::vector<ThemeDataSource>& sources, std::vector<ThemeValue>& values) const {
+  bool publish(const std::vector<ThemeDataSource>& sources, std::vector<ThemeValue>& values) {
+    // Runs on every frame, and a minute changes once a minute. So remember
+    // which whole-minute value each source was last published with, and build
+    // a key or a number text (a heap allocation each) only for a source whose
+    // value moved. A source's own "age" field is skipped by the same rule.
+    if (published_.size() < sources.size()) published_.resize(sources.size(), Unpublished);
     bool changed = false;
     for (size_t i = 0; i < sources.size(); ++i) {
+      if (minutes(i) == published_[i]) continue;
+      published_[i] = minutes(i);
       bool own = false;
       for (const auto& field : sources[i].fields) own = own || field.id == "age";
       if (own) continue;
@@ -140,7 +150,11 @@ class DataAges {
   // An enum, so neither value is ever stored in or read from memory (C++11
   // would need a definition for a static constexpr member that is odr-used).
   enum : uint32_t { Unknown = 0xffffffffu, MaxAge = 0xfffffffeu };
+  // What publish() last did for each source: its whole-minute value (-1 for
+  // unknown, which is "no value"), or Unpublished before it looked at all.
+  enum : int { Unpublished = -2 };
   std::vector<uint32_t> ageMs_;
+  std::vector<int> published_;
   uint32_t last_ = 0;
   bool started_ = false;
 };

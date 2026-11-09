@@ -1,11 +1,25 @@
 #include "ThemeData.h"
+#include <atomic>
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
+#include <new>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <thread>
 using namespace smalltv;
+
+// Counts every operator new, so a test can tell whether a code path allocates.
+static std::atomic<size_t> g_news{0};
+void* operator new(std::size_t n) {
+  ++g_news;
+  void* p = std::malloc(n ? n : 1);
+  if (!p) throw std::bad_alloc();
+  return p;
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
 // A socket that can stop halfway through a response, or drip one byte at a time.
 struct Response {
@@ -204,10 +218,11 @@ static void testDataAges(const char* wiringFile) {
     assert(tick != std::string::npos && collect != std::string::npos && publish != std::string::npos && set != std::string::npos);
     assert(tick < collect && collect < publish && publish < set);
     assert(code.find("dataAges_.tick(") == tick && code.find("dataAges_.tick(", tick + 1) == std::string::npos);
-    assert(code.find("dataAges_.reset(theme.data.size());") != std::string::npos);
+    // Only a spec 2 theme gets ages.
+    assert(code.find("dataAges_.reset(theme.data.size(), theme.spec >= 2);") != std::string::npos);
     assert(code.find("dataAges_.reset(0);") != std::string::npos);
     // The reset for a new theme sits with the other data state that a new theme clears.
-    const size_t clearValues = code.find("dataValues_.clear();\n        dataAges_.reset(theme.data.size());");
+    const size_t clearValues = code.find("dataValues_.clear();\n        // Only a spec 2 theme can use \"<source>.age\"; a spec 1 theme gets none.\n        dataAges_.reset(");
     assert(clearValues != std::string::npos);
     // The values are not handed over every frame, only when they changed.
     const std::string guarded = "if (changed) engine_.setValues(dataValues_);";
@@ -226,7 +241,98 @@ static void testDataAges(const char* wiringFile) {
   std::cout << "data age tests passed\n";
 }
 
+// refreshData() runs on every service() call, about once per frame. With no
+// change in the whole-minute value, publish() must not build a string. Counted
+// as operator new calls; a source id longer than 11 characters makes
+// "<id>.age" too long for std::string's inline buffer (15 chars in libstdc++'s
+// new ABI), so the old code allocated for it on every call. The short ids of a
+// real theme ("w", "d") never allocated, so they are counted too (printed).
+static size_t newsDuringIdlePublish(const char* id, int calls) {
+  const std::vector<ThemeDataSource> sources = {sourceNamed(id), sourceNamed("zz")};
+  std::vector<ThemeValue> values;
+  values.reserve(8);                                         // no growth of the vector itself
+  DataAges ages;
+  ages.reset(2);
+  ages.tick(0);
+  ages.result(0, true);
+  ages.publish(sources, values);                             // the first call may build
+  const size_t before = g_news.load();
+  for (int i = 0; i < calls; ++i) {
+    ages.tick(1000u + 7u * i);                               // well inside the same minute
+    ages.publish(sources, values);
+  }
+  const size_t used = g_news.load() - before;
+  assert(valueOf(values, (std::string(id) + ".age").c_str()) && ages.minutes(0) == 0);
+  return used;
+}
+static void testDataAgePublishAllocations() {
+  const size_t longId = newsDuringIdlePublish("weather_forecast_today", 1000);
+  const size_t shortId = newsDuringIdlePublish("w", 1000);
+  std::cout << "allocations in 1000 idle publish() calls: long id " << longId << ", short id " << shortId << std::endl;
+  assert(longId == 0);
+  assert(shortId == 0);
+  // A change in the minute still publishes (and may allocate): the saving must
+  // not lose an update.
+  const std::vector<ThemeDataSource> sources = {sourceNamed("weather_forecast_today")};
+  std::vector<ThemeValue> values;
+  DataAges ages;
+  ages.reset(1);
+  ages.tick(0);
+  ages.result(0, true);
+  assert(ages.publish(sources, values) && values[0].value == "0");
+  for (int i = 1; i <= 3; ++i) {
+    ages.tick(60000u * i);
+    assert(ages.publish(sources, values) && values[0].value == std::to_string(i));
+    // Once published, the same minute costs nothing again.
+    const size_t before = g_news.load();
+    assert(!ages.publish(sources, values));
+    assert(g_news.load() == before);
+  }
+  // Starting over (a new theme) makes the next publish look at every source
+  // again, even one whose age was unknown before: a stale value goes away.
+  DataAges fresh;
+  fresh.reset(1);
+  values.clear();
+  fresh.publish(sources, values);                            // unknown: nothing to add
+  values.push_back({"weather_forecast_today.age", "5"});
+  fresh.reset(1);
+  assert(fresh.publish(sources, values) && values.empty());
+  // A fetch result in the same minute (age back to 0) is a change too.
+  ages.result(0, true);
+  assert(ages.publish(sources, values) && values[0].value == "0");
+}
+
+// A spec 1 theme gets no "<source>.age" values (the parser would not accept the
+// token in it): nothing is published, whatever the ticks and results.
+static void testDataAgeSpec1() {
+  const std::vector<ThemeDataSource> sources = {sourceNamed("w")};
+  std::vector<ThemeValue> values;
+  DataAges off;
+  off.reset(1, false);
+  off.tick(0);
+  off.result(0, true);
+  off.tick(600000);
+  assert(!off.publish(sources, values) && values.empty());
+  DataAges on;
+  on.reset(1, true);
+  on.tick(0);
+  on.result(0, true);
+  assert(on.publish(sources, values) && values.size() == 1);
+  // A new theme can switch it on and off again.
+  values.clear();
+  on.reset(1, false);
+  on.tick(0);
+  on.result(0, true);
+  assert(!on.publish(sources, values) && values.empty());
+  on.reset(1);                                               // the default is on
+  on.tick(0);
+  on.result(0, true);
+  assert(on.publish(sources, values) && values.size() == 1);
+}
+
 int main(int argc, char** argv) {
+  testDataAgeSpec1();
+  testDataAgePublishAllocations();
   testDataAges(argc > 1 ? argv[1] : "src/features/theme/ThemeMode.cpp");
   std::string body;
   Response complete;complete.bytes="{\"value\":42}";
