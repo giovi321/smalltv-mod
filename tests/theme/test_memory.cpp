@@ -479,6 +479,9 @@ static void testShortTranslations() {
 }
 
 int main(int argc, char** argv) {
+  // A show rule keeps no vector of its own: 32 bytes on this 32-bit build (40 with one).
+  if (sizeof(ShowRule) > 32) fprintf(stderr, "sizeof(ShowRule) %zu: its ranges belong in ShowList::ranges\n", sizeof(ShowRule));
+  assert(sizeof(ShowRule) <= 32);
   testBlockList();
   testManyEntries();
   testThemeIndex();

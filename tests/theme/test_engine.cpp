@@ -276,6 +276,60 @@ int main() {
     assert(boxRepainted && two.states()[1].resolved.visible);
   }
 
+  // The most a theme can hold: 32 layers with 4 rules of 4 ranges each (512
+  // ranges). Layer i, rule r, range k covers [40i + 10k + r, 40i + 10k + r + 6].
+  // Rules 0 and 2 read w.code, rules 1 and 3 read w.temp. A layer shows while
+  // all four rules hold, so a range that ended up with another rule, layer or
+  // other ends would change what some value shows. Swept value by value
+  // against a plain oracle.
+  {
+    auto holds = [](int layer, int rule, int value) {
+      for (int k = 0; k < 4; ++k) {
+        const int low = layer * 40 + k * 10 + rule;
+        if (value >= low && value <= low + 6) return true;
+      }
+      return false;
+    };
+    std::string layers;
+    for (int i = 0; i < 32; ++i) {
+      std::string show;
+      for (int r = 0; r < 4; ++r) {
+        std::string in;
+        for (int k = 0; k < 4; ++k) {
+          const int low = i * 40 + k * 10 + r;
+          in += std::string(k ? "," : "") + "[" + std::to_string(low) + "," + std::to_string(low + 6) + "]";
+        }
+        show += std::string(r ? "," : "") + "{\"source\":\"w." + (r % 2 ? "temp" : "code") + "\",\"in\":[" + in + "]}";
+      }
+      layers += std::string(i ? "," : "") + "{\"id\":\"l" + std::to_string(i) + "\",\"type\":\"shape\",\"shape\":\"rectangle\","
+        "\"x\":1,\"y\":2,\"width\":5,\"height\":5,\"fill\":\"#ffffff\",\"show\":[" + show + "]}";
+    }
+    const std::string head = "{\"spec\":1,\"theme\":{\"id\":\"sweep\",\"name\":\"Sweep\",\"author\":\"Me\",\"version\":\"1\"},"
+      "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},\"data\":[{\"id\":\"w\",\"url\":\"http://example.test/w.json\","
+      "\"interval\":60,\"fields\":[{\"id\":\"code\",\"path\":\"code\"},{\"id\":\"temp\",\"path\":\"temp\"}]}],\"layers\":[";
+    Theme sweep;
+    assert(parseTheme(head + layers + "]}", sweep, error) && sweep.layers.size() == 32 && sweep.show.size() == 128);
+    Engine e;
+    e.setTheme(sweep, 0);
+    e.update(0, nullptr);
+    uint32_t now = 1;
+    int shown = 0;
+    for (int shift : {0, 2}) {
+      for (int v = -3; v < 32 * 40 + 20; ++v) {
+        e.setValues({{"w.code", std::to_string(v)}, {"w.temp", std::to_string(v + shift)}});
+        e.update(now++, nullptr);
+        for (int i = 0; i < 32; ++i) {
+          const bool expected = holds(i, 0, v) && holds(i, 1, v + shift) && holds(i, 2, v) && holds(i, 3, v + shift);
+          const bool visible = e.states()[i].resolved.visible;
+          shown += visible;
+          if (visible != expected) std::cerr << "layer " << i << ", code " << v << ", temp " << v + shift << ": shown " << visible << ", expected " << expected << "\n";
+          assert(visible == expected);
+        }
+      }
+    }
+    assert(shown > 400);   // a sweep that never reaches the ranges would pass anything
+  }
+
   const char* bindingJson = R"({"spec":1,"theme":{"id":"binding","name":"Binding","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"sensor","url":"http://example.test/value.json","interval":60,"fields":[{"id":"value","path":"value"}]}],"layers":[{"id":"bar","type":"shape","shape":"rectangle","x":20,"y":120,"width":10,"height":18,"cornerRadius":8,"fill":"#00ff00","bind":{"width":{"source":"sensor.value","input":[0,50],"output":[0,100]},"fill":{"source":"sensor.value","stops":[{"at":0,"value":"#00ff00"},{"at":50,"value":"#ffff00"}]}}}]})";
   assert(parseTheme(bindingJson,theme,error));
   const uint16_t staticGreen=0x07e0,warningColor=0xffe0;

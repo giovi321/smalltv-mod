@@ -902,14 +902,17 @@ __attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t
     JsonObjectConst item = rules[i].as<JsonObjectConst>();
     Fields fields(item, rulePath, error);
     if (item.isNull()) return fields.fail("", "expected an object");
-    ShowRule& rule = t.show.emplace_back();
+    ShowRule& rule = t.show.rules.emplace_back();
     rule.layer = static_cast<uint8_t>(t.layers.size() - 1);
+    // Its ranges follow the last range of the rules before it; ShowList keeps
+    // at most MaxLayers x 16 of them (a static_assert there), so this fits.
+    rule.first = static_cast<uint16_t>(t.show.ranges.size());
     if (!fields.keys("|source|in|missing|") || !fields.text("source", rule.source, 64) || !fields.boolean("missing", rule.missing, false)) return false;
     // Declared data fields only: the built-in time.*/device.* sources of spec 2 are not offered to `show`.
     if (!validFieldToken(rule.source, t)) return fields.fail("source", "expected a declared data field");
     JsonArrayConst ranges = item["in"].as<JsonArrayConst>();
     if (ranges.isNull() || ranges.size() == 0 || ranges.size() > 4) return fields.fail("in", "expected 1 to 4 ranges");
-    rule.ranges.reserve(ranges.size());
+    rule.count = static_cast<uint8_t>(ranges.size());   // 1 to 4, checked above
     for (size_t r = 0; r < ranges.size(); ++r) {
       Fields range(item, rulePath + ".in[" + std::to_string(r) + "]", error);
       JsonArrayConst ends = ranges[r].as<JsonArrayConst>();
@@ -923,7 +926,7 @@ __attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t
       }
       if (std::isinf(value[0]) && std::isinf(value[1])) return range.fail("", "at most one end may be null");
       if (value[0] > value[1]) return range.fail("", "low must not be above high");
-      rule.ranges.emplace_back(value[0], value[1]);
+      t.show.ranges.push_back(std::pair<double, double>(value[0], value[1]));
     }
   }
   return true;
@@ -1247,7 +1250,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
   if (!f.text("type", type, 16) || !f.number("x", -240, 479, l.x) || !f.number("y", -240, 479, l.y)) return false;
   if (type == "text") {
     l.type = LayerType::Text;
-    if (!f.keys("|id|type|x|y|anchor|value|size|font|color|scroll|bind|show|") ||!parseTextValue(o, t, f, l)) return false;
+    if (!f.keys("|id|type|x|y|anchor|value|size|font|color|scroll|bind|show|") || !parseTextValue(o, t, f, l)) return false;
     if (f.has("font")) {
       // A package font (#31): fonts/<name>.stf, whose line height is the
       // layer's size, so `size` is not given.
@@ -1563,7 +1566,10 @@ void Engine::resolveLayer(size_t index) {
       continue;
     }
     resolved.visible = false;
-    for (const auto& range : rule.ranges) if (value >= range.first && value <= range.second) resolved.visible = true;
+    for (size_t r = 0; r < rule.count; ++r) {
+      const auto& range = theme_.show.range(rule, r);
+      if (value >= range.first && value <= range.second) resolved.visible = true;
+    }
   }
   states_[index].resolved = resolved;
 }

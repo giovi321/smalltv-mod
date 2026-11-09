@@ -304,11 +304,12 @@ int main() {
     assert(parseTheme(json,theme,error));
     assert(theme.show.size()==2);
     const ShowRule& a=theme.show[0];
-    assert(a.layer==0&&a.source=="weather.temp"&&!a.missing&&a.ranges.size()==2);
-    assert(a.ranges[0].first==-5&&a.ranges[0].second==4.5&&a.ranges[1].first==20&&std::isinf(a.ranges[1].second)&&a.ranges[1].second>0);
+    assert(a.layer==0&&a.source=="weather.temp"&&!a.missing&&a.count==2);
+    assert(theme.show.range(a,0).first==-5&&theme.show.range(a,0).second==4.5&&theme.show.range(a,1).first==20);
+    assert(std::isinf(theme.show.range(a,1).second)&&theme.show.range(a,1).second>0);
     const ShowRule& b=theme.show[1];
-    assert(b.missing&&std::isinf(b.ranges[0].first)&&b.ranges[0].first<0&&b.ranges[0].second==30);
-    dataDocument(d);serializeJson(d,json);assert(parseTheme(json,theme,error)&&theme.show.size()==0);
+    assert(b.missing&&b.count==1&&b.first==2&&std::isinf(theme.show.range(b,0).first)&&theme.show.range(b,0).first<0&&theme.show.range(b,0).second==30);
+    assert(theme.show.ranges.size()==3);    dataDocument(d);serializeJson(d,json);assert(parseTheme(json,theme,error)&&theme.show.size()==0);
   }
   // Each malformed rule is refused, with the error pointing at it.
   struct BadShow { const char* show; const char* where; };

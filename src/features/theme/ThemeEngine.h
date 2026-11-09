@@ -110,16 +110,36 @@ struct ResolvedLayer {
   bool visible = true;
 };
 // One rule of a layer's `show` list: the layer is drawn only while every one
-// of its rules holds. A rule holds when the value of `source` lies in one of
-// `ranges` (ends included; an open end is an infinity), or when the value is
-// missing or not a number and `missing` is true. Rules live in one list on
-// the Theme, not in each Layer, so themes without them pay nothing per layer.
+// of its rules holds. A rule holds when the value of `source` lies in
+// one of its ranges (ends included; an open end is an infinity), or when the
+// value is missing or not a number and `missing` is true. Rules live in one
+// list on the Theme, not in each Layer, so themes without them pay nothing per
+// layer. A rule does not hold its ranges: they are in the list next to it
+// (ShowList), the rule's `count` ranges from number `first` on. One list of
+// all of them takes less heap than a small vector for every rule.
 struct ShowRule {
-  uint8_t layer = 0;
-  bool missing = false;
   std::string source;
-  std::vector<std::pair<double, double>> ranges;
+  uint16_t first = 0;   // its first range in ShowList::ranges
+  uint8_t layer = 0;
+  uint8_t count = 0;    // 1 to 4 ranges
+  bool missing = false;
 };
+// The show rules of a theme and their ranges. At most MaxLayers x 4 rules x 4
+// ranges, so `first` never passes 16 bits. Both are block lists: the ranges
+// are 16 bytes each.
+struct ShowList {
+  BlockList<ShowRule> rules;
+  BlockList<std::pair<double, double>> ranges;
+  size_t size() const { return rules.size(); }
+  bool empty() const { return rules.empty(); }
+  ShowRule& operator[](size_t index) { return rules[index]; }
+  const ShowRule& operator[](size_t index) const { return rules[index]; }
+  BlockList<ShowRule>::const_iterator begin() const { return rules.begin(); }
+  BlockList<ShowRule>::const_iterator end() const { return rules.end(); }
+  // Range number `index` of `rule`.
+  const std::pair<double, double>& range(const ShowRule& rule, size_t index) const { return ranges[rule.first + index]; }
+};
+static_assert(MaxLayers * 16 <= 0xffff, "a rule's first range must fit the 16 bits ShowRule keeps it in");
 bool parseFiniteNumber(const std::string& value, double& number);
 int resolveNumericBinding(const NumericBinding& binding, double value, int lo, int hi);
 uint16_t resolveColorBinding(const ColorBinding& binding, double value);
@@ -205,7 +225,7 @@ struct Theme {
   uint16_t translationBytes = 0;   // their cost so far, as parseTextValue() counts it
   std::vector<ThemeDataSource> data;
   std::vector<ThemeFont> fonts;
-  BlockList<ShowRule> show;
+  ShowList show;
 };
 // Random-access bytes of a manifest. parseTheme() reads it forward in small
 // pieces, several times, so a package's manifest never has to be copied into
