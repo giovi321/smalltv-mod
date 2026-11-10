@@ -206,11 +206,19 @@ def build(directory):
                 except (OSError, ValueError, TypeError) as error:
                     raise ValueError(f'layers[{index}].font: {layer["font"]}: {error}') from error
             # The text outside {tokens} is known now: a character the font
-            # lacks would be drawn as its fallback glyph.
-            missing = sorted(set(re.sub(r'\{[^}]*\}', '', layer['value'])) - font_glyphs(entries[path]))
-            if missing:
-                raise ValueError(f'layers[{index}].value: font {layer["font"]} has no glyph for {"".join(missing)!r}; '
-                                 f'add it to "glyphs" in fonts/{layer["font"]}.json')
+            # lacks would be drawn as its fallback glyph. A localized value
+            # (spec 2) is an object of strings by language, each checked; any
+            # other shape is left to the validator's message.
+            value = layer.get('value')
+            texts = {'': value} if isinstance(value, str) else value if isinstance(value, dict) else {}
+            for language, text in texts.items():
+                if not isinstance(text, str):
+                    continue
+                missing = sorted(set(re.sub(r'\{[^}]*\}', '', text)) - font_glyphs(entries[path]))
+                if missing:
+                    field = f'value.{language}' if language else 'value'
+                    raise ValueError(f'layers[{index}].{field}: font {layer["font"]} has no glyph for {"".join(missing)!r}; '
+                                     f'add it to "glyphs" in fonts/{layer["font"]}.json')
         if kind not in ('image', 'animation'):
             continue
         source = layer.get('source')

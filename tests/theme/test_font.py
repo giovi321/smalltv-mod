@@ -189,6 +189,20 @@ class FontTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, r'layers\[0\]\.value: font f has no glyph for ' + error):
                     pack.build(root)
 
+
+    def test_package_checks_every_language(self):
+        # A localized value (spec 2): each language's fixed text needs its
+        # glyphs, and the error names the language.
+        for value, error in [({'en': 'AB', 'pt': 'BA'}, None), ({'en': 'AB', 'pt': 'AC'}, r"value\.pt: .*'C'"),
+                             ({'en': 'C{HH}', 'pt': 'A'}, r"value\.en: .*'C'")]:
+            with tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                self.theme(root, 2, {'file': 'f.ttf', 'size': 20, 'glyphs': 'AB'}, value)
+                if error is None:
+                    pack.build(root)
+                    continue
+                with self.assertRaisesRegex(ValueError, r'layers\[0\]\.' + error):
+                    pack.build(root)
     def test_package_rejects(self):
         for spec, settings in [(1, {'file': 'f.ttf', 'size': 20, 'glyphs': 'AB'}), (2, None),
                                (2, {'file': 'f.ttf', 'size': 20}), (2, {'file': 'f.ttf', 'size': 20, 'glyphs': 'AB', 'x': 1}),
