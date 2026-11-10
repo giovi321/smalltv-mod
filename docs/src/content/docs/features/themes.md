@@ -372,7 +372,7 @@ leave room for the longest string.
 
 #### Fonts in the package
 
-A theme with `"spec": 2` can bring its own fonts, antialiased over the layers
+Fonts need firmware v3.6.0 or later. A theme with `"spec": 2` can bring its own fonts, antialiased over the layers
 below. A text layer names one with `font` and gives no `size`: the font's line
 height is the layer's height. Layers without `font` keep the built-in font.
 
@@ -434,7 +434,7 @@ uses Bebas Neue (OFL, `fonts/OFL.txt`) in two sizes, with `"author":
 "smalltv-mod; font Bebas Neue (c) Dharma Type, OFL"`; its package is
 14,240 bytes.
 
-Firmware up to 3.5.1 refuses a package with fonts with "Invalid or truncated
+Firmware before 3.6.0 refuses a package with fonts with "Invalid or truncated
 .stheme package". A spec 1 manifest with `font` is rejected with
 `layers[N].font: needs "spec": 2`, and a spec 1 package with an `.stf` entry
 with `fonts/<name>.stf: font needs "spec": 2`. A font whose baseline is 0 or
@@ -750,7 +750,7 @@ and `device` can no longer be used as the `id` of a `data` source, since
 
 #### Data age: `<source>.age`
 
-In a `"spec": 2` theme every `data` source also has an `age` field that the
+Data age needs firmware v3.6.0 or later. In a `"spec": 2` theme every `data` source also has an `age` field that the
 theme does not declare: `w.age` for a source with the ID `w`. It is the time
 since the source's last successful fetch, in whole minutes (0 up to 71582, about
 49.7 days, where it stops). Use it like any fetched field, in a binding or in
