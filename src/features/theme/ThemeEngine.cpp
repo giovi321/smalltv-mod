@@ -1262,7 +1262,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
   if (!f.text("type", type, 16) || !f.number("x", -240, 479, l.x) || !f.number("y", -240, 479, l.y)) return false;
   if (type == "text") {
     l.type = LayerType::Text;
-    if (!f.keys(textKeys) ||!parseTextValue(o, t, f, l)) return false;
+    if (!f.keys(textKeys) || !parseTextValue(o, t, f, l)) return false;
     if (f.has("font")) {
       // A package font (#31): fonts/<name>.stf, whose line height is the
       // layer's size, so `size` is not given.
