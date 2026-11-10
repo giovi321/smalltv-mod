@@ -10,6 +10,9 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCL
 /tmp/smalltv-theme-text-tokens-tests
 c++ -std=c++11 -Wall -Wextra -Werror -g -pthread -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_data.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-data-tests
 /tmp/smalltv-theme-data-tests
+# The allocator that holds a data reply's parse to a ceiling.
+c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_budget_allocator.cpp -o /tmp/smalltv-budget-allocator-tests
+/tmp/smalltv-budget-allocator-tests
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_package.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-package-tests
 /tmp/smalltv-theme-package-tests
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_font.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-font-tests
