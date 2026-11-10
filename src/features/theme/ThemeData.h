@@ -175,6 +175,52 @@ inline bool collectFetch(DataFetch& result, DataAges& ages, std::vector<ThemeVal
   return true;
 }
 
+// When a source is fetched again. Each source keeps one byte, `tries`:
+// 0 = never started; otherwise 1 + the number of fetches in a row that
+// failed (it stops at 255, so 254 failures count and then no more). One byte
+// holds both facts, so it replaces the old one-bit "scheduled" flag and adds
+// no allocation.
+//
+// After a failure the wait is 1, 2, 4 and 8 minutes, then the source's own
+// interval, and it stays there until a fetch works. A success goes straight
+// back to the interval and clears the count. A wait is never longer than the
+// interval, so a theme with a short interval fetches no less often than
+// before. At most 4 retries come sooner than the interval: a failed fetch
+// blocks the loop for up to 3 s on the ESP8266.
+constexpr uint32_t RetryFirstWaitMs = 60000;
+constexpr uint8_t RetryShortWaits = 4;
+
+// A source is due when it was never started, or when `nowMs` has reached
+// `nextMs`. The test is the signed difference, so it survives the wrap of
+// millis(); waits are at most a day (the interval is 86,400 s at most), far
+// under the 24.8 days that the signed test can tell apart.
+inline bool fetchDue(uint8_t tries, uint32_t nextMs, uint32_t nowMs) {
+  return tries == 0 || static_cast<int32_t>(nowMs - nextMs) >= 0;
+}
+// A fetch of the source starts: it is scheduled from now on. The count of
+// failures stays.
+inline void fetchStarted(uint8_t& tries) {
+  if (tries == 0) tries = 1;
+}
+// Failures in a row so far.
+inline uint8_t fetchFailures(uint8_t tries) { return tries == 0 ? 0 : tries - 1; }
+// A fetch of the source ended: updates the count and returns the wait until the
+// next one, in milliseconds. `intervalS` is the source's interval in seconds
+// (the theme parser allows 10 to 86,400, so the product cannot overflow).
+inline uint32_t fetchWaitMs(uint32_t intervalS, bool success, uint8_t& tries) {
+  const uint32_t intervalMs = intervalS * 1000u;
+  if (success) {
+    tries = 1;
+    return intervalMs;
+  }
+  if (tries == 0) tries = 1;
+  if (tries < 255) ++tries;
+  const uint8_t failures = fetchFailures(tries);
+  if (failures > RetryShortWaits) return intervalMs;
+  const uint32_t retryMs = RetryFirstWaitMs << (failures - 1);
+  return retryMs < intervalMs ? retryMs : intervalMs;
+}
+
 // The worker owns a shared reference, so changing/unloading a theme never frees
 // its request underneath it. Only the display loop consumes completed values.
 class DataRequests {

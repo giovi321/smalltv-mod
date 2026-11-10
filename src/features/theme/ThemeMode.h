@@ -64,7 +64,8 @@ class ThemeMode : public DisplayMode {
   std::unique_ptr<smalltv::Package> package_;
   String loadedId_, error_;
   std::vector<uint32_t> dataNextMs_;
-  std::vector<bool> dataScheduled_;
+  // Per source: 0 = never started, else 1 + failures in a row (fetchWaitMs).
+  std::vector<uint8_t> dataTries_;
   std::vector<smalltv::ThemeValue> dataValues_;
   smalltv::DataRequests dataRequests_;
   smalltv::DataAges dataAges_;
