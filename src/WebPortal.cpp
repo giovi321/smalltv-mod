@@ -1,6 +1,7 @@
 #include "WebPortal.h"
 #include "Platform.h"
 #include "WebGuard.h"
+#include "UpdateBuffer.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include "webui.h"
@@ -582,8 +583,27 @@ static void handleNotify() {
 #endif
 
 // ---- OTA ------------------------------------------------------------------
+#if defined(SMALLTV_FAMILY_ESP8266)
+// The core's updater asks for one buffer in one piece and gives up if the
+// heap has none (UpdateBuffer.h). A refused start is remembered here, so the
+// final handler can say why instead of "OK" or a generic failure.
+static bool g_updateRefused = false;
+static uint32_t g_refusedFree = 0;
+static uint32_t g_refusedBlock = 0;
+#endif
+
 static void handleUpdateDone() {
   if (!requireAuth()) return;
+#if defined(SMALLTV_FAMILY_ESP8266)
+  if (g_updateRefused) {
+    g_updateRefused = false;
+    char msg[200];
+    updatebuf::refusalText(msg, sizeof(msg), g_refusedFree, g_refusedBlock);
+    server.sendHeader("Connection", "close");
+    server.send(500, "text/plain", msg);
+    return;
+  }
+#endif
   bool ok = !Update.hasError();
   server.sendHeader("Connection", "close");
   server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : platformUpdateError().c_str());
@@ -608,10 +628,27 @@ static void handleUpdateUpload() {
   if (up.status == UPLOAD_FILE_START) {
 #if defined(SMALLTV_FAMILY_ESP8266)
     WiFiUDP::stopAll();   // free UDP sockets so the OTA has max contiguous flash/heap
+    g_updateRefused = false;
+    // Read after stopAll(): these are the numbers Update.begin() will see.
+    uint32_t freeNow = ESP.getFreeHeap();
+    uint32_t blockNow = ESP.getMaxFreeBlockSize();
+    if (!updatebuf::uploadCanStart(freeNow, blockNow)) {
+      g_updateRefused = true;
+      g_refusedFree = freeNow;
+      g_refusedBlock = blockNow;
+      return;
+    }
 #endif
     uint32_t maxSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
     if (!Update.begin(maxSpace)) Update.printError(Serial);
-  } else if (up.status == UPLOAD_FILE_WRITE) {
+  }
+#if defined(SMALLTV_FAMILY_ESP8266)
+  else if (g_updateRefused) {
+    // Refused at the start: nothing was begun, so the chunks, the end and
+    // the abort have nothing to act on.
+  }
+#endif
+  else if (up.status == UPLOAD_FILE_WRITE) {
     if (Update.write(up.buf, up.currentSize) != up.currentSize) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_END) {
     if (!Update.end(true)) Update.printError(Serial);

@@ -180,6 +180,13 @@ jobs:
           c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc tests/test_webguard.cpp -o /tmp/smalltv-webguard-tests
           /tmp/smalltv-webguard-tests
 
+      # The manual firmware upload on the ESP8266: the core's update buffer
+      # must fit into the largest free block, or the upload is refused with a
+      # clear text. The rule, the page showing the text, and a check that
+      # WebPortal.cpp asks the rule before Update.begin().
+      - name: Test firmware upload memory check
+        run: sh tests/update/run.sh
+
       - name: Test crash record labels and boot decisions
         run: |
           c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc tests/test_crash_record.cpp -o /tmp/smalltv-crash-tests
