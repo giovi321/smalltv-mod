@@ -76,6 +76,17 @@ struct StatusRadar {
   uint32_t triedAgo = 0, okAgo = 0;
   const char* url = "";         // left out when empty
 };
+struct StatusRain {
+  uint8_t frames = 0;
+  bool error = false;
+  const char* stage = "";
+  int http = 0;                 // left out when 0
+  uint8_t cropK = 0;            // left out when 0
+  uint32_t generated = 0;       // left out when 0
+  bool hasTried = false, hasOk = false;
+  uint32_t triedAgo = 0, okAgo = 0;
+  const char* url = "";         // left out when empty
+};
 
 namespace statusout {
 // `,"key":` (the key is a PSTR literal with its comma and quotes), then the value.
@@ -177,6 +188,21 @@ template <class Out> void writeStatusRadar(Out& out, const StatusRadar& r) {
   member(out, PSTR(",\"seenAc\":"), r.seenAc);
   if (r.http) member(out, PSTR(",\"http\":"), r.http);
   if (r.tlsRx) member(out, PSTR(",\"tlsRx\":"), r.tlsRx);
+  if (r.hasTried) member(out, PSTR(",\"triedAgo\":"), r.triedAgo);
+  if (r.hasOk) member(out, PSTR(",\"okAgo\":"), r.okAgo);
+  if (r.url[0]) member(out, PSTR(",\"url\":"), r.url);
+  jsonout::raw(out, PSTR("}"));
+}
+
+// `,"rain":{...}`.
+template <class Out> void writeStatusRain(Out& out, const StatusRain& r) {
+  using statusout::member;
+  member(out, PSTR(",\"rain\":{\"frames\":"), r.frames);
+  member(out, PSTR(",\"error\":"), r.error);
+  member(out, PSTR(",\"stage\":"), r.stage);
+  if (r.http) member(out, PSTR(",\"http\":"), r.http);
+  if (r.cropK) member(out, PSTR(",\"cropK\":"), r.cropK);
+  if (r.generated) member(out, PSTR(",\"generated\":"), r.generated);
   if (r.hasTried) member(out, PSTR(",\"triedAgo\":"), r.triedAgo);
   if (r.hasOk) member(out, PSTR(",\"okAgo\":"), r.okAgo);
   if (r.url[0]) member(out, PSTR(",\"url\":"), r.url);

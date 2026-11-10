@@ -14,6 +14,9 @@
 #if WITH_RADAR
 #include "RadarClient.h"
 #endif
+#if WITH_RAIN
+#include "RainClient.h"
+#endif
 #if WITH_NOTIFY
 #include "NotifyMode.h"
 #endif
@@ -133,6 +136,7 @@ static void handleGetConfig() {
   feat["ticker"] = (bool)WITH_TICKER;
   feat["usage"]  = (bool)WITH_USAGE;
   feat["radar"]  = (bool)WITH_RADAR;
+  feat["rain"]   = (bool)WITH_RAIN;
   feat["ha"]     = (bool)WITH_HA;
   feat["theme"]  = (bool)WITH_THEME;
   // WireGuard is a per-chip decision rather than a per-feature one: it is
@@ -271,6 +275,19 @@ static void handleStatus() {
   if (radarLastOkMs())  { r.hasOk = true;    r.okAgo    = (millis() - radarLastOkMs()) / 1000; }
   r.url = radarLastUrl().c_str();
   smalltv::writeStatusRadar(out, r);
+#endif
+#if WITH_RAIN
+  smalltv::StatusRain rn;
+  rn.frames = rainCount();           // frames currently on disk
+  rn.error = rainError();
+  rn.stage = rainStageName();        // why the last poll produced what it did
+  rn.http = rainLastHttp();          // <0 = HTTPClient internal error
+  rn.cropK = rainCropK();            // centre crop of the last poll
+  rn.generated = rainGenerated();    // unix time the server generated the set
+  if (rainLastTryMs()) { rn.hasTried = true; rn.triedAgo = (millis() - rainLastTryMs()) / 1000; }
+  if (rainLastOkMs())  { rn.hasOk = true;    rn.okAgo    = (millis() - rainLastOkMs()) / 1000; }
+  rn.url = rainLastUrl().c_str();
+  smalltv::writeStatusRain(out, rn);
 #endif
   smalltv::writeStatusEnd(out);
   server.sendContent("", 0);   // the last chunk
@@ -443,6 +460,9 @@ static void handleRefresh() {
   if (!requireAuth()) return;
 #if WITH_TICKER
   stocksForceRefresh();
+#endif
+#if WITH_RAIN
+  rainForceRefresh();
 #endif
   server.send(200, "application/json", "{\"ok\":true}");
 }

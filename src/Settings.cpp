@@ -487,6 +487,46 @@ void RadarSettings::fromJson(JsonObjectConst o) {
 }
 
 // ===========================================================================
+// Rain radar slice
+// ===========================================================================
+void RainSettings::setDefaults() {
+  lat = DEFAULT_RAIN_LAT;
+  lon = DEFAULT_RAIN_LON;
+  useDevice = true;
+  rangeKm = DEFAULT_RAIN_RANGE_KM;
+  pollSec = DEFAULT_RAIN_POLL_SEC;
+  animSec = DEFAULT_RAIN_ANIM_SEC;
+  unitsMi = false;
+  showCities = true;
+}
+
+void RainSettings::toJson(JsonObject o) const {
+  o["lat"]        = lat;
+  o["lon"]        = lon;
+  o["useDevice"]  = useDevice;
+  o["rangeKm"]    = rangeKm;
+  o["pollSec"]    = pollSec;
+  o["animSec"]    = animSec;
+  o["unitsMi"]    = unitsMi;
+  o["showCities"] = showCities;
+}
+
+void RainSettings::fromJson(JsonObjectConst o) {
+  if (o["lat"].is<float>() || o["lat"].is<int>()) lat = o["lat"].as<float>();
+  if (o["lon"].is<float>() || o["lon"].is<int>()) lon = o["lon"].as<float>();
+  // Same rule as the plane radar: an unset home (0/0) follows the device
+  // location, and a partial save must not read the stored coordinates.
+  if (o["useDevice"].is<bool>()) useDevice = o["useDevice"];
+  else if ((!o["lat"].isNull() || !o["lon"].isNull()) && (lat != 0.0f || lon != 0.0f))
+    useDevice = false;
+  if (o["rangeKm"].is<int>())    rangeKm = constrain((int)o["rangeKm"], 10, 100);
+  if (o["pollSec"].is<int>())    pollSec = constrain((int)o["pollSec"], 60, 3600);
+  if (o["animSec"].is<int>())    animSec = constrain((int)o["animSec"], 3, 30);
+  if (o["unitsMi"].is<bool>())   unitsMi = o["unitsMi"];
+  if (o["showCities"].is<bool>()) showCities = o["showCities"];
+}
+
+// ===========================================================================
 // Top-level settings
 // ===========================================================================
 void Settings::setDefaults() {
@@ -504,7 +544,7 @@ void Settings::setDefaults() {
   mode = DEFAULT_MODE;
   themeId = "";
   carouselSec = DEFAULT_CAROUSEL_SEC;
-  carouselTicker = carouselUsage = carouselRadar = carouselHa = true;
+  carouselTicker = carouselUsage = carouselRadar = carouselHa = carouselRain = true;
   carouselTheme = false;   // opt in: needs an installed theme, else the slot shows an error
   httpTimeout = DEFAULT_HTTP_TIMEOUT;
 
@@ -516,6 +556,7 @@ void Settings::setDefaults() {
   ticker.setDefaults();
   usage.setDefaults();
   radar.setDefaults();
+  rain.setDefaults();
   ha.setDefaults();
   clock.setDefaults();
   display.setDefaults();
@@ -593,6 +634,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   // Mode + shared HTTP/display
   root["themeId"] = s.themeId;
   root["mode"]              = (s.mode == MODE_THEME)    ? "theme"
+                            : (s.mode == MODE_RAIN)     ? "rain"
                             : (s.mode == MODE_RADAR)    ? "radar"
                             : (s.mode == MODE_USAGE)    ? "usage"
                             : (s.mode == MODE_HA)       ? "ha"
@@ -603,6 +645,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   root["carouselRadar"]     = s.carouselRadar;
   root["carouselHa"]        = s.carouselHa;
   root["carouselTheme"]     = s.carouselTheme;
+  root["carouselRain"]      = s.carouselRain;
   root["httpTimeout"]       = s.httpTimeout;
   root["brightness"]        = s.brightness;
   root["autoBrightness"]    = s.autoBrightness;
@@ -613,6 +656,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.ticker.toJson(root["ticker"].to<JsonObject>());
   s.usage.toJson(root["usage"].to<JsonObject>());
   s.radar.toJson(root["radar"].to<JsonObject>());
+  s.rain.toJson(root["rain"].to<JsonObject>());
   s.ha.toJson(root["ha"].to<JsonObject>(), includeSecrets);
   s.clock.toJson(root["clock"].to<JsonObject>());
   s.display.toJson(root["display"].to<JsonObject>());
@@ -668,6 +712,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["mode"].is<const char*>()) {
     String m = root["mode"].as<String>();
     s.mode = m.equalsIgnoreCase("theme")    ? MODE_THEME
+           : m.equalsIgnoreCase("rain")     ? MODE_RAIN
            : m.equalsIgnoreCase("radar")    ? MODE_RADAR
            : m.equalsIgnoreCase("usage")    ? MODE_USAGE
            : m.equalsIgnoreCase("ha")       ? MODE_HA
@@ -690,6 +735,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["carouselRadar"].is<bool>())   s.carouselRadar = root["carouselRadar"];
   if (root["carouselHa"].is<bool>())      s.carouselHa = root["carouselHa"];
   if (root["carouselTheme"].is<bool>())   s.carouselTheme = root["carouselTheme"];
+  if (root["carouselRain"].is<bool>())    s.carouselRain = root["carouselRain"];
 
   if (root["httpTimeout"].is<int>())        s.httpTimeout = constrain((int)root["httpTimeout"], 1000, 20000);
   if (root["brightness"].is<int>())         s.brightness = constrain((int)root["brightness"], 0, 100);
@@ -706,6 +752,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   s.usage.fromJson(u);
   // Radar has no legacy flat layout; only apply when its nested object is present.
   if (root["radar"].is<JsonObjectConst>()) s.radar.fromJson(root["radar"].as<JsonObjectConst>());
+  if (root["rain"].is<JsonObjectConst>()) s.rain.fromJson(root["rain"].as<JsonObjectConst>());
   // HA has no legacy flat layout either; only apply when its object is present.
   if (root["ha"].is<JsonObjectConst>()) s.ha.fromJson(root["ha"].as<JsonObjectConst>());
   if (root["clock"].is<JsonObjectConst>()) s.clock.fromJson(root["clock"].as<JsonObjectConst>());

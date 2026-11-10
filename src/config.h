@@ -13,11 +13,11 @@
 // Firmware identity
 // ---------------------------------------------------------------------------
 #define FW_NAME     "smalltv-mod"
-#define FW_VERSION  "3.5.1"
+#define FW_VERSION  "3.6.0"
 
 // Project / update references (shown in the web UI; used by the GitHub self-update)
-#define REPO_URL      "https://github.com/giovi321/smalltv-mod"
-#define REPO_OWNER    "giovi321"
+#define REPO_URL      "https://github.com/lanlanndn/smalltv-mod"
+#define REPO_OWNER    "lanlanndn"
 #define REPO_NAME     "smalltv-mod"
 // Release asset the GitHub self-updater pulls, and the short variant name shown
 // in the web UI. One app image per target, plus a second one for the two boards
@@ -142,6 +142,7 @@
 #define MODE_NOTIFY    4             // transient overlay: armed over HTTP, never persisted
 #define MODE_THEME     6             // declarative installed clock faces
 #define MODE_HA        5             // Home Assistant screens pushed over MQTT
+#define MODE_RAIN      7             // live rain radar (RainViewer)
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
@@ -268,6 +269,9 @@
 #ifndef WITH_HA
 #define WITH_HA 1
 #endif
+#ifndef WITH_RAIN
+#define WITH_RAIN 1
+#endif
 
 // Claude usage mode: once data stops arriving for this long (PC asleep, daemon
 // stopped, network down) the screen switches from the stats to the idle mascot
@@ -375,6 +379,35 @@
 #define DEFAULT_RADAR_LON       0.0f
 #define DEFAULT_RADAR_RANGE_KM  20
 #define DEFAULT_RADAR_POLL_SEC  10     // >=3 keeps us under the 1 req/s limit
+
+// ---------------------------------------------------------------------------
+// Rain radar (MODE_RAIN)
+//   RainViewer public API (v2): past 2h of radar frames, 10-minute steps, no
+//   API key. Fetched over plain HTTP — tilecache answers unencrypted, so the
+//   ESP8266 skips the BearSSL handshake entirely. The radar data is served
+//   at zoom 7 only (z>=8 returns map tiles, verified); the nowcast (future)
+//   frames were discontinued on 2026-01-01 and the code tolerates an empty
+//   array. Frames arrive as 256px RGBA PNGs with filter "None" on every row,
+//   decoded by the custom decoder in features/rain/RainPng.cpp.
+// ---------------------------------------------------------------------------
+#define RAIN_API_HOST      "api.rainviewer.com"
+#define RAIN_API_PATH      "/public/weather-maps.json"
+#define RAIN_USE_HTTPS     0               // 1 = https:// (RainViewer may force it one day)
+#define RAIN_ZOOM          7               // the only zoom serving radar data
+#define RAIN_TILE_SIZE     256
+#define RAIN_COLOR_SCHEME  2               // Universal Blue (blue -> purple ramp)
+#define RAIN_USER_AGENT    "Mozilla/5.0 (SmallTV)"
+
+// Max frames kept in LittleFS (2h of past = 13; +3 nowcast slots if they return).
+#define MAX_RAIN_FRAMES    16
+#define RAIN_DIR           "/rain"
+
+// Defaults (lat/lon 0,0 is the "not set yet" sentinel -> shows a prompt).
+#define DEFAULT_RAIN_LAT       0.0f
+#define DEFAULT_RAIN_LON       0.0f
+#define DEFAULT_RAIN_RANGE_KM  50
+#define DEFAULT_RAIN_POLL_SEC  900
+#define DEFAULT_RAIN_ANIM_SEC  8
 
 // ---------------------------------------------------------------------------
 // Defaults (used on first boot / factory reset)

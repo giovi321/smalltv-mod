@@ -189,6 +189,22 @@ struct RadarSettings {
   void fromJson(JsonObjectConst o);
 };
 
+// ---- Rain radar feature slice ----------------------------------------------
+struct RainSettings {
+  float    lat;           // home latitude  (0,0 = not set yet)
+  float    lon;           // home longitude
+  bool     useDevice;     // true: use the device location (clock settings)
+  uint16_t rangeKm;       // outer ring radius
+  uint16_t pollSec;       // refresh period (frame set download)
+  uint16_t animSec;       // per-frame on-screen time in the loop
+  bool     unitsMi;       // show distances in miles instead of km
+  bool     showCities;    // nearby cities as reference dots
+
+  void setDefaults();
+  void toJson(JsonObject o) const;
+  void fromJson(JsonObjectConst o);
+};
+
 // ---- Physical button slice (device-wide) -----------------------------------
 // Only acted on where BTN_PIN exists, but the fields persist everywhere so a
 // config export/import round-trips across boards. sensitivity is the touch press
@@ -220,7 +236,7 @@ struct Settings {
 
   // --- Carousel (mode == MODE_CAROUSEL): dwell + which features rotate ---
   uint16_t carouselSec;
-  bool carouselTicker, carouselUsage, carouselRadar, carouselHa, carouselTheme;
+  bool carouselTicker, carouselUsage, carouselRadar, carouselHa, carouselTheme, carouselRain;
 
   // --- Shared HTTP / display ---
   uint16_t httpTimeout; // ms
@@ -233,6 +249,7 @@ struct Settings {
   TickerSettings  ticker;
   UsageSettings   usage;
   RadarSettings   radar;
+  RainSettings    rain;
   HaSettings      ha;        // MQTT broker for HA screens
   ClockSettings   clock;
   DisplaySettings display;   // panel colour correction
@@ -246,6 +263,8 @@ struct Settings {
 // The radar's home: the device location unless the radar has its own.
 inline float radarLat(const Settings& s) { return s.radar.useDevice ? s.clock.lat : s.radar.lat; }
 inline float radarLon(const Settings& s) { return s.radar.useDevice ? s.clock.lon : s.radar.lon; }
+inline float rainLat(const Settings& s) { return s.rain.useDevice ? s.clock.lat : s.rain.lat; }
+inline float rainLon(const Settings& s) { return s.rain.useDevice ? s.clock.lon : s.rain.lon; }
 
 // Persistence
 bool settingsBegin();                       // mount LittleFS
