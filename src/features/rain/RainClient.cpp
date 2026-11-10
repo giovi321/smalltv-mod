@@ -223,8 +223,10 @@ static bool fetchFrame(const Settings& s, const String& host, uint8_t i) {
   Stream& in = http.getStream();
   uint8_t buf[512];
   uint32_t total = 0;
+  // readBytes: same signature on the ESP8266 and ESP32 cores (Stream::read
+  // differs between them).
   int n;
-  while ((n = in.read(buf, sizeof buf)) > 0) {
+  while ((n = (int)in.readBytes(buf, sizeof buf)) > 0) {
     tmp.write(buf, (size_t)n);
     total += (uint32_t)n;
     if (total > 262144) break;   // sanity cap 256 KB
