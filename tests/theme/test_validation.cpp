@@ -309,7 +309,8 @@ int main() {
     assert(parseTheme(json,theme,error));
     assert(theme.show.size()==2);
     const ShowRule& a=theme.show[0];
-    assert(a.layer==0&&a.source=="weather.temp"&&!a.missing&&a.count==2);
+    // weather is data source 0 and temp its field 0.
+    assert(a.layer==0&&a.source==0&&a.field==0&&!a.missing&&a.count==2);
     assert(a.low[0]==-5&&a.high[0]==4.5f&&a.low[1]==20);
     assert(std::isinf(a.high[1])&&a.high[1]>0);
     const ShowRule& b=theme.show[1];
@@ -332,7 +333,19 @@ int main() {
     // A data source's age is accepted as a source (spec 2): hide a layer once its data is stale.
     showDocument(d);JsonDocument ageDoc;assert(!deserializeJson(ageDoc,"[{\"source\":\"weather.age\",\"in\":[[null,30]],\"missing\":true}]"));
     d["layers"][0]["show"]=ageDoc.as<JsonVariantConst>();serializeJson(d,json);
-    assert(parseTheme(json,theme,error)&&theme.show.size()==1&&theme.show[0].source=="weather.age");
+    assert(parseTheme(json,theme,error)&&theme.show.size()==1&&theme.show[0].source==0&&theme.show[0].field==ShowAgeField);
+    // Two sources: a rule keeps the index of the one it names, and of the field in it.
+    showDocument(d);
+    JsonObject second=d["data"].add<JsonObject>();
+    second["id"]="rain";second["url"]="https://example.test/rain.json";second["interval"]=60;second["insecureTls"]=true;
+    second["fields"].add<JsonObject>()["id"]="mm";second["fields"][0]["path"]="mm";
+    JsonObject extra=second["fields"].add<JsonObject>();extra["id"]="prob";extra["path"]="prob";
+    JsonDocument twoDoc;assert(!deserializeJson(twoDoc,"[{\"source\":\"rain.prob\",\"in\":[[0,1]]},{\"source\":\"rain.age\",\"in\":[[0,1]]},{\"source\":\"weather.temp\",\"in\":[[0,1]]}]"));
+    d["layers"][0]["show"]=twoDoc.as<JsonVariantConst>();serializeJson(d,json);
+    assert(parseTheme(json,theme,error)&&theme.show.size()==3);
+    assert(theme.show[0].source==1&&theme.show[0].field==1);
+    assert(theme.show[1].source==1&&theme.show[1].field==ShowAgeField);
+    assert(theme.show[2].source==0&&theme.show[2].field==0);
     // The biggest a float holds is still accepted.
     showDocument(d);JsonDocument bigDoc;assert(!deserializeJson(bigDoc,"[{\"source\":\"weather.temp\",\"in\":[[-3.4e38,3.4e38]]}]"));
     d["layers"][0]["show"]=bigDoc.as<JsonVariantConst>();serializeJson(d,json);

@@ -193,17 +193,27 @@ static const char deviceNames[5][12] PROGMEM = {"focusToday", "focusGoal", "stre
 // halves must be valid IDs, and the source and field must actually appear in
 // this theme's `data` block. Shared between text-template validation
 // (validText) and binding source validation (declaredSource).
-static bool validFieldToken(const std::string& token, const Theme& theme) {
+// When `sourceIndex` and `fieldIndex` are given, they receive the position of
+// the source in theme.data and of the field in it (ShowAgeField for `age`).
+static bool validFieldToken(const std::string& token, const Theme& theme, uint8_t* sourceIndex = nullptr, uint8_t* fieldIndex = nullptr) {
   size_t dot = token.find('.');
   if (dot == std::string::npos || dot == 0 || dot + 1 >= token.size()) return false;
   std::string source = token.substr(0, dot), field = token.substr(dot + 1);
   if (!validId(source) || !validId(field)) return false;
-  for (const auto& data : theme.data) {
+  for (size_t s = 0; s < theme.data.size(); ++s) {
+    const auto& data = theme.data[s];
     if (data.id != source) continue;
+    if (sourceIndex) *sourceIndex = static_cast<uint8_t>(s);
     // Spec 2: every source also has an "age" field, the minutes since its last
     // successful fetch, which the firmware supplies (DataAges in ThemeData.h).
-    if (theme.spec >= 2 && field == "age") return true;
-    for (const auto& f : data.fields) if (f.id == field) return true;
+    if (theme.spec >= 2 && field == "age") {
+      if (fieldIndex) *fieldIndex = ShowAgeField;
+      return true;
+    }
+    for (size_t f = 0; f < data.fields.size(); ++f) if (data.fields[f].id == field) {
+      if (fieldIndex) *fieldIndex = static_cast<uint8_t>(f);
+      return true;
+    }
   }
   return false;
 }
@@ -896,11 +906,21 @@ static const char showRangesMsg[] PROGMEM = "expected 1 to 4 ranges";
 static const char showPairMsg[] PROGMEM = "expected [low, high]";
 static const char showNumbersMsg[] PROGMEM = "expected numbers or null";
 static const char showSizeMsg[] PROGMEM = "expected numbers from -3.4e38 to 3.4e38, or null";
-static const char showTooManyMsg[] PROGMEM = "expected at most 24 rules in a theme";
+static const char showTooManyMsg[] PROGMEM = "expected at most " SMALLTV_STRINGIFY(THEME_MAX_SHOW_RULES) " rules in a theme";
 static const char showOneNullMsg[] PROGMEM = "at most one end may be null";
 static const char showOrderMsg[] PROGMEM = "low must not be above high";
 static const char showUndeclaredMsg[] PROGMEM = "expected a declared data field";
 static const char showKeys[] PROGMEM = "|source|in|missing|";
+// True when `key` is "<source id>.<field id>" of a show rule's source and
+// field (ShowAgeField: "<source id>.age"), compared in place so that no key
+// string is built for each rule of each frame.
+static bool isShowKey(const std::string& key, const ThemeDataSource& source, uint8_t field) {
+  const std::string* name = field == ShowAgeField ? nullptr : &source.fields[field].id;
+  const size_t length = name ? name->size() : 3;
+  const size_t dot = source.id.size();
+  if (key.size() != dot + 1 + length || key.compare(0, dot, source.id) != 0 || key[dot] != '.') return false;
+  return (name ? key.compare(dot + 1, length, *name) : key.compare(dot + 1, length, "age")) == 0;
+}
 // Parses the last parsed layer's `show` list into t.show (see ShowRule): 1 to
 // 4 rules, each a declared data field and 1 to 4 inclusive [low, high]
 // ranges, where null is an open end; spec 2 only, and at most MaxShowRules
@@ -918,9 +938,10 @@ __attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t
     if (item.isNull()) return fields.fail("", "expected an object");
     ShowRule& rule = t.show.emplace_back();
     rule.layer = static_cast<uint8_t>(t.layers.size() - 1);
-    if (!fields.keys(showKeys) || !fields.text("source", rule.source, 64) || !fields.boolean("missing", rule.missing, false)) return false;
+    std::string source;
+    if (!fields.keys(showKeys) || !fields.text("source", source, 64) || !fields.boolean("missing", rule.missing, false)) return false;
     // Declared data fields only: the built-in time.*/device.* sources of spec 2 are not offered to `show`.
-    if (!validFieldToken(rule.source, t)) return fields.fail("source", fromFlash(showUndeclaredMsg));
+    if (!validFieldToken(source, t, &rule.source, &rule.field)) return fields.fail("source", fromFlash(showUndeclaredMsg));
     JsonArrayConst ranges = item["in"].as<JsonArrayConst>();
     if (ranges.isNull() || ranges.size() == 0 || ranges.size() > 4) return fields.fail("in", fromFlash(showRangesMsg));
     rule.count = static_cast<uint8_t>(ranges.size());   // 1 to 4, checked above
@@ -1135,7 +1156,7 @@ __attribute__((noinline)) static bool readLayer(ManifestSource& json, const Mani
 // MaxTranslationBytes can hold at the least, and parseTextValue() still checks
 // every text against it, so a manifest over the limit is refused there.
 // The same pass counts the `show` rules, for the same reason: the first rule
-// would open a block of 12 (768 bytes). That count is capped at MaxShowRules,
+// would open a whole block (768 bytes). That count is capped at MaxShowRules,
 // which parseShow() enforces.
 __attribute__((noinline)) static bool reserveCounted(ManifestSource& json, const ManifestLayout& scan, Theme& t, std::string& error) {
   JsonDocument filter;
@@ -1581,7 +1602,7 @@ void Engine::resolveLayer(size_t index) {
   for (const auto& rule : theme_.show) {
     if (rule.layer != index || !resolved.visible) continue;
     const std::string* source = nullptr;
-    for (const auto& item : values_) if (item.key == rule.source) {
+    for (const auto& item : values_) if (isShowKey(item.key, theme_.data[rule.source], rule.field)) {
       source = &item.value;
       break;
     }

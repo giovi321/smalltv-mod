@@ -115,20 +115,30 @@ struct ResolvedLayer {
 // value is missing or not a number and `missing` is true. Rules live in one
 // list on the Theme, not in each Layer, so themes without them pay nothing per
 // layer. The ranges are in the rule (at most 4, as floats like the device's
-// JSON numbers), so a rule is one element of the list and nothing else is
-// allocated for it but a source name longer than the string's own buffer.
+// JSON numbers), and the source is two small indexes into the theme's declared
+// data, not a string: a rule is 40 bytes, one element of the list, and
+// allocates nothing else.
 struct ShowRule {
-  std::string source;
   float low[4] = {};    // range i is low[i] to high[i], both ends included;
   float high[4] = {};   // -INFINITY or INFINITY is an open end
   uint8_t layer = 0;
   uint8_t count = 0;    // 1 to 4 ranges
+  uint8_t source = 0;   // index into Theme::data
+  uint8_t field = 0;    // index into that source's fields, or ShowAgeField
   bool missing = false;
 };
-// The most `show` rules all layers of one theme may have together. A block
-// list holds them, reserved at the number the manifest declares (so a theme
-// with one rule does not open a whole block), and a rule is about 60 bytes.
-constexpr size_t MaxShowRules = 24;
+// The `field` of a rule that reads `<source>.age` (spec 2).
+constexpr uint8_t ShowAgeField = 255;
+// The most `show` rules all layers of one theme may have together. The rules
+// are reserved at the number the manifest declares (so a theme with one rule
+// does not open a whole block of them). A personal build with bigger themes
+// may raise it: -DTHEME_MAX_SHOW_RULES=<n>, 40 bytes of RAM a rule.
+#ifndef THEME_MAX_SHOW_RULES
+#define THEME_MAX_SHOW_RULES 42
+#endif
+#define SMALLTV_STRINGIFY_(x) #x
+#define SMALLTV_STRINGIFY(x) SMALLTV_STRINGIFY_(x)
+constexpr size_t MaxShowRules = THEME_MAX_SHOW_RULES;
 bool parseFiniteNumber(const std::string& value, double& number);
 int resolveNumericBinding(const NumericBinding& binding, double value, int lo, int hi);
 uint16_t resolveColorBinding(const ColorBinding& binding, double value);

@@ -171,6 +171,11 @@ SECOND = {'source': 'time.second', 'input': [0, 60], 'output': [0, 360]}
 SOURCE = {'id': 'w', 'url': 'http://a/b', 'interval': 10, 'fields': [{'id': 'x', 'path': 'x'}]}
 SHOW = {'source': 'w.x', 'in': [[0, 10]]}
 
+
+def show_layers(rules):
+    """Text layers with 4 `show` rules each, the last with what is left of `rules`."""
+    return [dict(TEXT, id=f'l{i}', show=[SHOW] * min(4, rules - 4 * i)) for i in range(-(-rules // 4))]
+
 # Both validators must give the same verdict. Keep cases away from the edge of
 # the per-language translation budget: stheme.py counts the device's 28 bytes
 # per entry, the host build of the firmware validator 40.
@@ -222,8 +227,8 @@ MANIFESTS = {
     'show too big': manifest(data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, **{'in': [[0, 1e39]]})])]),
     'show 5 rules': manifest(data=[SOURCE], layers=[dict(TEXT, show=[SHOW] * 5)]),
     'show no ranges': manifest(data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, **{'in': []})])]),
-    'show 24 rules': manifest(data=[SOURCE], layers=[dict(TEXT, id=f'l{i}', show=[SHOW] * 4) for i in range(6)]),
-    'show 28 rules': manifest(data=[SOURCE], layers=[dict(TEXT, id=f'l{i}', show=[SHOW] * 4) for i in range(7)]),
+    'show 42 rules': manifest(data=[SOURCE], layers=show_layers(42)),
+    'show 43 rules': manifest(data=[SOURCE], layers=show_layers(43)),
     'stops not increasing': layer(bind={'color': {'source': 'time.second',
                                                   'stops': [{'at': 5, 'value': '#000000'}, {'at': 5, 'value': '#ffffff'}]}}),
 }
@@ -272,13 +277,12 @@ class ShowTests(unittest.TestCase):
                          ['layers[0].show[0].in[0]: expected numbers from -3.4e38 to 3.4e38, or null'])
         self.assertEqual(stheme.validate(self.theme([dict(SHOW, **{'in': [[3, 2]]})])),
                          ['layers[0].show[0].in[0]: low must not be above high'])
-        seven = manifest(data=[SOURCE], layers=[dict(TEXT, id=f'l{i}', show=[SHOW] * 4) for i in range(7)])
-        self.assertEqual(stheme.validate(seven), ['layers[6].show: expected at most 24 rules in a theme'])
-        # One rule over is refused, 24 are not.
-        full = [dict(TEXT, id=f'l{i}', show=[SHOW] * 4) for i in range(6)]
-        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=full)), [])
-        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=full + [dict(TEXT, id='x', show=[SHOW])])),
-                         ['layers[6].show: expected at most 24 rules in a theme'])
+        # 42 rules are accepted; one more is refused, at the layer that crosses the cap.
+        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(42))), [])
+        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(43))),
+                         ['layers[10].show: expected at most 42 rules in a theme'])
+        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(44))),
+                         ['layers[10].show: expected at most 42 rules in a theme'])
 
     def test_auto_spec_becomes_2(self):
         self.assertEqual(stheme.needed_spec(self.theme([SHOW])), 2)

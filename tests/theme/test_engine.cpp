@@ -281,8 +281,8 @@ int main() {
     assert(boxRepainted && two.states()[1].resolved.visible);
   }
 
-  // The most a theme can hold: MaxShowRules (24) rules, here 6 layers with 4
-  // rules of 4 ranges each (96 ranges). Layer i, rule r, range k covers [40i + 10k + r, 40i + 10k + r + 6].
+  // The most a theme can hold: MaxShowRules rules, here layers with 4
+  // rules of 4 ranges each. Layer i, rule r, range k covers [40i + 10k + r, 40i + 10k + r + 6].
   // Rules 0 and 2 read w.code, rules 1 and 3 read w.temp. A layer shows while
   // all four rules hold, so a range that ended up with another rule, layer or
   // other ends would change what some value shows. Swept value by value
@@ -295,8 +295,26 @@ int main() {
       }
       return false;
     };
-    const int layerCount = 6;
-    assert(layerCount * 4 == int(MaxShowRules));   // the sweep fills the cap exactly
+    // The sweep takes as many layers of 4 rules as the cap holds; the rest of the
+    // cap (MaxShowRules % 4 rules) is one more layer, in the cap tests below. The
+    // cap may be set by a build flag, so none of this assumes a value.
+    // The default is 42 (the docs and the skill say so); a build that sets
+    // THEME_MAX_SHOW_RULES says what to expect with -DEXPECTED_MAX_SHOW_RULES.
+#ifndef EXPECTED_MAX_SHOW_RULES
+#define EXPECTED_MAX_SHOW_RULES 42
+#endif
+    assert(MaxShowRules == size_t(EXPECTED_MAX_SHOW_RULES));
+    assert(MaxShowRules / 4 + 2 < MaxLayers);
+    const int layerCount = int(MaxShowRules / 4);
+    const int restRules = int(MaxShowRules % 4);
+    auto restLayer = [](int rules, const char* id) {
+      std::string show;
+      for (int r = 0; r < rules; ++r) show += std::string(r ? "," : "") + "{\"source\":\"w.code\",\"in\":[[0,1]]}";
+      return std::string(",{\"id\":\"") + id + "\",\"type\":\"shape\",\"shape\":\"rectangle\",\"x\":1,\"y\":2,\"width\":5,\"height\":5,\"fill\":\"#ffffff\",\"show\":[" + show + "]}";
+    };
+    auto overCap = [&](int layers) {
+      return "layers[" + std::to_string(layers) + "].show: expected at most " + std::to_string(MaxShowRules) + " rules in a theme";
+    };
     auto layersJson = [&](int count) {
     std::string layers;
     for (int i = 0; i < count; ++i) {
@@ -318,14 +336,15 @@ int main() {
       "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},\"data\":[{\"id\":\"w\",\"url\":\"http://example.test/w.json\","
       "\"interval\":60,\"fields\":[{\"id\":\"code\",\"path\":\"code\"},{\"id\":\"temp\",\"path\":\"temp\"}]}],\"layers\":[";
     Theme sweep;
-    assert(parseTheme(head + layersJson(layerCount) + "]}", sweep, error) && sweep.layers.size() == 6 && sweep.show.size() == MaxShowRules);
-    // One layer more is over the cap, and the error names the layer that crosses it.
-    assert(!parseTheme(head + layersJson(layerCount + 1) + "]}", sweep, error) && error == "layers[6].show: expected at most 24 rules in a theme");
-    // Even one rule over the cap is refused: a 7th layer with a single rule.
-    assert(!parseTheme(head + layersJson(layerCount) + ",{\"id\":\"extra\",\"type\":\"shape\",\"shape\":\"rectangle\",\"x\":1,\"y\":2,"
-      "\"width\":5,\"height\":5,\"fill\":\"#ffffff\",\"show\":[{\"source\":\"w.code\",\"in\":[[0,1]]}]}]}", sweep, error) &&
-      error == "layers[6].show: expected at most 24 rules in a theme");
-    // (The refused parse above left `sweep` half filled; parse the good one again.)
+    // Exactly the cap is accepted: full layers, and a last one with what is left of it.
+    const std::string atCap = layersJson(layerCount) + (restRules ? restLayer(restRules, "rest") : "");
+    const int capLayers = layerCount + (restRules ? 1 : 0);
+    assert(parseTheme(head + atCap + "]}", sweep, error) && sweep.layers.size() == size_t(capLayers) && sweep.show.size() == MaxShowRules);
+    // One rule over is refused, and the error names the layer that crosses the cap.
+    assert(!parseTheme(head + atCap + restLayer(1, "more") + "]}", sweep, error) && error == overCap(capLayers));
+    // So is one more layer of 4.
+    assert(!parseTheme(head + layersJson(layerCount + 1) + "]}", sweep, error) && error == overCap(layerCount));
+    // (The refused parse above left `sweep` half filled; parse the sweep's theme.)
     assert(parseTheme(head + layersJson(layerCount) + "]}", sweep, error));
     Engine e;
     e.setTheme(sweep, 0);
@@ -346,8 +365,8 @@ int main() {
       }
     }
     // A sweep that never reaches the ranges would pass anything. A layer shows for 4
-    // values in each of its 4 ranges, under both shifts: 6 x 4 x 4 x 2.
-    assert(shown == 192);
+    // values in each of its 4 ranges, under both shifts: layers x 4 x 4 x 2.
+    assert(shown == layerCount * 32);
     // The bounds are floats, as on the device: the value 9.49 holds for the single-value
     // range [9.49, 9.49], and one step either side does not.
     std::string precise = spec2(dataJson);
@@ -364,6 +383,25 @@ int main() {
       return p.states()[0].resolved.visible;
     };
     assert(shows("9.49") && !shows("9.48") && !shows("9.5"));
+    // A rule reads its own key and no other: not a longer or shorter one, not another source's.
+    for (const char* other : {"weather.temperature", "weather.tem", "weathxr.temp", "weather_temp", "weather.age"}) {
+      p.setValues({{other, "9.49"}});
+      p.update(at++, nullptr);
+      assert(!p.states()[0].resolved.visible);
+    }
+    // `<source>.age` is read through its own index (spec 2): hide the layer once the data is stale.
+    std::string aged = spec2(dataJson);
+    aged.replace(aged.find(tail), tail.size(), "\"color\":\"#ffffff\",\"show\":[{\"source\":\"weather.age\",\"in\":[[null,30]]}]}]}");
+    assert(parseTheme(aged, sweep, error));
+    Engine a;
+    a.setTheme(sweep, 0);
+    a.update(0, nullptr);
+    auto freshWhen = [&](const char* age) {
+      a.setValues({{"weather.age", age}, {"weather.temp", "1"}});
+      a.update(at++, nullptr);
+      return a.states()[0].resolved.visible;
+    };
+    assert(freshWhen("0") && freshWhen("30") && !freshWhen("31") && !freshWhen("500"));
   }
 
   const char* bindingJson = R"({"spec":1,"theme":{"id":"binding","name":"Binding","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"sensor","url":"http://example.test/value.json","interval":60,"fields":[{"id":"value","path":"value"}]}],"layers":[{"id":"bar","type":"shape","shape":"rectangle","x":20,"y":120,"width":10,"height":18,"cornerRadius":8,"fill":"#00ff00","bind":{"width":{"source":"sensor.value","input":[0,50],"output":[0,100]},"fill":{"source":"sensor.value","stops":[{"at":0,"value":"#00ff00"},{"at":50,"value":"#ffff00"}]}}}]})";
