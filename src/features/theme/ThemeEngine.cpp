@@ -762,7 +762,7 @@ static bool applicable(const Layer& layer, BoundProperty property, bool color) {
   if (property == BoundProperty::X || property == BoundProperty::Y) return true;
   if (property == BoundProperty::ScrollWidth || property == BoundProperty::ScrollSpeed)
     return layer.type == LayerType::Text && layer.scroll.enabled;
-  if (layer.type == LayerType::Text) return property == BoundProperty::Size;
+  if (layer.type == LayerType::Text) return property == BoundProperty::Size && !layer.font;
   if (layer.type != LayerType::Shape) return false;
   if (property == BoundProperty::StrokeWidth) return true;
   if (layer.shape == Shape::Rectangle)
@@ -781,6 +781,9 @@ static const char timeNames[9][12] PROGMEM = {"second", "minute", "hour", "hour1
 static const char needSpec2[] PROGMEM = "time.* and device.* sources need \"spec\": 2";
 static const char unknownBuiltIn[] PROGMEM = "unknown time.* or device.* name";
 static const char reservedId[] PROGMEM = "time and device are the names of built-in sources";
+static const char fontNeedsSpec2[] PROGMEM = "needs \"spec\": 2";
+static const char sizeWithFont[] PROGMEM = "not allowed with a font, which sets the size";
+static const char tooManyFonts[] PROGMEM = "expected at most 4 fonts per theme";
 static std::string fromFlash(const char* text) {
   std::string out(strlen_P(text), '\0');
   memcpy_P(&out[0], text, out.size());
@@ -1206,8 +1209,25 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
   if (!f.text("type", type, 16) || !f.number("x", -240, 479, l.x) || !f.number("y", -240, 479, l.y)) return false;
   if (type == "text") {
     l.type = LayerType::Text;
-    if (!f.keys("|id|type|x|y|anchor|value|size|color|scroll|bind|") || !parseTextValue(o, t, f, l)) return false;
-    if (!f.number("size", 8, 96, l.size) || !f.color("color", l.color)) return false;
+    if (!f.keys("|id|type|x|y|anchor|value|size|font|color|scroll|bind|") || !parseTextValue(o, t, f, l)) return false;
+    if (f.has("font")) {
+      // A package font (#31): fonts/<name>.stf, whose line height is the
+      // layer's size, so `size` is not given.
+      std::string name;
+      if (t.spec < 2) return f.fail("font", fromFlash(fontNeedsSpec2));
+      if (!f.text("font", name, 32)) return false;
+      if (!validId(name)) return f.fail("font", "use ASCII letters, digits, '-' or '_'");
+      if (f.has("size")) return f.fail("size", fromFlash(sizeWithFont));
+      size_t i = 0;
+      while (i < t.fonts.size() && t.fonts[i].name != name) ++i;
+      if (i == MaxFonts) return f.fail("font", fromFlash(tooManyFonts));
+      if (i == t.fonts.size()) {
+        t.fonts.emplace_back();
+        t.fonts.back().name = std::move(name);
+      }
+      l.font = static_cast<uint8_t>(i + 1);
+    } else if (!f.number("size", 8, 96, l.size)) return false;
+    if (!f.color("color", l.color)) return false;
     std::string anchor = "top-left";
     if (!f.text("anchor", anchor, 20, false)) return false;
     // The 9 anchor names are a 3x3 grid in row-major order (left/center/right
@@ -1595,8 +1615,12 @@ static bool sameColors(const ResolvedLayer& a, const ResolvedLayer& b) {
 // The built-in bitmap font's cell width scales with `size`: each glyph is
 // drawn in a 5-of-6-pixel-wide cell (the 6th pixel is inter-character
 // spacing), sized in eighths of `size` so the whole font scales uniformly.
-static int textPixelWidth(int size, size_t length) {
-  return static_cast<int>(length) * ((size * 6 + 7) / 8);
+// A package font's text is as wide as its glyphs' advances.
+static int textPixelWidth(const Theme& theme, const Layer& l, int size, const std::string& text) {
+  if (!l.font) return static_cast<int>(text.size()) * ((size * 6 + 7) / 8);
+  int width = 0;
+  for (unsigned char c : text) width += theme.fonts[l.font - 1].advance(c);
+  return width;
 }
 // ---- Rotation shapes (spec 2, #31) ----
 // Angles are kept in sixteenths of a degree, 0 at 12 o'clock, growing
@@ -1731,9 +1755,9 @@ static Rect arcBounds(const ResolvedLayer& r) {
 // this layer's footprint. For scrolling text this is the fixed viewport, not
 // the full (possibly much wider) expanded text -- render() maps viewport-
 // local pixels back to a position in the text itself via scrollContentColumn.
-static Rect bounds(const Layer& l, const ResolvedLayer& resolved, const std::string& text) {
+static Rect bounds(const Theme& theme, const Layer& l, const ResolvedLayer& resolved, const std::string& text) {
   if (l.type == LayerType::Text) {
-    int w = l.scroll.enabled ? resolved.scrollWidth : textPixelWidth(resolved.size, text.size());
+    int w = l.scroll.enabled ? resolved.scrollWidth : textPixelWidth(theme, l, resolved.size, text);
     return Rect(resolved.x - w * l.anchorX / 2, resolved.y - resolved.size * l.anchorY / 2, w, resolved.size);
   }
   if (l.type == LayerType::Shape && l.shape == Shape::Circle && resolved.radius == 0)
@@ -1877,7 +1901,7 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
         resetScroll(s, l, now);
         changed = true;
       } else {
-        const int textWidth = textPixelWidth(s.resolved.size, s.text.size());
+        const int textWidth = textPixelWidth(theme_, l, s.resolved.size, s.text);
         const int previousOffset = s.scrollOffset;
         advanceScroll(l, s, now, textWidth);
         if (s.scrollOffset != previousOffset) changed = true;
@@ -1885,7 +1909,7 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     }
     // The dirty region is the union of this layer's old and new footprint, so
     // moving/shrinking/hiding a layer also erases wherever it used to be.
-    Rect next = bounds(l, s.resolved, s.text);
+    Rect next = bounds(theme_, l, s.resolved, s.text);
     // A rotation shape sweeps a thin diagonal: its old and new boxes are
     // repainted apart, since their union would also cover everything between.
     if (changed && !full_) {
@@ -1906,8 +1930,8 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
 }
 // Alpha-composites an RGB565 foreground pixel over a background one, blending
 // each of the 5/6/5 channels independently with rounding (+127 before the
-// /255 integer division). Used for image/animation alpha only -- shapes and
-// text are always fully opaque where drawn.
+// /255 integer division). Used for image/animation alpha and a package font's
+// coverage -- shapes and built-in font text are fully opaque where drawn.
 static uint16_t blend(uint16_t bg, uint16_t fg, uint8_t a) {
   if (a == 255) return fg;
   if (a == 0) return bg;
@@ -1988,6 +2012,39 @@ static bool scrollContentColumn(const Layer& l, const LayerState& s, int textWid
   contentX = local + s.scrollOffset;
   return contentX < textWidth;
 }
+// Draws the part `r` (one row) of a text layer in a package font into
+// `pixels`, which starts at r.x. Every glyph's ink lies within its advance
+// (the package check makes sure), so walking the advances from the left
+// finds the one glyph under each pixel; only that glyph's row is read, into
+// `coverage`, and blended with the layer's colour over what is below.
+// Out of line: render() already holds three row buffers on the stack.
+__attribute__((noinline)) static bool fontRow(const Theme& theme, const Layer& l, const LayerState& s, Rect r,
+                                              AssetHandle& handle, Assets& assets, uint16_t* pixels, uint8_t* coverage) {
+  if (l.font > theme.fonts.size()) return false;
+  const ThemeFont& font = theme.fonts[l.font - 1];
+  if (handle == InvalidAsset) handle = assets.resolve("fonts/" + font.name + ".stf");
+  if (handle == InvalidAsset) return false;
+  const int width = textPixelWidth(theme, l, s.resolved.size, s.text), line = r.y - s.bounds.y;
+  size_t index = 0, loaded = SIZE_MAX;
+  int pen = 0, left = 0, inked = 0;
+  for (int x = r.x; x < r.x + r.w; ++x) {
+    int contentX = 0;
+    if (!scrollContentColumn(l, s, width, x - s.bounds.x, contentX)) continue;
+    if (contentX < pen) {   // the next copy of a looping scroll
+      index = 0;
+      pen = 0;
+    }
+    while (index < s.text.size() && contentX >= pen + font.advance(s.text[index])) pen += font.advance(s.text[index++]);
+    if (index == s.text.size()) continue;
+    if (index != loaded) {
+      if (!assets.glyphRow(handle, font.glyph(s.text[index]), line, coverage, left, inked)) return false;
+      loaded = index;
+    }
+    const int column = contentX - pen - left;
+    if (column >= 0 && column < inked) pixels[x - r.x] = blend(pixels[x - r.x], s.resolved.color, coverage[column]);
+  }
+  return true;
+}
 // Rebuilds every dirty row from scratch, in layer order back to front, and
 // streams each finished row straight to `display` -- there is no persistent
 // 240x240 framebuffer anywhere in this path. `handles` caches one resolved
@@ -2017,6 +2074,10 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
           for (int x = 0; x < r.w; ++x) pixels[r.x - region.x + x] = blend(pixels[r.x - region.x + x], colors[x], alpha[x]);
           continue;
         }
+        if (l.type == LayerType::Text && l.font) {
+          if (!fontRow(e.theme(), l, s, r, handles[i], assets, pixels + (r.x - region.x), alpha)) return false;
+          continue;
+        }
         // The rotation shapes' per-row setup: one sine for a whole row of
         // pixels instead of one per pixel.
         int tickIndex = -1;
@@ -2038,7 +2099,7 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
             // fixed 8-row bitmap by `resolved.size`).
             const int cell = (s.resolved.size * 6 + 7) / 8, local = x - s.bounds.x;
             int contentX = 0;
-            if (scrollContentColumn(l, s, textPixelWidth(s.resolved.size, s.text.size()), local, contentX)) {
+            if (scrollContentColumn(l, s, textPixelWidth(e.theme(), l, s.resolved.size, s.text), local, contentX)) {
               const int col = (contentX % cell) * 6 / cell, charIndex = contentX / cell;
               const int row = (y - s.bounds.y) * 8 / s.resolved.size;
               draw = col < 5 && charIndex < static_cast<int>(s.text.size()) &&

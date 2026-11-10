@@ -11,8 +11,10 @@ import struct
 import tempfile
 try:
     from .theme_native import validate_manifest, validate_package
+    from .theme_font import compile_font
 except ImportError:
     from theme_native import validate_manifest, validate_package
+    from theme_font import compile_font
 from PIL import Image
 
 MAX_PACKAGE = 3 * 1024 * 1024
@@ -150,6 +152,24 @@ def unique_keys(pairs):
     return result
 
 
+def build_font(root, name):
+    """fonts/<name>.stf from fonts/<name>.json, which names a TrueType file
+    in fonts/, its size in pixels per em, the glyphs to keep and optionally
+    the fallback glyph (spec 2, #31)."""
+    settings = json.loads(source_file(root, f'fonts/{name}.json').read_text(encoding='utf-8'), object_pairs_hook=unique_keys)
+    if not isinstance(settings, dict) or not {'file', 'size', 'glyphs'} <= settings.keys() <= {'file', 'size', 'glyphs', 'fallback'}:
+        raise ValueError(f'fonts/{name}.json: expected "file", "size", "glyphs" and optionally "fallback"')
+    if not isinstance(settings['file'], str) or '/' in settings['file']:
+        raise ValueError('file: expected a font file name in fonts/')
+    data = source_file(root, 'fonts/' + settings['file']).read_bytes()
+    return compile_font(data, settings['size'], settings['glyphs'], settings.get('fallback'))
+
+
+def font_glyphs(stf):
+    """The characters an STF font has a glyph for (a record with an advance)."""
+    return {chr(stf[6] + i) for i in range(stf[7]) if stf[12 + 8 * i + 2]}
+
+
 def build(directory):
     root = Path(directory).resolve()
     manifest_path = root / 'theme.json'
@@ -178,6 +198,27 @@ def build(directory):
         kind = layer.get('type')
         if kind not in ('image', 'animation', 'text', 'shape'):
             raise ValueError(f'Unknown layer type: {kind}')
+        if kind == 'text' and 'font' in layer:
+            path = f'fonts/{layer["font"]}.stf'
+            if path not in entries:
+                try:
+                    entries[path] = build_font(root, layer['font'])
+                except (OSError, ValueError, TypeError) as error:
+                    raise ValueError(f'layers[{index}].font: {layer["font"]}: {error}') from error
+            # The text outside {tokens} is known now: a character the font
+            # lacks would be drawn as its fallback glyph. A localized value
+            # (spec 2) is an object of strings by language, each checked; any
+            # other shape is left to the validator's message.
+            value = layer.get('value')
+            texts = {'': value} if isinstance(value, str) else value if isinstance(value, dict) else {}
+            for language, text in texts.items():
+                if not isinstance(text, str):
+                    continue
+                missing = sorted(set(re.sub(r'\{[^}]*\}', '', text)) - font_glyphs(entries[path]))
+                if missing:
+                    field = f'value.{language}' if language else 'value'
+                    raise ValueError(f'layers[{index}].{field}: font {layer["font"]} has no glyph for {"".join(missing)!r}; '
+                                     f'add it to "glyphs" in fonts/{layer["font"]}.json')
         if kind not in ('image', 'animation'):
             continue
         source = layer.get('source')

@@ -21,6 +21,7 @@ class Source {
 // STI1: row-major RGB565 pixels (plus alpha8 when flag=1).
 // STI2 (spec 2 only): the palette, one u32 offset per row into the row
 // data, then each row as runs (see walkRow() in ThemePackage.cpp).
+// Font (spec 2 only): fonts/<name>.stf, see checkFont() in ThemePackage.cpp.
 class Package : public Assets {
  public:
   explicit Package(Source& source) : source_(source) {}
@@ -28,6 +29,7 @@ class Package : public Assets {
   AssetHandle resolve(const std::string& path) override;
   using Assets::row;
   bool row(AssetHandle handle, int y, int x, int count, uint16_t* colors, uint8_t* alpha) override;
+  bool glyphRow(AssetHandle font, uint8_t code, int y, uint8_t* coverage, int& left, int& width) override;
  private:
   // Every animation frame is an entry, so an entry is kept small: its path
   // is not held in RAM (that took ~45 bytes more per frame), only its FNV-1a
@@ -39,13 +41,31 @@ class Package : public Assets {
     uint8_t pathLength = 0, stride = 0;
     bool compressed = false;   // STI2: rows as runs (see row())
     uint8_t palette = 0;       // STI2 palette size, 0 for direct colours
+    // A font has stride 0 (it is no image) and, unlike the manifest,
+    // `compressed` set; its width is its first code point and its height
+    // its number of glyph records.
+    bool font() const { return !stride && compressed; }
   };
   Source& source_;
   // In blocks: in one vector, a package with many frames needed a block of
   // several KiB.
   BlockList<Entry> entries_;
+  // The glyph records glyphRow() read last, in GlyphSlots slots by code
+  // point: every row of a text needs the same records again, and reading
+  // them was half of a redraw's reads (#31 review). Allocated by loadFonts()
+  // when a layer uses a font, so nothing is allocated while drawing (#69
+  // review); a package without font layers holds none.
+  static constexpr unsigned GlyphSlots = 16;
+  struct Glyph {
+    uint8_t font = 0, code = 0;   // code 0: an empty slot
+    uint8_t left = 0, top = 0, width = 0, rows = 0;
+    uint16_t bitmap = 0;
+  };
+  std::vector<Glyph> glyphs_;
   bool samePath(const Entry& entry, const std::string& path) const;
   bool checkRows(const Entry& entry) const;
+  bool checkFont(const Entry& entry) const;
+  bool loadFonts(Theme& theme, std::string& error);
   size_t indexOf(const std::string& path) const;
   const Entry* find(const std::string& path) const;
   bool readIndex(std::string& error);

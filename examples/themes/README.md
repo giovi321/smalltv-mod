@@ -1,13 +1,17 @@
 # Source themes
 
-Three examples are ready to install from **Display → Theme clocks** on SmallTV Pro:
+Four examples are ready to install from **Display → Theme clocks** on SmallTV Pro:
 
 * [`pixel-room.stheme`](pixel-room.stheme) — pixel-art room with an animated cat;
 * [`terminal-ops.stheme`](terminal-ops.stheme) — dense text and line dashboard;
 * [`live-status.stheme`](live-status.stheme) — dynamic dashboard driven by a
   fetched JSON status endpoint: a loop-scrolling headline, a bounce-scrolling
   headline, a threshold-colored rounded progress bar bound to a numeric level,
-  and status text.
+  and status text;
+* [`bebas-clock.stheme`](bebas-clock.stheme) — a spec 2 clock in Bebas Neue,
+  compiled into two package fonts from `bebas-clock/fonts/` (Bebas Neue (c)
+  Dharma Type, SIL Open Font License, see `bebas-clock/fonts/OFL.txt`; the
+  package names it in its `author`). Firmware up to 3.3.0 refuses it.
 
 Their editable sources are in the matching directories. Open
 [pixel-room-preview.html](pixel-room-preview.html),
