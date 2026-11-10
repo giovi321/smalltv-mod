@@ -291,12 +291,18 @@ static void testDataAgePublishAllocations() {
   // Starting over (a new theme) makes the next publish look at every source
   // again, even one whose age was unknown before: a stale value goes away.
   DataAges fresh;
+  std::vector<ThemeValue> mine;
   fresh.reset(1);
-  values.clear();
-  fresh.publish(sources, values);                            // unknown: nothing to add
-  values.push_back({"weather_forecast_today.age", "5"});
+  fresh.publish(sources, mine);                              // unknown: nothing to add
+  mine.push_back({"weather_forecast_today.age", "5"});
   fresh.reset(1);
-  assert(fresh.publish(sources, values) && values.empty());
+  assert(fresh.publish(sources, mine) && mine.empty());
+  // ... and a value that is already right is not reported as a change.
+  fresh.reset(1);
+  fresh.tick(0);
+  fresh.result(0, true);
+  mine.push_back({"weather_forecast_today.age", "0"});
+  assert(!fresh.publish(sources, mine) && mine.size() == 1 && mine[0].value == "0");
   // A fetch result in the same minute (age back to 0) is a change too.
   ages.result(0, true);
   assert(ages.publish(sources, values) && values[0].value == "0");
