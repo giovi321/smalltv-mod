@@ -1,0 +1,1 @@
+{"latitude":0.0,"longitude":0.0,"timezone":"Example/City","current_units":{"temperature_2m":"C","weather_code":"wmo code"},"current":{"time":"2030-01-01T12:00","interval":900,"temperature_2m":12.3,"weather_code":3},"daily":{"time":"2030-01-01","temperature_2m_max":18.4,"temperature_2m_min":9.1}}

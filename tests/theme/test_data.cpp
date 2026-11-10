@@ -1,6 +1,7 @@
 #include "ThemeData.h"
 #include <atomic>
 #include <cassert>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -496,33 +497,289 @@ static void testFetchRetry(const char* wiringFile) {
   std::cout << "theme data fetch retry tests passed\n";
 }
 
+// A field with the given id and path (ThemeDataField has a default member
+// initializer, so it is no aggregate in C++11 and cannot be brace-initialised).
+static ThemeDataField fieldOf(const std::string& id, const std::string& path) {
+  ThemeDataField f;
+  f.id=id;
+  f.path=path;
+  return f;
+}
+
+// ---- A reply read as it arrives, straight into the filtered parse ----
+static ThemeDataSource valueSource() {
+  ThemeDataSource s;
+  s.id="d";
+  s.fields.push_back(fieldOf("v","value"));
+  return s;
+}
+// {"value":42,"pad":"xxx..."} of exactly `size` bytes (a made-up reply).
+static std::string padded(size_t size) {
+  std::string s=R"({"value":42,"pad":")";
+  s+=std::string(size-s.size()-2,'x');
+  return s+"\"}";
+}
+// {"value":42} followed by spaces up to `size` bytes.
+static std::string spaced(size_t size) {
+  std::string s=R"({"value":42})";
+  return s+std::string(size-s.size(),' ');
+}
+// The tests here run on a 64-bit host, where ArduinoJson's first pool is 4 KB
+// (1 KB on the device): they give the parse room and test the budget by
+// itself (testFilter). The device budget is tested in test_memory.cpp.
+static const size_t Roomy = 1 << 20;
+static std::string manyOnes(size_t count);
+static void testReplyStream() {
+  std::vector<ThemeValue> values;
+  // True when the reply was read whole and valid; then `values` holds the one
+  // value, else it is exactly what it was.
+  auto fetch=[&](Response& r,int length) {
+    values.assign(1,ThemeValue{"keep","1"});
+    const bool ok=readDataValues(r,length,valueSource(),values,Roomy);
+    if(ok && !(values.size()==2 && values[0].key=="keep" && values[1]==(ThemeValue{"d.v","42"})))
+      fprintf(stderr,"reply of %zu B (length %d) read, but values: %zu, last %s\n",r.bytes.size(),length,values.size(),values.empty()?"":(values.back().key+"="+values.back().value).c_str());
+    if(ok) assert(values.size()==2 && values[0].key=="keep" && values[1]==(ThemeValue{"d.v","42"}));
+    else assert(values.size()==1 && values[0].key=="keep");
+    return ok;
+  };
+  Response complete;complete.bytes="{\"value\":42}";
+  assert(fetch(complete,12) && complete.elapsed==0);
+  Response stalled;stalled.bytes="{";
+  assert(!fetch(stalled,12) && stalled.elapsed==3000);
+  Response disconnected;disconnected.bytes="{";disconnected.closeAtEnd=true;
+  assert(!fetch(disconnected,12));
+  Response unknown;unknown.bytes=spaced(2048);unknown.closeAtEnd=true;
+  assert(fetch(unknown,-1) && unknown.position==2048);
+  Response tooLarge;tooLarge.bytes=spaced(2049);tooLarge.closeAtEnd=true;
+  assert(!fetch(tooLarge,-1) && tooLarge.position<=2048);   // never read past the cap
+  assert(tooLarge.elapsed==0);                              // and it fails at once, not at the deadline
+  Response tooLargeSized;tooLargeSized.bytes=spaced(2049);
+  assert(!fetch(tooLargeSized,2049) && tooLargeSized.position==0);
+  Response atCap;atCap.bytes=spaced(2048);
+  assert(fetch(atCap,2048) && atCap.position==2048);
+  Response empty;empty.closeAtEnd=true;assert(!fetch(empty,0));
+  Response zero;zero.bytes=spaced(100);zero.closeAtEnd=true;
+  assert(!fetch(zero,0) && zero.position==0);   // "Content-Length: 0" is no reply, whatever follows
+  Response nothing;nothing.closeAtEnd=true;assert(!fetch(nothing,-1));
+  Response invalid;invalid.bytes=R"(<html>)";invalid.closeAtEnd=true;assert(!fetch(invalid,-1));
+  Response cutOff;cutOff.bytes=R"({"value":)";cutOff.closeAtEnd=true;assert(!fetch(cutOff,-1));
+  // Silence is not the end of a reply of unknown length: the document is
+  // complete, but the connection never closes, so the fetch ends at the deadline.
+  Response idleJson;idleJson.bytes="{\"value\":42}";
+  assert(!fetch(idleJson,-1) && idleJson.elapsed==3000);
+  // A slow trickle ends at the overall deadline, in the middle of the parse.
+  Response slow;slow.bytes="{\"value\":42}";slow.spacing=900;
+  assert(!fetch(slow,12) && slow.elapsed==3000);
+  Response wrapped;wrapped.start=0xfffffff0;wrapped.bytes="{";
+  assert(!fetch(wrapped,12) && wrapped.elapsed==3000);
+  Response cancelled;cancelled.cancel=true;cancelled.bytes="{\"value\":42}";
+  assert(!fetch(cancelled,12) && cancelled.elapsed==0 && cancelled.position==0);
+  // A reply that drips one byte at a time still gets in, within the deadline.
+  Response drip;drip.bytes=padded(1000);drip.spacing=2;drip.closeAtEnd=true;
+  assert(fetch(drip,-1) && drip.position==1000);
+  // A declared length is honoured: nothing past it is read (the next bytes are
+  // not this reply), and a reply that stops short of it fails even when the
+  // document in it is whole.
+  Response longer;longer.bytes="{\"value\":42}trailing bytes";
+  assert(fetch(longer,12) && longer.position==12);
+  Response sized;sized.bytes=spaced(100);
+  assert(fetch(sized,100) && sized.position==100);
+  Response shortOfIt;shortOfIt.bytes=spaced(100);shortOfIt.closeAtEnd=true;
+  assert(!fetch(shortOfIt,300));
+  // No length: read until the close, everything counts toward the cap.
+  Response untilClose;untilClose.bytes=spaced(600);untilClose.closeAtEnd=true;
+  assert(fetch(untilClose,-1) && untilClose.position==600);
+  // The budget given to readDataValues reaches the parse: a field that keeps a
+  // long list (it names it) does not fit in 1,536 B (a pool is bigger on the
+  // host and on the device), and does with room.
+  ThemeDataSource listed;listed.id="l";listed.fields.push_back(fieldOf("all","a"));
+  const std::string longList=R"({"a":)"+manyOnes(300)+"}";
+  Response tight;tight.bytes=longList;tight.closeAtEnd=true;
+  values.assign(1,ThemeValue{"keep","1"});
+  assert(!readDataValues(tight,-1,listed,values,1536) && values.size()==1);
+  Response roomy;roomy.bytes=longList;roomy.closeAtEnd=true;
+  assert(readDataValues(roomy,-1,listed,values,Roomy) && values.size()==2 && values[1]==(ThemeValue{"l.all","--"}));
+  // A header that is a nonsense length.
+  Response negative;negative.bytes=spaced(100);negative.closeAtEnd=true;
+  assert(!fetch(negative,-2));
+  assert(MaxDataBody==2048 && DataTimeoutMs==3000);
+}
+
+// ---- The filter: what the parse keeps ----
+static std::string manyOnes(size_t count) {
+  std::string s="[";
+  for(size_t i=0;i<count;++i) s+=i?",1":"1";
+  return s+"]";
+}
+static void testFilter() {
+  ThemeDataSource source;
+  source.id="w";
+  source.fields.push_back(fieldOf("now","current.t"));
+  source.fields.push_back(fieldOf("hi","daily.hi"));
+  source.fields.push_back(fieldOf("code","code"));
+  source.fields.push_back(fieldOf("gone","absent.x"));
+  // The least budget a small reply needs here: ArduinoJson's first pool of a
+  // document (its size depends on the build: 1 KB on the device, 4 KB on a
+  // 64-bit host) and the filter. `room` is that and a little more, but far less
+  // than a second pool.
+  auto smallest=[&](const std::string& body) {
+    std::vector<ThemeValue> got;
+    for(size_t budget=16;budget<=65536;budget+=16)
+      if(extractThemeValues(body,source,got,budget)) return budget;
+    return size_t(0);
+  };
+  const size_t base=smallest(R"({"current":{"t":21.5},"daily":{"hi":2},"code":3})");
+  assert(base>=1024 && base<=8192);
+  const size_t room=base+64;
+  // Plenty that no field names: a long list, a deep object, other keys. With
+  // `room` the reply parses only if all of that is dropped.
+  const std::string junk=R"({"junk":)"+manyOnes(300)+R"(,"current":{"t":21.5,"u":{"deep":[1,2,3],"more":"text"},"w":9},)"
+    R"("daily":{"time":["a","b"],"hi":17.5,"min":[1,2]},"code":3,"tail":{"a":{"b":{"c":1}}}})";
+  std::vector<ThemeValue> values;
+  assert(extractThemeValues(junk,source,values,room));
+  assert(smallest(junk)<=base+32);   // dropping costs (next to) nothing: no second pool
+  assert(values.size()==4);
+  assert(values[0]==(ThemeValue{"w.now","21.5"}) && values[1]==(ThemeValue{"w.hi","17.5"}));
+  assert(values[2]==(ThemeValue{"w.code","3"}) && values[3]==(ThemeValue{"w.gone","--"}));
+  // The same reply with no limit gives the same values.
+  std::vector<ThemeValue> unlimited;
+  assert(extractThemeValues(junk,source,unlimited,0) && unlimited==values);
+  // A reply that is not an object or a list is refused, whatever the filter
+  // would skip: an error page must not pass as an empty reply (it would
+  // overwrite the old values with "--" and count as a success).
+  std::vector<ThemeValue> none2{{"keep","1"}};
+  const char* const notRoots[]={"<html>404</html>","42","\"text\"","null","true","garbage {\"code\":3}","/* c */{\"code\":3}"};
+  for(const char* text:notRoots) assert(!extractThemeValues(text,source,none2,0) && none2.size()==1);
+  assert(extractThemeValues(" \r\n\t{\"code\":3}",source,none2,0) && none2.size()==5);
+  none2.resize(1);
+  assert(extractThemeValues("[1,2]",source,none2,0) && none2.size()==5 && none2[1].value=="--");
+  // Too small a budget for even the filter: refused, not a half-built filter.
+  std::vector<ThemeValue> tiny{{"keep","1"}};
+  assert(!extractThemeValues(junk,source,tiny,64) && tiny.size()==1);
+  // A source with no fields keeps nothing, and still refuses what is not JSON.
+  ThemeDataSource none;none.id="n";
+  std::vector<ThemeValue> noValues;
+  assert(extractThemeValues(junk,none,noValues,300) && noValues.empty());
+  assert(!extractThemeValues("{\"junk\":[1,",none,noValues,300));
+  // Dropped parts are still checked: nesting deeper than 8 is refused even
+  // where no field looks.
+  assert(!extractThemeValues(R"({"junk":[[[[[[[[[1]]]]]]]]],"code":3})",source,noValues,0));
+  assert(extractThemeValues(R"({"junk":[[[[[[[1]]]]]]],"code":3})",source,noValues,0));    // the object and 7 lists: 8 levels
+  assert(!extractThemeValues(R"({"junk":[[[[[[[[1]]]]]]]],"code":3})",source,noValues,0));  // the object and 8 lists: 9 levels
+  // The budget is a ceiling: a field that names a long list keeps the whole
+  // list (its value reads "--", a list is not a value), so it is refused when
+  // the list does not fit, and the values stay as they were.
+  ThemeDataSource listed;listed.id="l";listed.fields.push_back(fieldOf("all","a"));
+  const std::string big=R"({"a":)"+manyOnes(400)+"}";
+  std::vector<ThemeValue> kept{{"keep","1"}};
+  assert(!extractThemeValues(big,listed,kept,room) && kept.size()==1 && kept[0].key=="keep");
+  assert(extractThemeValues(big,listed,kept,0) && kept.size()==2 && kept[1]==(ThemeValue{"l.all","--"}));
+  // Two fields on one branch, in either order: the longer path does not undo
+  // the shorter one and the other way round.
+  ThemeDataSource shared;shared.id="s";
+  shared.fields.push_back(fieldOf("obj","o"));
+  shared.fields.push_back(fieldOf("inner","o.k"));
+  shared.fields.push_back(fieldOf("n","o.n"));
+  std::vector<ThemeValue> sharedValues;
+  assert(extractThemeValues(R"({"o":{"k":"v","n":2},"z":1})",shared,sharedValues,0));
+  assert(sharedValues[0].value=="--" && sharedValues[1].value=="v" && sharedValues[2].value=="2");
+  ThemeDataSource reversed;reversed.id="s";
+  reversed.fields.push_back(fieldOf("inner","o.k"));
+  reversed.fields.push_back(fieldOf("obj","o"));
+  reversed.fields.push_back(fieldOf("n","o.n"));
+  sharedValues.clear();
+  assert(extractThemeValues(R"({"o":{"k":"v","n":2},"z":1})",reversed,sharedValues,0));
+  assert(sharedValues[0].value=="v" && sharedValues[1].value=="--" && sharedValues[2].value=="2");
+  // A field that is a plain value and another that looks inside it: the plain
+  // one stays (a longer path must not turn the kept value into a branch).
+  ThemeDataSource plain;plain.id="p";
+  plain.fields.push_back(fieldOf("s","s"));
+  plain.fields.push_back(fieldOf("k","s.k"));
+  std::vector<ThemeValue> plainValues;
+  assert(extractThemeValues(R"({"s":"text"})",plain,plainValues,0));
+  assert(plainValues[0].value=="text" && plainValues[1].value=="--");
+  // A path with an empty part, or an empty path, finds nothing.
+  ThemeDataSource odd;odd.id="o";
+  odd.fields.push_back(fieldOf("a","a..b"));
+  odd.fields.push_back(fieldOf("b",""));
+  odd.fields.push_back(fieldOf("c",".a"));
+  odd.fields.push_back(fieldOf("d","a"));
+  std::vector<ThemeValue> oddValues;
+  assert(extractThemeValues(R"({"a":5})",odd,oddValues,0) && oddValues.size()==4);
+  assert(oddValues[0].value=="--" && oddValues[1].value=="--" && oddValues[2].value=="--" && oddValues[3].value=="5");
+  // A part of a path is always an object's key (digits too); a path does not
+  // go into a list.
+  ThemeDataSource digits;digits.id="g";
+  digits.fields.push_back(fieldOf("z","named.0"));
+  digits.fields.push_back(fieldOf("o","named.1"));
+  digits.fields.push_back(fieldOf("e","list.2"));
+  std::vector<ThemeValue> digitValues;
+  assert(extractThemeValues(R"({"named":{"0":"zero","1":"one"},"list":[7,8,9],"x":[1]})",digits,digitValues,0));
+  assert(digitValues[0].value=="zero" && digitValues[1].value=="one" && digitValues[2].value=="--");
+  std::cout<<"theme data filter tests passed\n";
+}
+
+// ---- The fetch gate and the fetch status ----
+// ThemeDataClient.cpp is device-only code, so check that it is wired as
+// described: a fetch is refused before it starts when the heap or the largest
+// block is short, and once the connection is up the parse heap is checked
+// before the reply is read; each refusal is counted; the reply is parsed from
+// the stream (never read into a string first).
+static void testFetchWiring(const char* clientFile) {
+  std::ifstream in(clientFile);
+  assert(in.good());
+  std::stringstream text;
+  text << in.rdbuf();
+  const std::string code = text.str();
+  // The start gate, before the fetch runs; the refusal is counted.
+  const std::string gate = "if (ESP.getFreeHeap() < smalltv::FetchFreeHeap || platformMaxFreeBlock() < smalltv::FetchLargestBlock) {\n    noteFetch(Outcome::Refused);\n    return false;\n  }\n  request->finish(fetchThemeSource(*request));";
+  assert(code.find(gate) != std::string::npos);
+  // After GET() and before the reply is read: the heap for the parse.
+  const size_t get = code.find("http.GET() != HTTP_CODE_OK");
+  const size_t parseGate = code.find("if (ESP.getFreeHeap() < smalltv::FetchParseHeap) return Outcome::Refused;");
+  const size_t parse = code.find("smalltv::readDataValues(stream, http.getSize(), request.source, request.values)");
+  assert(get != std::string::npos && parseGate != std::string::npos && parse != std::string::npos);
+  assert(get < parseGate && parseGate < parse);
+  // The https check is a refusal too.
+  assert(code.find("if (ESP.getFreeHeap() < 18000) return Outcome::Refused;") != std::string::npos);
+  // No copy of the reply, and no document of everything in it.
+  assert(code.find("readDataBody") == std::string::npos && code.find("std::string body") == std::string::npos);
+  assert(code.find("deserializeJson") == std::string::npos);
+  // A fetch dropped by a theme change is not noted; every other outcome is.
+  assert(code.find("if (!request.cancelled()) noteFetch(outcome);") != std::string::npos);
+  assert(code.find("return outcome == Outcome::Ok;") != std::string::npos);
+  std::cout << "theme data fetch wiring tests passed\n";
+}
+// The status count: refused fetches since boot, and how the last one ended.
+static void testFetchStats() {
+  FetchStats stats;
+  assert(!stats.any() && stats.refused == 0);
+  stats.note(0);
+  assert(stats.any() && stats.last == 1 && stats.refused == 0);
+  stats.note(1);
+  stats.note(1);
+  assert(stats.last == 2 && stats.refused == 2);
+  stats.note(2);
+  assert(stats.last == 3 && stats.refused == 2);
+  stats.note(3);
+  stats.note(-1);
+  assert(stats.last == 3 && stats.refused == 2);              // unknown outcomes are ignored
+  stats.refused = 65535;
+  stats.note(1);
+  assert(stats.refused == 65535 && stats.last == 2);          // stops at the top, never wraps
+  assert(sizeof(FetchStats) == 4);
+  std::cout << "theme data fetch stats tests passed\n";
+}
+
 int main(int argc, char** argv) {
+  testFetchStats();
+  testFetchWiring(argc > 2 ? argv[2] : "src/features/theme/ThemeDataClient.cpp");
   testDataAgeSpec1();
   testDataAgePublishAllocations();
   testDataAges(argc > 1 ? argv[1] : "src/features/theme/ThemeMode.cpp");
   testFetchRetry(argc > 1 ? argv[1] : "src/features/theme/ThemeMode.cpp");
-  std::string body;
-  Response complete;complete.bytes="{\"value\":42}";
-  assert(readDataBody(complete,12,body) && body==complete.bytes && complete.elapsed==0);
-  Response stalled;stalled.bytes="{";
-  assert(!readDataBody(stalled,12,body) && stalled.elapsed==3000);
-  Response disconnected;disconnected.bytes="{";disconnected.closeAtEnd=true;
-  assert(!readDataBody(disconnected,12,body));
-  Response unknown;unknown.bytes=std::string(2048,' ');unknown.closeAtEnd=true;
-  assert(readDataBody(unknown,-1,body) && body.size()==2048);
-  Response tooLarge;tooLarge.bytes=std::string(2049,' ');tooLarge.closeAtEnd=true;
-  assert(!readDataBody(tooLarge,-1,body) && body.size()<=2048);
-  Response oversizedHeader;assert(!readDataBody(oversizedHeader,2049,body));
-  Response empty;empty.closeAtEnd=true;assert(!readDataBody(empty,0,body));
-  assert(!readDataBody(empty,-1,body));
-  Response idleJson;idleJson.bytes="{}"; // silence is not EOF for an unknown length
-  assert(!readDataBody(idleJson,-1,body) && idleJson.elapsed==3000);
-  Response slow;slow.bytes="{\"value\":42}";slow.spacing=900;
-  assert(!readDataBody(slow,12,body) && slow.elapsed==3000);
-  Response wrapped;wrapped.start=0xfffffff0;wrapped.bytes="{";
-  assert(!readDataBody(wrapped,12,body) && wrapped.elapsed==3000);
-  Response cancelled;cancelled.cancel=true;
-  assert(!readDataBody(cancelled,12,body) && cancelled.elapsed==0);
+  testFilter();
+  testReplyStream();
 
   // On the ESP8266, available() lets the network stack run when it finds
   // nothing, and still returns that 0 if the rest of the reply and the
@@ -549,10 +806,24 @@ int main(int argc, char** argv) {
     bool connected() const { return !arrived; }
     void idle() { ++elapsed;assert(elapsed<=3500); }
   };
-  LateRest late;late.bytes=std::string(550,'x');late.firstPart=414;
-  assert(readDataBody(late,-1,body) && body==late.bytes);
-  LateRest lateSized;lateSized.bytes=std::string(550,'x');lateSized.firstPart=414;
-  assert(readDataBody(lateSized,550,body) && body==lateSized.bytes);
+  {
+    std::vector<ThemeValue> values;
+    LateRest late;late.bytes=padded(550);late.firstPart=414;
+    assert(readDataValues(late,-1,valueSource(),values,Roomy) && values.size()==1 && values[0].value=="42" && late.position==550);
+    values.clear();
+    LateRest lateSized;lateSized.bytes=padded(550);lateSized.firstPart=414;
+    assert(readDataValues(lateSized,550,valueSource(),values,Roomy) && values.size()==1 && lateSized.position==550);
+    // The document is whole in the first part and the close comes with bytes
+    // still waiting after it: they are read too, and counted.
+    values.clear();
+    LateRest tail;tail.bytes=spaced(550);tail.firstPart=40;
+    assert(readDataValues(tail,-1,valueSource(),values,Roomy) && tail.position==550);
+    // A declared length is a hard stop even when more is waiting in the same
+    // read: the next bytes are not this reply's.
+    values.clear();
+    LateRest more;more.bytes=spaced(100)+"next reply";more.firstPart=more.bytes.size();
+    assert(readDataValues(more,100,valueSource(),values,Roomy) && values.size()==1 && more.position==100);
+  }
 
   // A slow old request must neither block animation ticks nor update a new theme.
   DataRequests requests;ThemeDataSource source;source.id="old";
