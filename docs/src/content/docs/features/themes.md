@@ -674,6 +674,31 @@ and `device` can no longer be used as the `id` of a `data` source, since
 `time.second` would then be ambiguous. A name that starts with `time.` or
 `device.` but is not in the tables is rejected with `unknown time.* or device.* name`.
 
+#### Data age: `<source>.age`
+
+In a `"spec": 2` theme every `data` source also has an `age` field that the
+theme does not declare: `w.age` for a source with the ID `w`. It is the time
+since the source's last successful fetch, in whole minutes (0 up to 71582, about
+49.7 days, where it stops). Use it like any fetched field, in a binding or in
+text (`{w.age}`), for example to mark data that has gone stale.
+
+- Before the first successful fetch the age is unknown: there is no value. A
+  binding keeps its static value and text shows `--`, exactly like a fetched
+  field that is missing.
+- A successful fetch sets the age to 0. A failed one (no connection, an HTTP
+  status other than 200, a reply that is cut off, too large or not JSON) changes
+  nothing, so the age keeps growing from the last success. A reply that is valid
+  JSON but lacks a declared field is still a success; that field shows `--`.
+- The age is the time since the fetch ended, not the age of the data at the
+  server. It counts the device's run time, not the clock, so it works before
+  the clock is set, and a change of the time or timezone does not move it.
+- It is a whole number that goes up once a minute, so a layer bound to it
+  repaints at most once a minute. After a restart it is unknown again.
+- A source that declares a field of its own called `age` keeps that field; no
+  built-in age is added to that source.
+- In a `"spec": 1` theme `w.age` is refused like any name that is not a declared
+  field.
+
 ## Example: a dynamic dashboard
 
 `examples/themes/live-status` builds `examples/themes/live-status.stheme` from a

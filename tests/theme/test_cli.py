@@ -220,6 +220,36 @@ class ThemeCliTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0, token)
                 self.assertNotIn('Traceback', result.stderr)
 
+    def test_preview_injects_the_data_age_of_a_spec_2_source(self):
+        manifest = {
+            'spec': 2,
+            'theme': {'id': 'agetest', 'name': 'Age Test', 'author': 'Test', 'version': '1'},
+            'display': {'width': 240, 'height': 240, 'background': '#000000'},
+            'data': [{'id': 'w', 'url': 'http://198.51.100.1/data', 'interval': 60,
+                      'fields': [{'id': 'temp', 'path': 'temp'}]}],
+            'layers': [
+                {'id': 'bar', 'type': 'shape', 'shape': 'rectangle', 'x': 0, 'y': 100, 'width': 10, 'height': 10,
+                 'fill': '#00ff00',
+                 'bind': {'width': {'source': 'w.age', 'input': [0, 120], 'output': [1, 200]}}}]}
+        with tempfile.TemporaryDirectory() as d:
+            source = Path(d)
+            (source/'theme.json').write_text(json.dumps(manifest))
+            args = ('--seconds', 1, '--fps', 1, '--time', '2026-09-18T10:00:00')
+            result = self.run_cli('preview', source, source/'age.html', *args, '--data', 'w.age=90')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.preview_data(source/'age.html')['values']['w.age'], '90')
+            # Another name next to it is still not a field.
+            result = self.run_cli('preview', source, source/'bad.html', *args, '--data', 'w.ages=90')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Undeclared data key', result.stderr)
+            # Spec 1 has no age field.
+            manifest['spec'] = 1
+            manifest['layers'][0]['bind']['width']['source'] = 'w.temp'
+            (source/'theme.json').write_text(json.dumps(manifest))
+            result = self.run_cli('preview', source, source/'bad.html', *args, '--data', 'w.age=90')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Undeclared data key', result.stderr)
+
     def test_documentation_covers_scrolling_and_dynamic_properties(self):
         documentation = (ROOT/'docs/src/content/docs/features/themes.md').read_text()
         for token in ('"mode": "loop"', '"mode": "bounce"', 'cornerRadius',
