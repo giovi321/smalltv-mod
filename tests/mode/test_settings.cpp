@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 FSClass LittleFS;
 EspClass ESP;
@@ -42,11 +43,13 @@ static uint8_t after(uint8_t stored, const char* json) {
 static void testNamesSetTheMode() {
   CHECK(after(MODE_STOCKS, "{\"mode\":\"theme\"}") == MODE_THEME, "theme");
   CHECK(after(MODE_STOCKS, "{\"mode\":\"radar\"}") == MODE_RADAR, "radar");
+  CHECK(after(MODE_STOCKS, "{\"mode\":\"rain\"}") == MODE_RAIN, "rain");
   CHECK(after(MODE_STOCKS, "{\"mode\":\"usage\"}") == MODE_USAGE, "usage");
   CHECK(after(MODE_STOCKS, "{\"mode\":\"ha\"}") == MODE_HA, "ha");
   CHECK(after(MODE_STOCKS, "{\"mode\":\"carousel\"}") == MODE_CAROUSEL, "carousel");
   CHECK(after(MODE_RADAR, "{\"mode\":\"stocks\"}") == MODE_STOCKS, "stocks");
   CHECK(after(MODE_RADAR, "{\"mode\":\"Theme\"}") == MODE_THEME, "case is ignored");
+  CHECK(after(MODE_STOCKS, "{\"mode\":\"R A I N\"}") == MODE_STOCKS, "rain with spaces ignored");
 }
 
 static void testEmptyMode() {
@@ -81,12 +84,39 @@ static void testImport() {
   CHECK(s.hostname == "smalltv-test-2", "the rest of the import applies");
 }
 
+static void testRainSlice() {
+  // Defaults, then a partial save: range only, the coordinates stay stored.
+  Settings s;
+  s.setDefaults();
+  CHECK(s.rain.useDevice, "rain follows the device location by default");
+  CHECK(s.rain.rangeKm == DEFAULT_RAIN_RANGE_KM, "default range");
+  CHECK(s.rain.pollSec == DEFAULT_RAIN_POLL_SEC, "default poll");
+  CHECK(s.rain.animSec == DEFAULT_RAIN_ANIM_SEC, "default animation");
+  CHECK(s.carouselRain, "rain in the carousel by default");
+
+  apply(s, "{\"rain\":{\"lat\":47.1519,\"lon\":-1.6084,\"rangeKm\":20}}");
+  CHECK(!s.rain.useDevice, "own coordinates unticks the device location");
+  CHECK(s.rain.rangeKm == 20, "range applied");
+  CHECK(s.rain.pollSec == DEFAULT_RAIN_POLL_SEC, "poll untouched by a partial save");
+
+  apply(s, "{\"rain\":{\"rangeKm\":500}}");
+  CHECK(s.rain.rangeKm == 100, "range clamped to 100");
+
+  apply(s, "{\"rain\":{\"pollSec\":1}}");
+  CHECK(s.rain.pollSec == 60, "poll clamped to 60");
+
+  // lat/lon survive a save that does not carry them.
+  CHECK(fabsf(s.rain.lat - 47.1519f) < 0.0001f, "lat kept");
+  CHECK(fabsf(s.rain.lon + 1.6084f) < 0.0001f, "lon kept");
+}
+
 int main() {
   testNamesSetTheMode();
   testEmptyMode();
   testUnknownMode();
   testNoModeOrOtherType();
   testImport();
+  testRainSlice();
   printf("%d checks, %d failed\n", g_checks, g_failed);
   return g_failed ? 1 : 0;
 }
