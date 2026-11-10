@@ -1401,7 +1401,8 @@ class RootWatch {
 // The two steps around the parse are out of line, siblings of it: their
 // locals (path parts, the strings of a value) are gone while the parse runs
 // and the reader waits on the network, which is the deep part of the loop
-// stack (TRAPS T12, T13).
+// stack (4 KB on the ESP8266; a called function's frame stacks on top of its
+// caller's whole frame, so work split into siblings costs less than nested).
 __attribute__((noinline)) bool buildFilter(JsonDocument& filter, const ThemeDataSource& source) {
   for (const auto& field : source.fields) addFieldFilter(filter.as<JsonVariant>(), field.path);
   return !filter.overflowed();
