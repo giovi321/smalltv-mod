@@ -114,32 +114,21 @@ struct ResolvedLayer {
 // one of its ranges (ends included; an open end is an infinity), or when the
 // value is missing or not a number and `missing` is true. Rules live in one
 // list on the Theme, not in each Layer, so themes without them pay nothing per
-// layer. A rule does not hold its ranges: they are in the list next to it
-// (ShowList), the rule's `count` ranges from number `first` on. One list of
-// all of them takes less heap than a small vector for every rule.
+// layer. The ranges are in the rule (at most 4, as floats like the device's
+// JSON numbers), so a rule is one element of the list and nothing else is
+// allocated for it but a source name longer than the string's own buffer.
 struct ShowRule {
   std::string source;
-  uint16_t first = 0;   // its first range in ShowList::ranges
+  float low[4] = {};    // range i is low[i] to high[i], both ends included;
+  float high[4] = {};   // -INFINITY or INFINITY is an open end
   uint8_t layer = 0;
   uint8_t count = 0;    // 1 to 4 ranges
   bool missing = false;
 };
-// The show rules of a theme and their ranges. At most MaxLayers x 4 rules x 4
-// ranges, so `first` never passes 16 bits. Both are block lists: the ranges
-// are 16 bytes each.
-struct ShowList {
-  BlockList<ShowRule> rules;
-  BlockList<std::pair<double, double>> ranges;
-  size_t size() const { return rules.size(); }
-  bool empty() const { return rules.empty(); }
-  ShowRule& operator[](size_t index) { return rules[index]; }
-  const ShowRule& operator[](size_t index) const { return rules[index]; }
-  BlockList<ShowRule>::const_iterator begin() const { return rules.begin(); }
-  BlockList<ShowRule>::const_iterator end() const { return rules.end(); }
-  // Range number `index` of `rule`.
-  const std::pair<double, double>& range(const ShowRule& rule, size_t index) const { return ranges[rule.first + index]; }
-};
-static_assert(MaxLayers * 16 <= 0xffff, "a rule's first range must fit the 16 bits ShowRule keeps it in");
+// The most `show` rules all layers of one theme may have together. A block
+// list holds them, reserved at the number the manifest declares (so a theme
+// with one rule does not open a whole block), and a rule is about 60 bytes.
+constexpr size_t MaxShowRules = 24;
 bool parseFiniteNumber(const std::string& value, double& number);
 int resolveNumericBinding(const NumericBinding& binding, double value, int lo, int hi);
 uint16_t resolveColorBinding(const ColorBinding& binding, double value);
@@ -225,7 +214,7 @@ struct Theme {
   uint16_t translationBytes = 0;   // their cost so far, as parseTextValue() counts it
   std::vector<ThemeDataSource> data;
   std::vector<ThemeFont> fonts;
-  ShowList show;
+  BlockList<ShowRule> show;
 };
 // Random-access bytes of a manifest. parseTheme() reads it forward in small
 // pieces, several times, so a package's manifest never has to be copied into

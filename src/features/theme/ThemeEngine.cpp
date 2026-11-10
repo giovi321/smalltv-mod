@@ -895,27 +895,29 @@ static const char showRulesMsg[] PROGMEM = "expected 1 to 4 rules";
 static const char showRangesMsg[] PROGMEM = "expected 1 to 4 ranges";
 static const char showPairMsg[] PROGMEM = "expected [low, high]";
 static const char showNumbersMsg[] PROGMEM = "expected numbers or null";
+static const char showSizeMsg[] PROGMEM = "expected numbers from -3.4e38 to 3.4e38, or null";
+static const char showTooManyMsg[] PROGMEM = "expected at most 24 rules in a theme";
 static const char showOneNullMsg[] PROGMEM = "at most one end may be null";
 static const char showOrderMsg[] PROGMEM = "low must not be above high";
 static const char showUndeclaredMsg[] PROGMEM = "expected a declared data field";
 static const char showKeys[] PROGMEM = "|source|in|missing|";
 // Parses the last parsed layer's `show` list into t.show (see ShowRule): 1 to
 // 4 rules, each a declared data field and 1 to 4 inclusive [low, high]
-// ranges, where null is an open end.
+// ranges, where null is an open end; spec 2 only, and at most MaxShowRules
+// rules in all.
 __attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t, const std::string& path, std::string& error) {
   Fields layer(object, path, error);
+  if (t.spec < 2) return layer.fail("show", fromFlash(fontNeedsSpec2));
   JsonArrayConst rules = object["show"].as<JsonArrayConst>();
   if (rules.isNull() || rules.size() == 0 || rules.size() > 4) return layer.fail("show", fromFlash(showRulesMsg));
+  if (t.show.size() + rules.size() > MaxShowRules) return layer.fail("show", fromFlash(showTooManyMsg));
   for (size_t i = 0; i < rules.size(); ++i) {
     const std::string rulePath = path + ".show[" + std::to_string(i) + "]";
     JsonObjectConst item = rules[i].as<JsonObjectConst>();
     Fields fields(item, rulePath, error);
     if (item.isNull()) return fields.fail("", "expected an object");
-    ShowRule& rule = t.show.rules.emplace_back();
+    ShowRule& rule = t.show.emplace_back();
     rule.layer = static_cast<uint8_t>(t.layers.size() - 1);
-    // Its ranges follow the last range of the rules before it; ShowList keeps
-    // at most MaxLayers x 16 of them (a static_assert there), so this fits.
-    rule.first = static_cast<uint16_t>(t.show.ranges.size());
     if (!fields.keys(showKeys) || !fields.text("source", rule.source, 64) || !fields.boolean("missing", rule.missing, false)) return false;
     // Declared data fields only: the built-in time.*/device.* sources of spec 2 are not offered to `show`.
     if (!validFieldToken(rule.source, t)) return fields.fail("source", fromFlash(showUndeclaredMsg));
@@ -926,16 +928,21 @@ __attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t
       Fields range(item, rulePath + ".in[" + std::to_string(r) + "]", error);
       JsonArrayConst ends = ranges[r].as<JsonArrayConst>();
       if (ends.isNull() || ends.size() != 2) return range.fail("", fromFlash(showPairMsg));
-      double value[2];
+      float value[2];
       for (size_t e = 0; e < 2; ++e) {
         JsonVariantConst end = ends[e];
         if (end.isNull()) value[e] = e ? INFINITY : -INFINITY;
-        else if (end.is<double>() || end.is<long>() || end.is<int>()) value[e] = end.as<double>();
-        else return range.fail("", fromFlash(showNumbersMsg));
+        else if (end.is<double>() || end.is<long>() || end.is<int>()) {
+          // A number that is infinite, or too big for a float, is not an open end: null is.
+          const double number = end.as<double>();
+          if (!(std::fabs(number) <= 3.4e38)) return range.fail("", fromFlash(showSizeMsg));
+          value[e] = static_cast<float>(number);
+        } else return range.fail("", fromFlash(showNumbersMsg));
       }
       if (std::isinf(value[0]) && std::isinf(value[1])) return range.fail("", fromFlash(showOneNullMsg));
       if (value[0] > value[1]) return range.fail("", fromFlash(showOrderMsg));
-      t.show.ranges.push_back(std::pair<double, double>(value[0], value[1]));
+      rule.low[r] = value[0];
+      rule.high[r] = value[1];
     }
   }
   return true;
@@ -1127,10 +1134,14 @@ __attribute__((noinline)) static bool readLayer(ManifestSource& json, const Mani
 // about 750 bytes for a text of two letters. The count is capped at what
 // MaxTranslationBytes can hold at the least, and parseTextValue() still checks
 // every text against it, so a manifest over the limit is refused there.
-__attribute__((noinline)) static bool reserveTranslations(ManifestSource& json, const ManifestLayout& scan, Theme& t, std::string& error) {
+// The same pass counts the `show` rules, for the same reason: the first rule
+// would open a block of 12 (768 bytes). That count is capped at MaxShowRules,
+// which parseShow() enforces.
+__attribute__((noinline)) static bool reserveCounted(ManifestSource& json, const ManifestLayout& scan, Theme& t, std::string& error) {
   JsonDocument filter;
   filter["value"] = true;
-  size_t count = 0;
+  filter["show"] = true;
+  size_t count = 0, rules = 0;
   for (const auto& range : scan.layerRanges) {
     JsonDocument doc;
     ManifestReader reader(json, range.begin, range.end);
@@ -1138,16 +1149,18 @@ __attribute__((noinline)) static bool reserveTranslations(ManifestSource& json, 
     if (jsonFailed(err, reader, error)) return false;
     for (JsonPairConst p : doc["value"].as<JsonObjectConst>())
       if (languageIndex(p.key().c_str(), p.key().size()) > 0) ++count;
+    rules += doc["show"].as<JsonArrayConst>().size();
   }
   size_t most = MaxTranslationBytes / sizeof(LocalizedText);
   t.translations.reserve(count < most ? count : most);
+  t.show.reserve(rules < MaxShowRules ? rules : MaxShowRules);
   return true;
 }
 // The second pass: each layer `scan` found, parsed on its own and its JSON
 // freed before the next.
 __attribute__((noinline)) static bool parseLayers(ManifestSource& json, const ManifestLayout& scan, Theme& t, std::string& error) {
   t.layers.reserve(scan.layerRanges.size());
-  if (t.spec >= 2 && !reserveTranslations(json, scan, t, error)) return false;
+  if (t.spec >= 2 && !reserveCounted(json, scan, t, error)) return false;
   // The layer IDs seen so far, for the duplicate check; Layer does not keep
   // its ID, so they exist only while the layers are parsed.
   BlockList<std::string> ids;
@@ -1201,7 +1214,7 @@ static const char animationKeys[] PROGMEM = "|id|type|x|y|width|height|source|fr
 // What one translation holds while the theme runs: its entry and, once the
 // text outgrows the string's inline buffer, the heap block behind it. This is
 // what MaxTranslationBytes bounds -- the text alone says nothing of the entry,
-// which dwarfs a two-letter text -- and what reserveTranslations() sets aside.
+// which dwarfs a two-letter text -- and what reserveCounted() sets aside.
 static size_t translationCost(size_t length) {
   return sizeof(LocalizedText) + (length > std::string().capacity() ? length + 1 : 0);
 }
@@ -1572,16 +1585,17 @@ void Engine::resolveLayer(size_t index) {
       source = &item.value;
       break;
     }
-    double value = 0;
-    if (!source || !parseFiniteNumber(*source, value)) {
+    double number = 0;
+    if (!source || !parseFiniteNumber(*source, number)) {
       resolved.visible = rule.missing;
       continue;
     }
+    // Compared as a float, the precision the bounds are kept in: a bound of
+    // 9.49 holds for the value 9.49 whatever it rounds to.
+    const float value = static_cast<float>(number);
     resolved.visible = false;
-    for (size_t r = 0; r < rule.count; ++r) {
-      const auto& range = theme_.show.range(rule, r);
-      if (value >= range.first && value <= range.second) resolved.visible = true;
-    }
+    for (size_t r = 0; r < rule.count; ++r)
+      if (value >= rule.low[r] && value <= rule.high[r]) resolved.visible = true;
   }
   states_[index].resolved = resolved;
 }
