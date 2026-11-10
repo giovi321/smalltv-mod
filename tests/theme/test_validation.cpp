@@ -353,5 +353,18 @@ int main() {
     d["layers"][0]["show"]=v2.as<JsonVariantConst>();serializeJson(d,json);
     assert(parseTheme(json,theme,error));
   }
+  // Image and animation layers take `show` too (their key lists are in flash).
+  for(const char* type:{"image","animation"}){
+    dataDocument(d);JsonObject layer=d["layers"][0];layer.clear();
+    layer["id"]="pic";layer["type"]=type;layer["x"]=0;layer["y"]=0;layer["source"]="pic.sti";
+    if(std::string(type)=="animation"){layer["width"]=10;layer["height"]=10;layer["frames"]=2;layer["fps"]=2;layer["loop"]=true;}
+    JsonObject rule=layer["show"].add<JsonObject>();
+    rule["source"]="weather.temp";rule["in"].add<JsonArray>().add(1);
+    rule["in"][0].add(2);
+    serializeJson(d,json);
+    if(!parseTheme(json,theme,error)||theme.show.size()!=1){std::cerr<<type<<" -> "<<error<<"\n";assert(false);}
+    layer["bogus"]=1;serializeJson(d,json);
+    assert(!parseTheme(json,theme,error)&&error=="layers[0].bogus: unknown field");
+  }
   std::cout<<"theme validation tests passed\n";
 }
