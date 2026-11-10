@@ -890,13 +890,22 @@ static bool parseScroll(JsonObjectConst object, const std::string& path, std::st
   result.scroll.enabled = true;
   return true;
 }
+// parseShow's messages and its key list, in flash like the ones above.
+static const char showRulesMsg[] PROGMEM = "expected 1 to 4 rules";
+static const char showRangesMsg[] PROGMEM = "expected 1 to 4 ranges";
+static const char showPairMsg[] PROGMEM = "expected [low, high]";
+static const char showNumbersMsg[] PROGMEM = "expected numbers or null";
+static const char showOneNullMsg[] PROGMEM = "at most one end may be null";
+static const char showOrderMsg[] PROGMEM = "low must not be above high";
+static const char showUndeclaredMsg[] PROGMEM = "expected a declared data field";
+static const char showKeys[] PROGMEM = "|source|in|missing|";
 // Parses the last parsed layer's `show` list into t.show (see ShowRule): 1 to
 // 4 rules, each a declared data field and 1 to 4 inclusive [low, high]
 // ranges, where null is an open end.
 __attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t, const std::string& path, std::string& error) {
   Fields layer(object, path, error);
   JsonArrayConst rules = object["show"].as<JsonArrayConst>();
-  if (rules.isNull() || rules.size() == 0 || rules.size() > 4) return layer.fail("show", "expected 1 to 4 rules");
+  if (rules.isNull() || rules.size() == 0 || rules.size() > 4) return layer.fail("show", fromFlash(showRulesMsg));
   for (size_t i = 0; i < rules.size(); ++i) {
     const std::string rulePath = path + ".show[" + std::to_string(i) + "]";
     JsonObjectConst item = rules[i].as<JsonObjectConst>();
@@ -907,25 +916,25 @@ __attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t
     // Its ranges follow the last range of the rules before it; ShowList keeps
     // at most MaxLayers x 16 of them (a static_assert there), so this fits.
     rule.first = static_cast<uint16_t>(t.show.ranges.size());
-    if (!fields.keys("|source|in|missing|") || !fields.text("source", rule.source, 64) || !fields.boolean("missing", rule.missing, false)) return false;
+    if (!fields.keys(showKeys) || !fields.text("source", rule.source, 64) || !fields.boolean("missing", rule.missing, false)) return false;
     // Declared data fields only: the built-in time.*/device.* sources of spec 2 are not offered to `show`.
-    if (!validFieldToken(rule.source, t)) return fields.fail("source", "expected a declared data field");
+    if (!validFieldToken(rule.source, t)) return fields.fail("source", fromFlash(showUndeclaredMsg));
     JsonArrayConst ranges = item["in"].as<JsonArrayConst>();
-    if (ranges.isNull() || ranges.size() == 0 || ranges.size() > 4) return fields.fail("in", "expected 1 to 4 ranges");
+    if (ranges.isNull() || ranges.size() == 0 || ranges.size() > 4) return fields.fail("in", fromFlash(showRangesMsg));
     rule.count = static_cast<uint8_t>(ranges.size());   // 1 to 4, checked above
     for (size_t r = 0; r < ranges.size(); ++r) {
       Fields range(item, rulePath + ".in[" + std::to_string(r) + "]", error);
       JsonArrayConst ends = ranges[r].as<JsonArrayConst>();
-      if (ends.isNull() || ends.size() != 2) return range.fail("", "expected [low, high]");
+      if (ends.isNull() || ends.size() != 2) return range.fail("", fromFlash(showPairMsg));
       double value[2];
       for (size_t e = 0; e < 2; ++e) {
         JsonVariantConst end = ends[e];
         if (end.isNull()) value[e] = e ? INFINITY : -INFINITY;
         else if (end.is<double>() || end.is<long>() || end.is<int>()) value[e] = end.as<double>();
-        else return range.fail("", "expected numbers or null");
+        else return range.fail("", fromFlash(showNumbersMsg));
       }
-      if (std::isinf(value[0]) && std::isinf(value[1])) return range.fail("", "at most one end may be null");
-      if (value[0] > value[1]) return range.fail("", "low must not be above high");
+      if (std::isinf(value[0]) && std::isinf(value[1])) return range.fail("", fromFlash(showOneNullMsg));
+      if (value[0] > value[1]) return range.fail("", fromFlash(showOrderMsg));
       t.show.ranges.push_back(std::pair<double, double>(value[0], value[1]));
     }
   }
@@ -1186,6 +1195,9 @@ static const char lineKeys[] PROGMEM = "|id|type|shape|x|y|x2|y2|stroke|strokeWi
 static const char arcKeys[] PROGMEM = "|id|type|shape|x|y|radius|start|sweep|stroke|strokeWidth|bind|show|";
 static const char handKeys[] PROGMEM = "|id|type|shape|x|y|length|tail|angle|stroke|strokeWidth|bind|show|";
 static const char ticksKeys[] PROGMEM = "|id|type|shape|x|y|radius|count|length|stroke|strokeWidth|bind|show|";
+static const char textKeys[] PROGMEM = "|id|type|x|y|anchor|value|size|font|color|scroll|bind|show|";
+static const char imageKeys[] PROGMEM = "|id|type|x|y|source|scroll|bind|show|";
+static const char animationKeys[] PROGMEM = "|id|type|x|y|width|height|source|frames|fps|loop|scroll|bind|show|";
 // What one translation holds while the theme runs: its entry and, once the
 // text outgrows the string's inline buffer, the heap block behind it. This is
 // what MaxTranslationBytes bounds -- the text alone says nothing of the entry,
@@ -1250,7 +1262,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
   if (!f.text("type", type, 16) || !f.number("x", -240, 479, l.x) || !f.number("y", -240, 479, l.y)) return false;
   if (type == "text") {
     l.type = LayerType::Text;
-    if (!f.keys("|id|type|x|y|anchor|value|size|font|color|scroll|bind|show|") || !parseTextValue(o, t, f, l)) return false;
+    if (!f.keys(textKeys) ||!parseTextValue(o, t, f, l)) return false;
     if (f.has("font")) {
       // A package font (#31): fonts/<name>.stf, whose line height is the
       // layer's size, so `size` is not given.
@@ -1283,7 +1295,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
     l.anchorY = a / 3;
   } else if (type == "image" || type == "animation") {
     l.type = type == "image" ? LayerType::Image : LayerType::Animation;
-    if (!f.keys(type == "image" ? "|id|type|x|y|source|scroll|bind|show|" : "|id|type|x|y|width|height|source|frames|fps|loop|scroll|bind|show|") || !f.text("source", l.source, 110)) return false;
+    if (!f.keys(type == "image" ? imageKeys : animationKeys) || !f.text("source", l.source, 110)) return false;
     if (!validPath(l.source)) return f.fail("source", "expected a safe relative asset path");
     if (type == "animation") {
       int frames = 0, fps = 0;
