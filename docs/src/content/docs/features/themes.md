@@ -235,7 +235,9 @@ The reply is parsed while it arrives and only the declared fields are kept, so
 the firmware never holds the reply (or a document of all of it) in memory. On
 the ESP8266 a fetch is refused, like a failed request, when the free heap or
 the largest free block is too small for the connection and the parse; the
-reply's parse may take at most 2 KiB.
+reply's parse may take at most 2 KiB. `/api/status` reports `fetchRefused`
+(fetches refused for memory since boot) and `fetchLast` (`ok`, `refused` or
+`failed`) once a fetch has ended.
 When a value changes, only text whose rendered content changed is repainted,
 including the area needed to erase its previous contents.
 

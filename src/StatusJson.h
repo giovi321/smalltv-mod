@@ -16,7 +16,7 @@
 // test can compare it with the old way, byte for byte.
 //
 // Call order: writeStatusHead(), then writeStatusCrash() if there is a crash
-// record, writeStatusTickers() if the build has
+// record, writeStatusFetch() if the build has themes, writeStatusTickers() if the build has
 // the ticker, writeStatusRadar() if it has the radar, and writeStatusEnd().
 #include "JsonStream.h"
 
@@ -144,6 +144,16 @@ template <class Out> void writeStatusCrash(Out& out, const StatusCrash& k) {
   if (k.addr[0]) member(out, PSTR(",\"addr\":"), k.addr);
   if (k.hasUptime) member(out, PSTR(",\"uptime\":"), k.uptime);
   jsonout::raw(out, PSTR("}"));
+}
+
+// `,"fetchRefused":N,"fetchLast":"ok|refused|failed"`: how the theme data
+// fetches ended since boot (ThemeData.h, FetchStats). `last` is 0 until the
+// first fetch has ended, and then nothing is written; else 1 ok, 2 refused for
+// memory, 3 failed. Added after the 3.2.1 keys.
+template <class Out> void writeStatusFetch(Out& out, uint16_t refused, uint8_t last) {
+  if (!last) return;
+  statusout::member(out, PSTR(",\"fetchRefused\":"), refused);
+  jsonout::raw(out, last == 1 ? PSTR(",\"fetchLast\":\"ok\"") : last == 2 ? PSTR(",\"fetchLast\":\"refused\"") : PSTR(",\"fetchLast\":\"failed\""));
 }
 
 // `,"tickers":[...]`, row i from rowAt(i).

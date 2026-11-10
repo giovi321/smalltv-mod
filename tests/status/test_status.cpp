@@ -7,6 +7,8 @@
 #include <ArduinoJson.h>
 #include <cassert>
 #include <cstdio>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 using namespace smalltv;
@@ -285,6 +287,34 @@ int main() {
     StringSink s2;
     { PieceWriter<128> out(s2); writeStatusCrash(out, a); out.flush(); }
     assert(s2.text == ",\"lastCrash\":{\"reason\":\"Abort/out of memory\",\"fw\":\"3.2.1\"}");
+  }
+  {  // fetch: nothing before the first theme data fetch has ended, then the
+     // count of refusals and how the last one ended
+    StringSink none;
+    { PieceWriter<128> out(none); writeStatusFetch(out, 0, 0); out.flush(); }
+    assert(none.text.empty());
+    const char* const lastNames[] = {"ok", "refused", "failed"};
+    for (uint8_t last = 1; last <= 3; ++last) {
+      StringSink s;
+      { PieceWriter<5> out(s); writeStatusFetch(out, 7, last); out.flush(); }
+      assert(s.text == std::string(",\"fetchRefused\":7,\"fetchLast\":\"") + lastNames[last - 1] + "\"");
+    }
+    StringSink top;
+    { PieceWriter<128> out(top); writeStatusFetch(out, 65535, 2); out.flush(); }
+    assert(top.text == ",\"fetchRefused\":65535,\"fetchLast\":\"refused\"");
+    // Where the keys sit in the reply: after lastCrash, before the tickers.
+    std::ifstream in("src/WebPortal.cpp");
+    assert(in.good());
+    std::stringstream file;
+    file << in.rdbuf();
+    const std::string code = file.str();
+    const size_t crash = code.find("smalltv::writeStatusCrash(out, k);");
+    const size_t fetch = code.find("statusFetch(out);");
+    const size_t tickers = code.find("smalltv::writeStatusTickers(");
+    assert(crash != std::string::npos && fetch != std::string::npos && tickers != std::string::npos && crash < fetch && fetch < tickers);
+    // The call sits in a sibling of handleStatus (its frame must not grow), only where themes are built.
+    assert(code.find("__attribute__((noinline)) static void statusFetch(") != std::string::npos);
+    assert(code.find("smalltv::writeStatusFetch(out, stats.refused, stats.last);") != std::string::npos);
   }
   std::printf("status reply tests passed (%d replies, byte for byte)\n", checked);
   return 0;
