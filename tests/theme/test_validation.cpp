@@ -312,31 +312,46 @@ int main() {
     assert(theme.show.ranges.size()==3);    dataDocument(d);serializeJson(d,json);assert(parseTheme(json,theme,error)&&theme.show.size()==0);
   }
   // Each malformed rule is refused, with the error pointing at it.
-  struct BadShow { const char* show; const char* where; };
+  // `message` is the exact reason after the location (nullptr: not checked). The
+  // messages sit in flash on the ESP8266, so a lost or garbled one must show here.
+  struct BadShow { const char* show; const char* where; const char* message; };
   const BadShow badShows[]={
-    {"{}","layers[0].show:"},
-    {"[]","layers[0].show:"},
-    {"[1]","layers[0].show[0]:"},
-    {"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"x\":1}]","layers[0].show[0].x:"},
-    {"[{\"source\":\"weather.wind\",\"in\":[[0,1]]}]","layers[0].show[0].source:"},
-    {"[{\"in\":[[0,1]]}]","layers[0].show[0].source:"},
-    {"[{\"source\":\"weather.temp\"}]","layers[0].show[0].in:"},
-    {"[{\"source\":\"weather.temp\",\"in\":[]}]","layers[0].show[0].in:"},
-    {"[{\"source\":\"weather.temp\",\"in\":[[0,1],[2,3],[4,5],[6,7],[8,9]]}]","layers[0].show[0].in:"},
-    {"[{\"source\":\"weather.temp\",\"in\":[[0]]}]","layers[0].show[0].in[0]:"},
-    {"[{\"source\":\"weather.temp\",\"in\":[[0,1,2]]}]","layers[0].show[0].in[0]:"},
-    {"[{\"source\":\"weather.temp\",\"in\":[[2,1]]}]","layers[0].show[0].in[0]:"},
-    {"[{\"source\":\"weather.temp\",\"in\":[[null,null]]}]","layers[0].show[0].in[0]:"},
-    {"[{\"source\":\"weather.temp\",\"in\":[[\"0\",1]]}]","layers[0].show[0].in[0]:"},
-    {"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":1}]","layers[0].show[0].missing:"},
+    {"{}","layers[0].show:","expected 1 to 4 rules"},
+    {"[]","layers[0].show:","expected 1 to 4 rules"},
+    {"[1]","layers[0].show[0]:","expected an object"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"x\":1}]","layers[0].show[0].x:","unknown field"},
+    {"[{\"source\":\"weather.wind\",\"in\":[[0,1]]}]","layers[0].show[0].source:","expected a declared data field"},
+    {"[{\"in\":[[0,1]]}]","layers[0].show[0].source:",nullptr},
+    {"[{\"source\":\"weather.temp\"}]","layers[0].show[0].in:","expected 1 to 4 ranges"},
+    {"[{\"source\":\"weather.temp\",\"in\":[]}]","layers[0].show[0].in:","expected 1 to 4 ranges"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1],[2,3],[4,5],[6,7],[8,9]]}]","layers[0].show[0].in:","expected 1 to 4 ranges"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0]]}]","layers[0].show[0].in[0]:","expected [low, high]"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1,2]]}]","layers[0].show[0].in[0]:","expected [low, high]"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[2,1]]}]","layers[0].show[0].in[0]:","low must not be above high"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[null,null]]}]","layers[0].show[0].in[0]:","at most one end may be null"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[\"0\",1]]}]","layers[0].show[0].in[0]:","expected numbers or null"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":1}]","layers[0].show[0].missing:",nullptr},
     {"[{\"source\":\"weather.temp\",\"in\":[[0,1]]},{\"source\":\"weather.temp\",\"in\":[[0,1]]},"
      "{\"source\":\"weather.temp\",\"in\":[[0,1]]},{\"source\":\"weather.temp\",\"in\":[[0,1]]},"
-     "{\"source\":\"weather.temp\",\"in\":[[0,1]]}]","layers[0].show:"},
+     "{\"source\":\"weather.temp\",\"in\":[[0,1]]}]","layers[0].show:","expected 1 to 4 rules"},
   };
   for(const BadShow& bad:badShows){
     dataDocument(d);JsonDocument value;assert(!deserializeJson(value,bad.show));
     d["layers"][0]["show"]=value.as<JsonVariantConst>();serializeJson(d,json);
-    if(parseTheme(json,theme,error)||error.find(bad.where)!=0){std::cerr<<bad.show<<" -> "<<error<<"\n";assert(false);}
+    const bool refused=!parseTheme(json,theme,error);
+    const bool where=error.find(bad.where)==0;
+    const bool message=!bad.message||error==std::string(bad.where)+" "+bad.message;
+    if(!refused||!where||!message){std::cerr<<bad.show<<" -> "<<error<<"\n";assert(false);}
+  }
+  // A misspelled key is listed by name; the key list sits in flash too.
+  {
+    dataDocument(d);JsonDocument value;assert(!deserializeJson(value,"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":true,\"sources\":1}]"));
+    d["layers"][0]["show"]=value.as<JsonVariantConst>();serializeJson(d,json);
+    assert(!parseTheme(json,theme,error)&&error=="layers[0].show[0].sources: unknown field");
+    // All three keys of a rule are still accepted (the key list is intact).
+    dataDocument(d);JsonDocument v2;assert(!deserializeJson(v2,"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":true}]"));
+    d["layers"][0]["show"]=v2.as<JsonVariantConst>();serializeJson(d,json);
+    assert(parseTheme(json,theme,error));
   }
   std::cout<<"theme validation tests passed\n";
 }
