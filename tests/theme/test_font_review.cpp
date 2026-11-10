@@ -185,7 +185,7 @@ static void testGlyphLookup() {
 // proves nothing about the range check.
 static void testCodeAfterTheFont() {
   std::string s="STH1";u16(s,3);u16(s,0);
-  entry(s,"theme.json",manifest(textLayer("")));
+  entry(s,"theme.json",manifest(textLayer(",\"x\":0,\"y\":0")));
   entry(s,"fonts/test.stf",font());
   entry(s,"fonts/next.stf",font());
   Memory source;source.data=s;
