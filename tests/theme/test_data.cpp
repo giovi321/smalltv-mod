@@ -336,10 +336,171 @@ static void testDataAgeSpec1() {
   assert(on.publish(sources, values) && values.size() == 1);
 }
 
+// ---- Fetch retry: after a failed fetch, 1, 2, 4, 8 minutes, then the interval ----
+// Runs the fetches of one source the way refreshData does: each ends, the wait
+// comes from fetchWaitMs, and the next one starts when it is due.
+static std::vector<uint32_t> waitsAfterFailures(uint32_t interval, int failures) {
+  uint8_t tries = 0;
+  fetchStarted(tries);
+  std::vector<uint32_t> waits;
+  for (int i = 0; i < failures; ++i) waits.push_back(fetchWaitMs(interval, false, tries));
+  return waits;
+}
+static void testFetchRetry(const char* wiringFile) {
+  // The sequence at a long interval: 60, 120, 240, 480 s, then the interval.
+  {
+    const auto w = waitsAfterFailures(900, 8);
+    const uint32_t want[] = {60000, 120000, 240000, 480000, 900000, 900000, 900000, 900000};
+    for (int i = 0; i < 8; ++i) assert(w[i] == want[i]);
+  }
+  // With 300 s the fourth wait is capped, so the gaps are 60, 120, 240, 300, 300.
+  {
+    const auto w = waitsAfterFailures(300, 6);
+    const uint32_t want[] = {60000, 120000, 240000, 300000, 300000, 300000};
+    for (int i = 0; i < 6; ++i) assert(w[i] == want[i]);
+  }
+  // A wait is never longer than the interval, for any interval the parser
+  // allows (10 to 86,400 s), and at most 4 waits are shorter than it.
+  {
+    const uint32_t intervals[] = {10, 11, 59, 60, 61, 120, 300, 480, 481, 900, 3600, 86400};
+    for (uint32_t interval : intervals) {
+      const auto w = waitsAfterFailures(interval, 40);
+      int shorter = 0;
+      for (uint32_t ms : w) {
+        assert(ms <= interval * 1000u && ms > 0);
+        if (ms < interval * 1000u) ++shorter;
+      }
+      assert(shorter <= 4);
+      assert(w[39] == interval * 1000u);
+    }
+    const auto ten = waitsAfterFailures(10, 6);
+    for (uint32_t ms : ten) assert(ms == 10000);               // never fetches less often than today
+    const auto sixty = waitsAfterFailures(60, 6);
+    for (uint32_t ms : sixty) assert(ms == 60000);
+    const auto day = waitsAfterFailures(86400, 6);
+    assert(day[0] == 60000 && day[3] == 480000 && day[4] == 86400000u);
+  }
+  // A success goes straight back to the interval, clears the count, and a later
+  // failure starts over at one minute.
+  {
+    uint8_t tries = 0;
+    fetchStarted(tries);
+    assert(fetchWaitMs(900, false, tries) == 60000);
+    assert(fetchWaitMs(900, false, tries) == 120000);
+    assert(fetchWaitMs(900, false, tries) == 240000);
+    assert(fetchFailures(tries) == 3);
+    assert(fetchWaitMs(900, true, tries) == 900000);
+    assert(fetchFailures(tries) == 0);
+    assert(fetchWaitMs(900, false, tries) == 60000);
+    assert(fetchWaitMs(900, false, tries) == 120000);
+    // A success after the last short wait, and after the long ones, too.
+    for (int i = 0; i < 10; ++i) fetchWaitMs(900, false, tries);
+    assert(fetchWaitMs(900, true, tries) == 900000 && fetchFailures(tries) == 0);
+    assert(fetchWaitMs(900, false, tries) == 60000);
+  }
+  // A long outage: thousands of failures never wrap the count back to short waits.
+  {
+    uint8_t tries = 0;
+    fetchStarted(tries);
+    for (int i = 0; i < 100000; ++i) {
+      const uint32_t ms = fetchWaitMs(900, false, tries);
+      if (i >= 4) assert(ms == 900000);
+      assert(fetchFailures(tries) > 0);                       // the count never reads as "no failure"
+    }
+    assert(fetchFailures(tries) >= 5);
+    // Counting right at the top of the range does not wrap either.
+    tries = 255;
+    assert(fetchWaitMs(900, false, tries) == 900000 && tries == 255 && fetchFailures(tries) == 254);
+    tries = 254;
+    assert(fetchWaitMs(900, false, tries) == 900000 && tries == 255);
+    assert(fetchWaitMs(300, true, tries) == 300000 && fetchFailures(tries) == 0);
+  }
+  // A result for a source that was never marked started still counts as a
+  // first failure (the first wait is one minute, not a shift by a negative).
+  {
+    uint8_t tries = 0;
+    assert(fetchWaitMs(900, false, tries) == 60000 && fetchFailures(tries) == 1);
+    uint8_t other = 0;
+    assert(fetchWaitMs(900, true, other) == 900000 && fetchFailures(other) == 0 && other != 0);
+  }
+  // A source that was never started is due at once, whatever the clock says,
+  // and starting it makes it a scheduled one.
+  {
+    uint8_t tries = 0;
+    assert(fetchDue(tries, 0, 0) && fetchDue(tries, 12345, 0) && fetchDue(tries, 0xffffffffu, 5));
+    fetchStarted(tries);
+    assert(fetchFailures(tries) == 0 && !fetchDue(tries, 1000, 999) && fetchDue(tries, 1000, 1000));
+    // Starting again (a source whose fetch was dropped and is due again) keeps the count.
+    fetchWaitMs(900, false, tries);
+    fetchWaitMs(900, false, tries);
+    fetchStarted(tries);
+    assert(fetchFailures(tries) == 2);
+  }
+  // The schedule works across the wrap of millis(): the next time is now plus
+  // the wait, the due test is the signed difference, for every interval.
+  {
+    const uint32_t intervals[] = {10, 60, 300, 900, 86400};
+    const uint32_t clocks[] = {0, 1000, 0x7fffffffu - 5000, 0x80000000u, 0xfffffff0u, 0xffffffffu - 100000, 0xffffffffu};
+    for (uint32_t interval : intervals) {
+      for (uint32_t now : clocks) {
+        for (int failures = 0; failures < 7; ++failures) {
+          uint8_t tries = 0;
+          fetchStarted(tries);
+          uint32_t wait = fetchWaitMs(interval, true, tries);
+          for (int i = 0; i < failures; ++i) wait = fetchWaitMs(interval, false, tries);
+          const uint32_t next = now + wait;
+          assert(!fetchDue(tries, next, now));
+          assert(!fetchDue(tries, next, now + (wait - 1)));
+          assert(fetchDue(tries, next, now + wait));
+          assert(fetchDue(tries, next, now + wait + 1000));
+        }
+      }
+    }
+  }
+
+  // refreshData is device-only code, so check that it is wired as above: a
+  // finished fetch gets its wait from fetchWaitMs, the count sits with the
+  // other per-source state, a new theme (or an unload) clears it, and a
+  // release keeps it. argv[1] names another copy of the file.
+  {
+    std::ifstream in(wiringFile);
+    assert(in.good());
+    std::stringstream text;
+    text << in.rdbuf();
+    const std::string code = text.str();
+    const std::string wait = "dataNextMs_[result->index] = millis() + smalltv::fetchWaitMs(sources[result->index].interval, result->success, dataTries_[result->index]);";
+    assert(code.find(wait) != std::string::npos);
+    assert(code.find("fetchWaitMs(") == code.find(wait) + wait.find("fetchWaitMs(") && code.find("fetchWaitMs(", code.find(wait) + wait.size()) == std::string::npos);
+    assert(code.find("interval * 1000") == std::string::npos);  // no second, plain schedule
+    // The scan asks fetchDue, and marks a source started with fetchStarted.
+    const size_t due = code.find("if (!smalltv::fetchDue(dataTries_[i], dataNextMs_[i], millis())) continue;");
+    const size_t start = code.find("auto request = dataRequests_.start(sources[i], i);");
+    const size_t started = code.find("smalltv::fetchStarted(dataTries_[i]);");
+    assert(due != std::string::npos && start != std::string::npos && started != std::string::npos);
+    assert(due < start && start < started);
+    // A refused fetch is a failure: finish(false) is collected by the same take().
+    assert(code.find("if (!startThemeDataFetch(request)) request->finish(false);") != std::string::npos);
+    // The Wi-Fi check comes before any start, so no fetch (and no count) while it is down.
+    const size_t wifi = code.find("WiFi.status() != WL_CONNECTED) return;");
+    assert(wifi != std::string::npos && wifi < due);
+    // Cleared with dataNextMs_ in a new theme and in unload(); not in release().
+    assert(code.find("dataNextMs_.assign(theme.data.size(), 0);\n        dataTries_.assign(theme.data.size(), 0);") != std::string::npos);
+    assert(code.find("dataNextMs_.clear();\n  dataTries_.clear();") != std::string::npos);
+    assert(code.find("dataScheduled_") == std::string::npos);
+    const size_t releaseAt = code.find("void ThemeMode::release(");
+    const size_t releaseEnd = code.find("\n}\n", releaseAt);
+    assert(releaseAt != std::string::npos && releaseEnd != std::string::npos);
+    const std::string release = code.substr(releaseAt, releaseEnd - releaseAt);
+    assert(release.find("dataTries_") == std::string::npos && release.find("keepData_ = true;") != std::string::npos);
+  }
+  std::cout << "theme data fetch retry tests passed\n";
+}
+
 int main(int argc, char** argv) {
   testDataAgeSpec1();
   testDataAgePublishAllocations();
   testDataAges(argc > 1 ? argv[1] : "src/features/theme/ThemeMode.cpp");
+  testFetchRetry(argc > 1 ? argv[1] : "src/features/theme/ThemeMode.cpp");
   std::string body;
   Response complete;complete.bytes="{\"value\":42}";
   assert(readDataBody(complete,12,body) && body==complete.bytes && complete.elapsed==0);
