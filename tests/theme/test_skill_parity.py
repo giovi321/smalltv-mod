@@ -264,6 +264,8 @@ class ShowTests(unittest.TestCase):
         for source, message in bad.items():
             self.assertEqual(stheme.validate(self.theme([dict(SHOW, source=source)])), [message])
         self.assertEqual(stheme.validate(self.theme([])), ['layers[0].show: expected 1 to 4 rules'])
+        self.assertEqual(stheme.validate(self.theme([SHOW] * 5)), ['layers[0].show: expected 1 to 4 rules'])
+        self.assertEqual(stheme.validate(self.theme([dict(SHOW, **{'in': [[3, 3], [None, 1], [5, None]]})])), [])
         self.assertEqual(stheme.validate(self.theme([dict(SHOW, **{'in': [[None, None]]})])),
                          ['layers[0].show[0].in[0]: at most one end may be null'])
         self.assertEqual(stheme.validate(self.theme([dict(SHOW, **{'in': [[0, 1e39]]})])),
@@ -272,6 +274,11 @@ class ShowTests(unittest.TestCase):
                          ['layers[0].show[0].in[0]: low must not be above high'])
         seven = manifest(data=[SOURCE], layers=[dict(TEXT, id=f'l{i}', show=[SHOW] * 4) for i in range(7)])
         self.assertEqual(stheme.validate(seven), ['layers[6].show: expected at most 24 rules in a theme'])
+        # One rule over is refused, 24 are not.
+        full = [dict(TEXT, id=f'l{i}', show=[SHOW] * 4) for i in range(6)]
+        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=full)), [])
+        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=full + [dict(TEXT, id='x', show=[SHOW])])),
+                         ['layers[6].show: expected at most 24 rules in a theme'])
 
     def test_auto_spec_becomes_2(self):
         self.assertEqual(stheme.needed_spec(self.theme([SHOW])), 2)
@@ -285,6 +292,7 @@ class ShowTests(unittest.TestCase):
         self.assertTrue(stheme.shown(both, data(w_x='10')))               # w.y missing holds
         self.assertTrue(stheme.shown(both, data(w_x='0')))
         self.assertTrue(stheme.shown(both, data(w_x='1000', w_y='5')))    # open end, bound included
+        self.assertTrue(stheme.shown(both, data(w_x='1e300')))            # too big for a float: still past 20
         self.assertFalse(stheme.shown(both, data(w_x='10.5')))            # between the ranges
         self.assertFalse(stheme.shown(both, data(w_x='5', w_y='5.5')))    # the second rule fails
         self.assertFalse(stheme.shown(both, data(w_x='abc')))
@@ -293,6 +301,16 @@ class ShowTests(unittest.TestCase):
         precise = dict(TEXT, show=[dict(SHOW, **{'in': [[9.49, 9.49]]})])
         self.assertTrue(stheme.shown(precise, data(w_x='9.49')))
         self.assertFalse(stheme.shown(precise, data(w_x='9.5')) or stheme.shown(precise, data(w_x='9.48')))
+
+    def test_preview_draws_only_shown_layers(self):
+        box = dict(id='box', type='shape', shape='rectangle', x=10, y=10, width=5, height=5, fill='#ff0000',
+                   show=[dict(SHOW, **{'in': [[0, 10]]})])
+        theme = manifest(data=[SOURCE], layers=[box])
+        bg, red = stheme.color565('#000000'), stheme.color565('#ff0000')
+        at = lambda values: stheme.Renderer(theme, {}, 'en', values).frame(None, 0)[12 * 240 + 12]
+        self.assertEqual(at({'w.x': '5'}), red)
+        self.assertEqual(at({'w.x': '50'}), bg)
+        self.assertEqual(at({}), bg)
 
 
 if __name__ == '__main__':

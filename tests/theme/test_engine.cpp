@@ -296,7 +296,7 @@ int main() {
       return false;
     };
     const int layerCount = 6;
-    static_assert(6 * 4 == MaxShowRules, "the sweep fills the cap exactly");
+    assert(layerCount * 4 == int(MaxShowRules));   // the sweep fills the cap exactly
     auto layersJson = [&](int count) {
     std::string layers;
     for (int i = 0; i < count; ++i) {
@@ -321,6 +321,10 @@ int main() {
     assert(parseTheme(head + layersJson(layerCount) + "]}", sweep, error) && sweep.layers.size() == 6 && sweep.show.size() == MaxShowRules);
     // One layer more is over the cap, and the error names the layer that crosses it.
     assert(!parseTheme(head + layersJson(layerCount + 1) + "]}", sweep, error) && error == "layers[6].show: expected at most 24 rules in a theme");
+    // Even one rule over the cap is refused: a 7th layer with a single rule.
+    assert(!parseTheme(head + layersJson(layerCount) + ",{\"id\":\"extra\",\"type\":\"shape\",\"shape\":\"rectangle\",\"x\":1,\"y\":2,"
+      "\"width\":5,\"height\":5,\"fill\":\"#ffffff\",\"show\":[{\"source\":\"w.code\",\"in\":[[0,1]]}]}]}", sweep, error) &&
+      error == "layers[6].show: expected at most 24 rules in a theme");
     // (The refused parse above left `sweep` half filled; parse the good one again.)
     assert(parseTheme(head + layersJson(layerCount) + "]}", sweep, error));
     Engine e;

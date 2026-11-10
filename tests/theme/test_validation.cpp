@@ -334,9 +334,9 @@ int main() {
     d["layers"][0]["show"]=ageDoc.as<JsonVariantConst>();serializeJson(d,json);
     assert(parseTheme(json,theme,error)&&theme.show.size()==1&&theme.show[0].source=="weather.age");
     // The biggest a float holds is still accepted.
-    showDocument(d);JsonDocument bigDoc;assert(!deserializeJson(bigDoc,"[{\"source\":\"weather.temp\",\"in\":[[-3e38,3e38]]}]"));
+    showDocument(d);JsonDocument bigDoc;assert(!deserializeJson(bigDoc,"[{\"source\":\"weather.temp\",\"in\":[[-3.4e38,3.4e38]]}]"));
     d["layers"][0]["show"]=bigDoc.as<JsonVariantConst>();serializeJson(d,json);
-    assert(parseTheme(json,theme,error)&&theme.show[0].low[0]==-3e38f&&theme.show[0].high[0]==3e38f);
+    assert(parseTheme(json,theme,error)&&theme.show[0].low[0]==-3.4e38f&&theme.show[0].high[0]==3.4e38f);
   }
   // Each malformed rule is refused, with the error pointing at it.
   // `message` is the exact reason after the location (nullptr: not checked). The
