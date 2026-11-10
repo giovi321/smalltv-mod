@@ -1,7 +1,7 @@
 #!/bin/sh
 # Optional: the same targets under libFuzzer (needs clang with the fuzzer
 # runtime; the default tests/fuzz/run.sh does not). One binary per target:
-#   sh tests/fuzz/libfuzzer.sh package|manifest|meta|import [libFuzzer args...]
+#   sh tests/fuzz/libfuzzer.sh package|manifest|meta|import|font [libFuzzer args...]
 # e.g. sh tests/fuzz/libfuzzer.sh package -max_total_time=60 \
 #        /tmp/corpus-package examples/themes
 set -eu
