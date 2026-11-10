@@ -1,8 +1,8 @@
 // The bebas-clock example before the clock is set (or a data field has never
-// been fetched): the engine expands {HH}:{MM} to "--:--". The fonts keep only
-// the digits and ':', so '-' is a character the font lacks, and it is drawn as
-// the fallback glyph, which the packer takes to be the lowest kept character,
-// '0'. The screen then shows 00:00 instead of a placeholder.
+// been fetched): the engine expands {HH}:{MM} to "--:--". A font that lacks
+// '-' draws it as the fallback glyph, and if that is a digit the screen shows
+// 00:00 instead of a placeholder. The packer keeps '-' in every font, so the
+// compiled example must draw '-' as something other than a digit.
 // Run from the repository root.
 #include "ThemePackage.h"
 #include <fstream>

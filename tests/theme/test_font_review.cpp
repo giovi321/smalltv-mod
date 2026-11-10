@@ -3,7 +3,6 @@
 // run shows every gap; the exit status is the number of failures.
 #include "ThemePackage.h"
 #include <cstring>
-#include <fstream>
 #include <iostream>
 #include <random>
 using namespace smalltv;
@@ -16,12 +15,6 @@ struct Memory : Source {
     if(offset>data.size()||count>data.size()-offset) return false;
     memcpy(dest,data.data()+offset,count);return true;
   }
-};
-struct Disk : Source {
-  std::ifstream file;uint32_t length;
-  explicit Disk(const char* path):file(path,std::ios::binary){file.seekg(0,std::ios::end);length=file.tellg();}
-  uint32_t size() const override {return length;}
-  bool read(uint32_t offset,void* dest,size_t n) override {file.clear();file.seekg(offset);file.read(static_cast<char*>(dest),n);return bool(file);}
 };
 struct Pixels : Display {
   uint16_t data[240*240]{};
@@ -186,34 +179,32 @@ static void testGlyphLookup() {
   CHECK("glyph: a code point without a glyph falls back",f.glyph('B')=='C'&&f.advance('B')==2);
   CHECK("glyph: bytes outside the font fall back",f.glyph('@')=='C'&&f.glyph('D')=='C'&&f.glyph(0)=='C'&&f.glyph(255)=='C');
 }
-// 6. Not a pass/fail check: how many storage reads one redraw of the example costs.
-struct Counting : Disk {
-  unsigned reads=0,bytes=0;
-  using Disk::Disk;
-  bool read(uint32_t offset,void* dest,size_t n) override {++reads;bytes+=n;return Disk::read(offset,dest,n);}
-};
-static void measureReads() {
-  Counting disk("examples/themes/bebas-clock.stheme");
-  Package p(disk);Theme t;std::string error;
-  if(!p.load(t,error)) return;
-  Engine e;e.setTheme(t,0);Pixels d;tm now{};now.tm_year=126;now.tm_mday=17;now.tm_hour=10;now.tm_min=24;now.tm_wday=4;now.tm_mon=8;
-  auto dirty=e.update(0,&now);
-  disk.reads=disk.bytes=0;
-  render(e,{Rect(0,0,240,240)},p,d);
-  std::cout<<"measure: full redraw of bebas-clock: "<<disk.reads<<" storage reads, "<<disk.bytes<<" bytes\n";
-  disk.reads=disk.bytes=0;
-  now.tm_min=25;dirty=e.update(1000,&now);
-  size_t area=0;for(const Rect& r:dirty) area+=r.w*r.h;
-  render(e,dirty,p,d);
-  std::cout<<"measure: redraw after the minute changed ("<<dirty.size()<<" rects, "<<area<<" px): "<<disk.reads<<" storage reads\n";
+// 6. A code point one past the font's records is no glyph row, even when the
+// bytes after the records can be read (another font follows in the package).
+// With the font last in the file, a read past the table fails by itself and
+// proves nothing about the range check.
+static void testCodeAfterTheFont() {
+  std::string s="STH1";u16(s,3);u16(s,0);
+  entry(s,"theme.json",manifest(textLayer("")));
+  entry(s,"fonts/test.stf",font());
+  entry(s,"fonts/next.stf",font());
+  Memory source;source.data=s;
+  Package p(source);Theme t;std::string error;
+  CHECK("past the font: loads",p.load(t,error));
+  const AssetHandle h=p.resolve("fonts/test.stf");
+  CHECK("past the font: handle",h!=InvalidAsset);
+  uint8_t coverage[240];int left=-1,width=-1;
+  CHECK("past the font: the last code point is a row",p.glyphRow(h,'C',2,coverage,left,width));
+  CHECK("past the font: one past is none",!p.glyphRow(h,'D',2,coverage,left,width));
+  CHECK("past the font: one before is none",!p.glyphRow(h,'@',2,coverage,left,width));
 }
 int main() {
-  measureReads();
   testEdges();
   testAnchors();
   testValues();
   testDirtyRects();
   testGlyphLookup();
+  testCodeAfterTheFont();
   std::cout<<(failures?"theme font review tests: FAILED ":"theme font review tests passed ")<<failures<<" failing checks\n";
   return failures?1:0;
 }
