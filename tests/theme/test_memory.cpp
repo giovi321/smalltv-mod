@@ -478,10 +478,83 @@ static void testShortTranslations() {
   assert(!parseTheme(shortManifest(32, 5, "abcdef"), theme, error) && error.find("1024") != std::string::npos);
 }
 
+// `show` rules. The first rule of a list that opens its blocks on demand takes
+// a whole block (768 B), and a second list for the ranges another: one rule
+// with one range held about 1.5 KB. The ranges now sit in the rule, and the
+// rules are reserved at the number the manifest declares, so a theme holds
+// its rules and little else.
+static std::string showManifest(int layers, int rulesPerLayer, int ranges, const char* source, bool withShow) {
+  std::string json = "{\"spec\":2,\"theme\":{\"id\":\"sh\",\"name\":\"Sh\",\"author\":\"A\",\"version\":\"1\"},"
+    "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},"
+    "\"data\":[{\"id\":\"weather\",\"url\":\"http://example.test/w.json\",\"interval\":600,"
+    "\"fields\":[{\"id\":\"code\",\"path\":\"code\"},{\"id\":\"temperature\",\"path\":\"temp\"}]}],\"layers\":[";
+  for (int i = 0; i < layers; ++i) {
+    if (i) json += ",";
+    json += "{\"id\":\"l" + std::to_string(i) + "\",\"type\":\"shape\",\"shape\":\"rectangle\",\"x\":1,\"y\":" + std::to_string(i * 7) +
+            ",\"width\":5,\"height\":5,\"fill\":\"#ffffff\"";
+    if (withShow) {
+      json += ",\"show\":[";
+      for (int r = 0; r < rulesPerLayer; ++r) {
+        json += std::string(r ? "," : "") + "{\"source\":\"" + source + "\",\"missing\":true,\"in\":[";
+        for (int k = 0; k < ranges; ++k) json += std::string(k ? "," : "") + "[" + std::to_string(k * 100 + 5) + "," + std::to_string(k * 100 + 60) + "]";
+        json += "]}";
+      }
+      json += "]";
+    }
+    json += "}";
+  }
+  return json + "]}";
+}
+struct ShowUsage { size_t loadPeak, loadLargest, running; };
+static ShowUsage showUsage(const std::string& json) {
+  Theme theme;
+  std::string error;
+  ShowUsage u{};
+  live = peak = largest = 0;
+  counting = true;
+  {
+    bool ok = parseTheme(json, theme, error);
+    if (!ok) std::cerr << error << '\n';
+    assert(ok);
+  }
+  u.loadPeak = peak;
+  u.loadLargest = largest;
+  live = 0;
+  {
+    Engine engine;
+    engine.setTheme(std::move(theme), 0);
+    tm time{};
+    time.tm_year = 126; time.tm_mon = 9; time.tm_mday = 23; time.tm_wday = 5;
+    engine.update(1000, &time);
+    u.running = live;
+  }
+  counting = false;
+  return u;
+}
+static void testShowRules() {
+  // What the rules add to a theme: their own bytes, plus a little for the block
+  // headers and the list of blocks. 24 is the most a theme may have.
+  struct Case { int layers, rulesPerLayer, ranges; const char* source; };
+  for (Case c : {Case{1, 1, 1, "weather.code"}, Case{2, 1, 4, "weather.code"}, Case{6, 4, 4, "weather.temperature"}}) {
+    const size_t rules = size_t(c.layers) * c.rulesPerLayer;
+    const size_t held = heldBy(showManifest(c.layers, c.rulesPerLayer, c.ranges, c.source, true)) -
+                        heldBy(showManifest(c.layers, c.rulesPerLayer, c.ranges, c.source, false));
+    // A source name over 15 characters takes its own small block of 32.
+    const size_t bound = rules * (sizeof(ShowRule) + (strlen(c.source) > 15 ? 32 : 0)) + 96;
+    printf("show rules (%d layers x %d rules x %d ranges): %zu rules hold %zu B (bound %zu B)\n", c.layers, c.rulesPerLayer, c.ranges, rules, held, bound);
+    assert(held <= bound);
+  }
+  // A theme with every rule it may have stays inside the budgets the bundled examples are held to.
+  const ShowUsage u = showUsage(showManifest(6, 4, 4, "weather.temperature", true));
+  printf("show at the limit (24 rules, 96 ranges): load peak %zu B, largest block %zu B, running %zu B\n", u.loadPeak, u.loadLargest, u.running);
+  assert(u.loadPeak <= LoadPeakBudget && u.loadLargest <= LargestBlockBudget && u.running <= RunningBudget);
+}
+
 int main(int argc, char** argv) {
-  // A show rule keeps no vector of its own: 32 bytes on this 32-bit build (40 with one).
-  if (sizeof(ShowRule) > 32) fprintf(stderr, "sizeof(ShowRule) %zu: its ranges belong in ShowList::ranges\n", sizeof(ShowRule));
-  assert(sizeof(ShowRule) <= 32);
+  // A show rule holds its ranges itself: 4 floats a side, no vector of its own.
+  if (sizeof(ShowRule) > 64) fprintf(stderr, "sizeof(ShowRule) %zu\n", sizeof(ShowRule));
+  assert(sizeof(ShowRule) <= 64);
+  testShowRules();
   testBlockList();
   testManyEntries();
   testThemeIndex();

@@ -221,9 +221,14 @@ int main() {
   // one of the rule's ranges (ends included, null open), or is missing and
   // the rule says "missing": true. Hidden, the layer has no bounds, so it is
   // not drawn, and hiding or showing it repaints just its own area.
+  // `show` needs spec 2.
+  auto spec2 = [](std::string json) {
+    json.replace(json.find("\"spec\":1"), 8, "\"spec\":2");
+    return json;
+  };
   {
     auto withShow = [&](const std::string& rules) {
-      std::string json = dataJson;
+      std::string json = spec2(dataJson);
       const std::string end = "\"color\":\"#ffffff\"}]}";
       json.replace(json.find(end), end.size(), "\"color\":\"#ffffff\",\"show\":" + rules + "}]}");
       assert(parseTheme(json, theme, error));
@@ -258,7 +263,7 @@ int main() {
     // Rules belong to their own layer. Here only the second layer, a
     // rectangle, has one; hiding it changes nothing but its visibility, and
     // that alone repaints its area.
-    std::string twoLayers = dataJson;
+    std::string twoLayers = spec2(dataJson);
     const std::string end = "\"color\":\"#ffffff\"}]}";
     twoLayers.replace(twoLayers.find(end), end.size(), "\"color\":\"#ffffff\"},"
       "{\"id\":\"box\",\"type\":\"shape\",\"shape\":\"rectangle\",\"x\":100,\"y\":100,\"width\":20,\"height\":10,\"fill\":\"#ff0000\","
@@ -276,8 +281,8 @@ int main() {
     assert(boxRepainted && two.states()[1].resolved.visible);
   }
 
-  // The most a theme can hold: 32 layers with 4 rules of 4 ranges each (512
-  // ranges). Layer i, rule r, range k covers [40i + 10k + r, 40i + 10k + r + 6].
+  // The most a theme can hold: MaxShowRules (24) rules, here 6 layers with 4
+  // rules of 4 ranges each (96 ranges). Layer i, rule r, range k covers [40i + 10k + r, 40i + 10k + r + 6].
   // Rules 0 and 2 read w.code, rules 1 and 3 read w.temp. A layer shows while
   // all four rules hold, so a range that ended up with another rule, layer or
   // other ends would change what some value shows. Swept value by value
@@ -290,8 +295,11 @@ int main() {
       }
       return false;
     };
+    const int layerCount = 6;
+    static_assert(6 * 4 == MaxShowRules, "the sweep fills the cap exactly");
+    auto layersJson = [&](int count) {
     std::string layers;
-    for (int i = 0; i < 32; ++i) {
+    for (int i = 0; i < count; ++i) {
       std::string show;
       for (int r = 0; r < 4; ++r) {
         std::string in;
@@ -304,21 +312,27 @@ int main() {
       layers += std::string(i ? "," : "") + "{\"id\":\"l" + std::to_string(i) + "\",\"type\":\"shape\",\"shape\":\"rectangle\","
         "\"x\":1,\"y\":2,\"width\":5,\"height\":5,\"fill\":\"#ffffff\",\"show\":[" + show + "]}";
     }
-    const std::string head = "{\"spec\":1,\"theme\":{\"id\":\"sweep\",\"name\":\"Sweep\",\"author\":\"Me\",\"version\":\"1\"},"
+    return layers;
+    };
+    const std::string head = "{\"spec\":2,\"theme\":{\"id\":\"sweep\",\"name\":\"Sweep\",\"author\":\"Me\",\"version\":\"1\"},"
       "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},\"data\":[{\"id\":\"w\",\"url\":\"http://example.test/w.json\","
       "\"interval\":60,\"fields\":[{\"id\":\"code\",\"path\":\"code\"},{\"id\":\"temp\",\"path\":\"temp\"}]}],\"layers\":[";
     Theme sweep;
-    assert(parseTheme(head + layers + "]}", sweep, error) && sweep.layers.size() == 32 && sweep.show.size() == 128);
+    assert(parseTheme(head + layersJson(layerCount) + "]}", sweep, error) && sweep.layers.size() == 6 && sweep.show.size() == MaxShowRules);
+    // One layer more is over the cap, and the error names the layer that crosses it.
+    assert(!parseTheme(head + layersJson(layerCount + 1) + "]}", sweep, error) && error == "layers[6].show: expected at most 24 rules in a theme");
+    // (The refused parse above left `sweep` half filled; parse the good one again.)
+    assert(parseTheme(head + layersJson(layerCount) + "]}", sweep, error));
     Engine e;
     e.setTheme(sweep, 0);
     e.update(0, nullptr);
     uint32_t now = 1;
     int shown = 0;
     for (int shift : {0, 2}) {
-      for (int v = -3; v < 32 * 40 + 20; ++v) {
+      for (int v = -3; v < layerCount * 40 + 20; ++v) {
         e.setValues({{"w.code", std::to_string(v)}, {"w.temp", std::to_string(v + shift)}});
         e.update(now++, nullptr);
-        for (int i = 0; i < 32; ++i) {
+        for (int i = 0; i < layerCount; ++i) {
           const bool expected = holds(i, 0, v) && holds(i, 1, v + shift) && holds(i, 2, v) && holds(i, 3, v + shift);
           const bool visible = e.states()[i].resolved.visible;
           shown += visible;
@@ -327,7 +341,25 @@ int main() {
         }
       }
     }
-    assert(shown > 400);   // a sweep that never reaches the ranges would pass anything
+    // A sweep that never reaches the ranges would pass anything. A layer shows for 4
+    // values in each of its 4 ranges, under both shifts: 6 x 4 x 4 x 2.
+    assert(shown == 192);
+    // The bounds are floats, as on the device: the value 9.49 holds for the single-value
+    // range [9.49, 9.49], and one step either side does not.
+    std::string precise = spec2(dataJson);
+    const std::string tail = "\"color\":\"#ffffff\"}]}";
+    precise.replace(precise.find(tail), tail.size(), "\"color\":\"#ffffff\",\"show\":[{\"source\":\"weather.temp\",\"in\":[[9.49,9.49]]}]}]}");
+    assert(parseTheme(precise, sweep, error));
+    Engine p;
+    p.setTheme(sweep, 0);
+    p.update(0, nullptr);
+    uint32_t at = 1;
+    auto shows = [&](const char* temp) {
+      p.setValues({{"weather.temp", temp}});
+      p.update(at++, nullptr);
+      return p.states()[0].resolved.visible;
+    };
+    assert(shows("9.49") && !shows("9.48") && !shows("9.5"));
   }
 
   const char* bindingJson = R"({"spec":1,"theme":{"id":"binding","name":"Binding","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"sensor","url":"http://example.test/value.json","interval":60,"fields":[{"id":"value","path":"value"}]}],"layers":[{"id":"bar","type":"shape","shape":"rectangle","x":20,"y":120,"width":10,"height":18,"cornerRadius":8,"fill":"#00ff00","bind":{"width":{"source":"sensor.value","input":[0,50],"output":[0,100]},"fill":{"source":"sensor.value","stops":[{"at":0,"value":"#00ff00"},{"at":50,"value":"#ffff00"}]}}}]})";

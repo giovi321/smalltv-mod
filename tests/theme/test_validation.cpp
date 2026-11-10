@@ -14,6 +14,11 @@ void dataDocument(JsonDocument& doc) {
   deserializeJson(doc,dataBase);
   doc["data"][0]["insecureTls"]=true;
 }
+// `show` needs spec 2.
+void showDocument(JsonDocument& doc) {
+  dataDocument(doc);
+  doc["spec"]=2;
+}
 void validScroll(JsonObject layer) {
   layer["scroll"]["width"]=120;
   layer["scroll"]["mode"]="loop";
@@ -291,7 +296,7 @@ int main() {
   // `show`: up to 4 rules per layer, each a declared field and up to 4
   // inclusive ranges; null is an open end. Rules are kept with their layer.
   {
-    dataDocument(d);
+    showDocument(d);
     JsonObject rule=d["layers"][0]["show"].add<JsonObject>();
     rule["source"]="weather.temp";
     JsonArray in=rule["in"].to<JsonArray>();
@@ -305,11 +310,33 @@ int main() {
     assert(theme.show.size()==2);
     const ShowRule& a=theme.show[0];
     assert(a.layer==0&&a.source=="weather.temp"&&!a.missing&&a.count==2);
-    assert(theme.show.range(a,0).first==-5&&theme.show.range(a,0).second==4.5&&theme.show.range(a,1).first==20);
-    assert(std::isinf(theme.show.range(a,1).second)&&theme.show.range(a,1).second>0);
+    assert(a.low[0]==-5&&a.high[0]==4.5f&&a.low[1]==20);
+    assert(std::isinf(a.high[1])&&a.high[1]>0);
     const ShowRule& b=theme.show[1];
-    assert(b.missing&&b.count==1&&b.first==2&&std::isinf(theme.show.range(b,0).first)&&theme.show.range(b,0).first<0&&theme.show.range(b,0).second==30);
-    assert(theme.show.ranges.size()==3);    dataDocument(d);serializeJson(d,json);assert(parseTheme(json,theme,error)&&theme.show.size()==0);
+    assert(b.missing&&b.count==1&&std::isinf(b.low[0])&&b.low[0]<0&&b.high[0]==30);
+    // No `show`: no rules.
+    showDocument(d);serializeJson(d,json);assert(parseTheme(json,theme,error)&&theme.show.size()==0);
+    // Spec 1 refuses it, like fonts, arcs and localized text do.
+    deserializeJson(d,dataBase);
+    JsonObject old=d["layers"][0]["show"].add<JsonObject>();
+    old["source"]="weather.temp";old["in"].add<JsonArray>().add(1);old["in"][0].add(2);
+    serializeJson(d,json);
+    assert(!parseTheme(json,theme,error)&&error=="layers[0].show: needs \"spec\": 2");
+    // Both ends of a bound infinite or too big for a float: the message says so, not "null".
+    for(const char* in:{"[[-1e999,1e999]]","[[0,1e999]]","[[-1e999,0]]","[[1e39,2e39]]","[[0,4e38]]"}){
+      showDocument(d);JsonDocument rangeDoc;assert(!deserializeJson(rangeDoc,std::string("[{\"source\":\"weather.temp\",\"in\":")+in+"}]"));
+      d["layers"][0]["show"]=rangeDoc.as<JsonVariantConst>();serializeJson(d,json);
+      const bool ok=!parseTheme(json,theme,error)&&error=="layers[0].show[0].in[0]: expected numbers from -3.4e38 to 3.4e38, or null";
+      if(!ok){std::cerr<<in<<" -> "<<error<<"\n";assert(false);}
+    }
+    // A data source's age is accepted as a source (spec 2): hide a layer once its data is stale.
+    showDocument(d);JsonDocument ageDoc;assert(!deserializeJson(ageDoc,"[{\"source\":\"weather.age\",\"in\":[[null,30]],\"missing\":true}]"));
+    d["layers"][0]["show"]=ageDoc.as<JsonVariantConst>();serializeJson(d,json);
+    assert(parseTheme(json,theme,error)&&theme.show.size()==1&&theme.show[0].source=="weather.age");
+    // The biggest a float holds is still accepted.
+    showDocument(d);JsonDocument bigDoc;assert(!deserializeJson(bigDoc,"[{\"source\":\"weather.temp\",\"in\":[[-3e38,3e38]]}]"));
+    d["layers"][0]["show"]=bigDoc.as<JsonVariantConst>();serializeJson(d,json);
+    assert(parseTheme(json,theme,error)&&theme.show[0].low[0]==-3e38f&&theme.show[0].high[0]==3e38f);
   }
   // Each malformed rule is refused, with the error pointing at it.
   // `message` is the exact reason after the location (nullptr: not checked). The
@@ -321,6 +348,8 @@ int main() {
     {"[1]","layers[0].show[0]:","expected an object"},
     {"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"x\":1}]","layers[0].show[0].x:","unknown field"},
     {"[{\"source\":\"weather.wind\",\"in\":[[0,1]]}]","layers[0].show[0].source:","expected a declared data field"},
+    {"[{\"source\":\"time.second\",\"in\":[[0,1]]}]","layers[0].show[0].source:","expected a declared data field"},
+    {"[{\"source\":\"device.humidity\",\"in\":[[0,1]]}]","layers[0].show[0].source:","expected a declared data field"},
     {"[{\"in\":[[0,1]]}]","layers[0].show[0].source:",nullptr},
     {"[{\"source\":\"weather.temp\"}]","layers[0].show[0].in:","expected 1 to 4 ranges"},
     {"[{\"source\":\"weather.temp\",\"in\":[]}]","layers[0].show[0].in:","expected 1 to 4 ranges"},
@@ -336,7 +365,7 @@ int main() {
      "{\"source\":\"weather.temp\",\"in\":[[0,1]]}]","layers[0].show:","expected 1 to 4 rules"},
   };
   for(const BadShow& bad:badShows){
-    dataDocument(d);JsonDocument value;assert(!deserializeJson(value,bad.show));
+    showDocument(d);JsonDocument value;assert(!deserializeJson(value,bad.show));
     d["layers"][0]["show"]=value.as<JsonVariantConst>();serializeJson(d,json);
     const bool refused=!parseTheme(json,theme,error);
     const bool where=error.find(bad.where)==0;
@@ -345,17 +374,17 @@ int main() {
   }
   // A misspelled key is listed by name; the key list sits in flash too.
   {
-    dataDocument(d);JsonDocument value;assert(!deserializeJson(value,"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":true,\"sources\":1}]"));
+    showDocument(d);JsonDocument value;assert(!deserializeJson(value,"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":true,\"sources\":1}]"));
     d["layers"][0]["show"]=value.as<JsonVariantConst>();serializeJson(d,json);
     assert(!parseTheme(json,theme,error)&&error=="layers[0].show[0].sources: unknown field");
     // All three keys of a rule are still accepted (the key list is intact).
-    dataDocument(d);JsonDocument v2;assert(!deserializeJson(v2,"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":true}]"));
+    showDocument(d);JsonDocument v2;assert(!deserializeJson(v2,"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":true}]"));
     d["layers"][0]["show"]=v2.as<JsonVariantConst>();serializeJson(d,json);
     assert(parseTheme(json,theme,error));
   }
   // Image and animation layers take `show` too (their key lists are in flash).
   for(const char* type:{"image","animation"}){
-    dataDocument(d);JsonObject layer=d["layers"][0];layer.clear();
+    showDocument(d);JsonObject layer=d["layers"][0];layer.clear();
     layer["id"]="pic";layer["type"]=type;layer["x"]=0;layer["y"]=0;layer["source"]="pic.sti";
     if(std::string(type)=="animation"){layer["width"]=10;layer["height"]=10;layer["frames"]=2;layer["fps"]=2;layer["loop"]=true;}
     JsonObject rule=layer["show"].add<JsonObject>();
