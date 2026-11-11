@@ -318,15 +318,17 @@ int main() {
     // No `show`: no rules.
     showDocument(d);serializeJson(d,json);assert(parseTheme(json,theme,error)&&theme.show.size()==0);
     // Spec 1 refuses it, like fonts, arcs and localized text do.
-    deserializeJson(d,dataBase);
+    dataDocument(d);
     JsonObject old=d["layers"][0]["show"].add<JsonObject>();
     old["source"]="weather.temp";old["in"].add<JsonArray>().add(1);old["in"][0].add(2);
     serializeJson(d,json);
     assert(!parseTheme(json,theme,error)&&error=="layers[0].show: needs \"spec\": 2");
     // Both ends of a bound infinite or too big for a float: the message says so, not "null".
     for(const char* in:{"[[-1e999,1e999]]","[[0,1e999]]","[[-1e999,0]]","[[1e39,2e39]]","[[0,4e38]]"}){
-      showDocument(d);JsonDocument rangeDoc;assert(!deserializeJson(rangeDoc,std::string("[{\"source\":\"weather.temp\",\"in\":")+in+"}]"));
-      d["layers"][0]["show"]=rangeDoc.as<JsonVariantConst>();serializeJson(d,json);
+      // The bound goes into the text itself: a document would write an infinity back as null.
+      showDocument(d);d["layers"][0]["show"]="@@SHOW@@";serializeJson(d,json);
+      const std::string marker="\"@@SHOW@@\"";
+      json.replace(json.find(marker),marker.size(),std::string("[{\"source\":\"weather.temp\",\"in\":")+in+"}]");
       const bool ok=!parseTheme(json,theme,error)&&error=="layers[0].show[0].in[0]: expected numbers from -3.4e38 to 3.4e38, or null";
       if(!ok){std::cerr<<in<<" -> "<<error<<"\n";assert(false);}
     }
@@ -336,10 +338,10 @@ int main() {
     assert(parseTheme(json,theme,error)&&theme.show.size()==1&&theme.show[0].source==0&&theme.show[0].field==ShowAgeField);
     // Two sources: a rule keeps the index of the one it names, and of the field in it.
     showDocument(d);
-    JsonObject second=d["data"].add<JsonObject>();
-    second["id"]="rain";second["url"]="https://example.test/rain.json";second["interval"]=60;second["insecureTls"]=true;
-    second["fields"].add<JsonObject>()["id"]="mm";second["fields"][0]["path"]="mm";
-    JsonObject extra=second["fields"].add<JsonObject>();extra["id"]="prob";extra["path"]="prob";
+    JsonObject rainSrc=d["data"].add<JsonObject>();
+    rainSrc["id"]="rain";rainSrc["url"]="https://example.test/rain.json";rainSrc["interval"]=60;rainSrc["insecureTls"]=true;
+    rainSrc["fields"].add<JsonObject>()["id"]="mm";rainSrc["fields"][0]["path"]="mm";
+    JsonObject extra=rainSrc["fields"].add<JsonObject>();extra["id"]="prob";extra["path"]="prob";
     JsonDocument twoDoc;assert(!deserializeJson(twoDoc,"[{\"source\":\"rain.prob\",\"in\":[[0,1]]},{\"source\":\"rain.age\",\"in\":[[0,1]]},{\"source\":\"weather.temp\",\"in\":[[0,1]]}]"));
     d["layers"][0]["show"]=twoDoc.as<JsonVariantConst>();serializeJson(d,json);
     assert(parseTheme(json,theme,error)&&theme.show.size()==3);
@@ -347,9 +349,12 @@ int main() {
     assert(theme.show[1].source==1&&theme.show[1].field==ShowAgeField);
     assert(theme.show[2].source==0&&theme.show[2].field==0);
     // The biggest a float holds is still accepted.
-    showDocument(d);JsonDocument bigDoc;assert(!deserializeJson(bigDoc,"[{\"source\":\"weather.temp\",\"in\":[[-3.4e38,3.4e38]]}]"));
-    d["layers"][0]["show"]=bigDoc.as<JsonVariantConst>();serializeJson(d,json);
-    assert(parseTheme(json,theme,error)&&theme.show[0].low[0]==-3.4e38f&&theme.show[0].high[0]==3.4e38f);
+    showDocument(d);d["layers"][0]["show"]="@@SHOW@@";serializeJson(d,json);
+    json.replace(json.find("\"@@SHOW@@\""),10,"[{\"source\":\"weather.temp\",\"in\":[[-3.4e38,3.4e38]]}]");
+    const bool bigOk=parseTheme(json,theme,error);
+    if(!bigOk) std::cerr<<"float-sized bound refused: "<<error<<"\n";
+    // (ArduinoJson reads the number as a float, which may be an ulp off the literal's.)
+    assert(bigOk&&std::fabs(theme.show[0].low[0]/-3.4e38-1)<1e-5&&std::fabs(theme.show[0].high[0]/3.4e38-1)<1e-5);
   }
   // Each malformed rule is refused, with the error pointing at it.
   // `message` is the exact reason after the location (nullptr: not checked). The

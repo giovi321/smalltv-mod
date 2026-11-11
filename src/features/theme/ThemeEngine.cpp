@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <algorithm>
 #include <cerrno>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -956,7 +957,8 @@ __attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t
         else if (end.is<double>() || end.is<long>() || end.is<int>()) {
           // A number that is infinite, or too big for a float, is not an open end: null is.
           const double number = end.as<double>();
-          if (!(std::fabs(number) <= 3.4e38)) return range.fail("", fromFlash(showSizeMsg));
+          // (FLT_MAX, not 3.4e38: the float nearest to 3.4e38 is a little above it, and must pass.)
+          if (!(std::fabs(number) <= static_cast<double>(FLT_MAX))) return range.fail("", fromFlash(showSizeMsg));
           value[e] = static_cast<float>(number);
         } else return range.fail("", fromFlash(showNumbersMsg));
       }
