@@ -776,7 +776,7 @@ text (`{w.age}`), for example to mark data that has gone stale.
 ### Showing and hiding layers (spec 2)
 
 `show` is an optional list on any layer, in a theme with `"spec": 2`. It needs
-a firmware newer than v3.5.1: a firmware up to 3.5.1 does not know the key and
+a firmware newer than v3.6.0: a firmware up to 3.6.0 does not know the key and
 refuses the layer as an unknown field. A spec 1 theme that uses `show` is
 refused with `layers[N].show: needs "spec": 2`, and a spec 1 theme installs
 exactly as before. The layer is drawn only while every rule in the list holds:
