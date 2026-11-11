@@ -557,22 +557,26 @@ static void testShowRules() {
     fprintf(stderr, "show rules (%d layers, %d rules, %d ranges): hold %zu B (bound %zu B)\n", s.layers, s.rules, s.ranges, held, bound);
     assert(held <= bound);
   }
-  // A theme with every rule it may have. Measured (host = device bytes): at the
-  // default cap of 42 rules the smallest such theme (11 layers, 4 rules each)
-  // peaks above the 5,120 B budget the bundled examples are held to, by what its
-  // layers and rules take together. What a theme needs to load at all is the
-  // firmware's gate, ThemeMode::ParseFreeHeap (6,144 B: the 5 KB budget plus
-  // 1 KB for the network code), so that is the limit asserted here; the rules
-  // themselves are held to their bound above, and no block may pass the
-  // largest-block budget.
-  constexpr size_t ParseFreeHeap = 6144;   // ThemeMode::ParseFreeHeap (ThemeMode.h needs the Arduino core)
+  // A theme with every rule it may have stays inside the budgets the bundled
+  // examples are held to. The shape tested is the lightest one that holds that
+  // many rules: 4 rules to a layer (the most), 4 ranges each, so the fewest
+  // layers. Any other shape has more layers for the same rules and takes more,
+  // so if this one is over the budget, every theme at the cap is. The default
+  // cap (THEME_MAX_SHOW_RULES) is the largest count that passes here.
   const ShowShape full = shapes[3];
   const ShowUsage u = showUsage(showManifest(full, "weather.temperature", true));
   const ShowUsage none = showUsage(showManifest(full, "weather.temperature", false));
-  fprintf(stderr, "show at the cap (%d rules, %d layers): load peak %zu B (%zu B without, budget %zu B, gate %zu B), loaded %zu B (%zu B without), largest block %zu B, running %zu B (%zu B without)\n",
-         full.rules, full.layers, u.loadPeak, none.loadPeak, LoadPeakBudget, ParseFreeHeap, u.loaded, none.loaded, u.loadLargest, u.running, none.running);
-  assert(u.loadPeak < ParseFreeHeap && u.loadLargest <= LargestBlockBudget && u.running <= RunningBudget);
+  fprintf(stderr, "show at the cap (%d rules, %d layers): load peak %zu B (%zu B without, budget %zu B), loaded %zu B (%zu B without), largest block %zu B, running %zu B (%zu B without)\n",
+         full.rules, full.layers, u.loadPeak, none.loadPeak, LoadPeakBudget, u.loaded, none.loaded, u.loadLargest, u.running, none.running);
+  assert(u.loadPeak <= LoadPeakBudget && u.loadLargest <= LargestBlockBudget && u.running <= RunningBudget);
   assert(u.loadPeak - none.loadPeak <= size_t(full.rules) * (sizeof(ShowRule) + 8));
+  // The same rules in heavier shapes (2 or 1 to a layer, as far as 32 layers go), printed only.
+  for (int perLayer : {2, 1}) {
+    const ShowShape s{(cap + perLayer - 1) / perLayer, cap, cap * 4, perLayer};
+    if (s.layers > int(MaxLayers)) continue;
+    const ShowUsage w = showUsage(showManifest(s, "weather.temperature", true));
+    fprintf(stderr, "same rules, %d to a layer (%d layers): load peak %zu B, largest block %zu B, running %zu B\n", perLayer, s.layers, w.loadPeak, w.loadLargest, w.running);
+  }
   // The sky-shaped theme has more layers than any budget here holds (31 are 8 KB
   // before the first rule), so only what its rules add is held to a bound, above.
   // Print what it takes in all.
