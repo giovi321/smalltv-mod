@@ -253,7 +253,11 @@ class WeekTokenTests(unittest.TestCase):
         theme['layers'][0]['value'] = 'KW {WW}'
         self.assertTrue(any('{WW}' in reason for reason in stheme.spec2_reasons(theme)))
         theme['spec'] = 1
-        self.assertTrue(stheme.validate(theme))
+        errors = stheme.validate(theme)
+        # Refused twice, like the firmware's unknown variable: by the spec check
+        # and by the text check (so {WW} is not in the spec 1 token list).
+        self.assertTrue(any('needs "spec": 2' in e for e in errors), errors)
+        self.assertTrue(any('declared clock/data variables only' in e for e in errors), errors)
 
 
 if __name__ == '__main__':
