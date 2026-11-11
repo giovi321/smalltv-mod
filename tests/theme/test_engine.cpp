@@ -383,6 +383,9 @@ int main() {
       return p.states()[0].resolved.visible;
     };
     assert(shows("9.49") && !shows("9.48") && !shows("9.5"));
+    // A rule has the ranges it names and no more: with one range, 0 is not in it (the
+    // slot after the last range holds 0 to 0).
+    assert(!shows("0"));
     // A rule reads its own key and no other: not a longer or shorter one, not another source's.
     for (const char* other : {"weather.temperature", "weather.tem", "weathxr.temp", "weather_temp", "weather.age"}) {
       p.setValues({{other, "9.49"}});
@@ -402,6 +405,24 @@ int main() {
       return a.states()[0].resolved.visible;
     };
     assert(freshWhen("0") && freshWhen("30") && !freshWhen("31") && !freshWhen("500"));
+    // Two sources: a rule reads the key of the source and the field it names (r.b), not the
+    // same field of the first source (w.temp).
+    const std::string twoSources = "{\"spec\":2,\"theme\":{\"id\":\"two\",\"name\":\"Two\",\"author\":\"Me\",\"version\":\"1\"},"
+      "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},\"data\":["
+      "{\"id\":\"w\",\"url\":\"http://example.test/w.json\",\"interval\":60,\"fields\":[{\"id\":\"code\",\"path\":\"code\"},{\"id\":\"temp\",\"path\":\"temp\"}]},"
+      "{\"id\":\"r\",\"url\":\"http://example.test/r.json\",\"interval\":60,\"fields\":[{\"id\":\"a\",\"path\":\"a\"},{\"id\":\"b\",\"path\":\"b\"}]}],"
+      "\"layers\":[{\"id\":\"box\",\"type\":\"shape\",\"shape\":\"rectangle\",\"x\":1,\"y\":2,\"width\":5,\"height\":5,\"fill\":\"#ffffff\","
+      "\"show\":[{\"source\":\"r.b\",\"in\":[[5,6]]}]}]}";
+    assert(parseTheme(twoSources, sweep, error));
+    Engine two;
+    two.setTheme(sweep, 0);
+    two.update(0, nullptr);
+    auto twoShows = [&](const char* rb, const char* wtemp) {
+      two.setValues({{"r.b", rb}, {"w.temp", wtemp}});
+      two.update(at++, nullptr);
+      return two.states()[0].resolved.visible;
+    };
+    assert(twoShows("5", "99") && !twoShows("9", "5"));
   }
 
   const char* bindingJson = R"({"spec":1,"theme":{"id":"binding","name":"Binding","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"sensor","url":"http://example.test/value.json","interval":60,"fields":[{"id":"value","path":"value"}]}],"layers":[{"id":"bar","type":"shape","shape":"rectangle","x":20,"y":120,"width":10,"height":18,"cornerRadius":8,"fill":"#00ff00","bind":{"width":{"source":"sensor.value","input":[0,50],"output":[0,100]},"fill":{"source":"sensor.value","stops":[{"at":0,"value":"#00ff00"},{"at":50,"value":"#ffff00"}]}}}]})";
