@@ -39,7 +39,7 @@ except ImportError:  # validate/build of shape-only themes still work
 # --------------------------------------------------------------------------
 MAX_PACKAGE, MAX_ENTRIES, MAX_MANIFEST = 3 * 1024 * 1024, 256, 16384
 MAX_LAYERS, MAX_BINDINGS, MAX_STOPS, MAX_TRANSLATION_BYTES = 32, 8, 8, 1024
-MAX_SHOW_RULES = 42   # the firmware's default (THEME_MAX_SHOW_RULES); a build may raise it
+MAX_SHOW_RULES = 36  # the firmware's default (THEME_MAX_SHOW_RULES); a build may raise it
 ANCHORS = ['top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right',
            'bottom-left', 'bottom-center', 'bottom-right']
 TOKENS = ['HH', 'hh', 'MM', 'SS', 'DD', 'MON', 'MONTH', 'WD', 'WEEKDAY', 'YYYY']

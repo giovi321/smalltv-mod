@@ -792,7 +792,7 @@ exactly as before. The layer is drawn only while every rule in the list holds:
 | `in` | array | yes | 1–4 ranges `[low, high]`, ends included; `null` is an open end (not both); other ends must be numbers from −3.4e38 to 3.4e38 |
 | `missing` | boolean | no, default false | Whether the rule holds while the value is missing or not a number |
 
-A layer takes 1–4 rules, and a theme at most 42 rules in all (a rule costs
+A layer takes 1–4 rules, and a theme at most 36 rules in all (the most that load inside the memory budget; a rule costs
 40 bytes of RAM; a firmware build can raise the limit with
 `-DTHEME_MAX_SHOW_RULES=<n>`). A rule holds
 when the fetched number lies in any of its ranges. The built-in `time.*` and
@@ -843,7 +843,7 @@ preview it with the `--data` workflow documented above.
 | Tick count | 1–60 |
 | Animation | 1–240 frames, 1–15 FPS |
 | Fonts (spec 2) | 4 per theme; names 1–32 ID characters; printable ASCII glyphs; line height 6–96 pixels; advance 1–120 pixels; 65,535 bytes of glyph bitmaps |
-| `show` (spec 2) | 1–4 rules per layer, at most 42 rules in a theme; 1–4 ranges per rule |
+| `show` (spec 2) | 1–4 rules per layer, at most 36 rules in a theme; 1–4 ranges per rule |
 | Container | 256 entries, at most 3 MiB |
 | Installed packages | 16, within available storage |
 

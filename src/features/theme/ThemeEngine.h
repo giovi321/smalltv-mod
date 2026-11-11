@@ -132,9 +132,12 @@ constexpr uint8_t ShowAgeField = 255;
 // The most `show` rules all layers of one theme may have together. The rules
 // are reserved at the number the manifest declares (so a theme with one rule
 // does not open a whole block of them). A personal build with bigger themes
-// may raise it: -DTHEME_MAX_SHOW_RULES=<n>, 40 bytes of RAM a rule.
+// may raise it: -DTHEME_MAX_SHOW_RULES=<n>, 40 bytes of RAM a rule. The default,
+// 36, is the most rules a theme can hold (9 layers of 4 rules, 4 ranges each)
+// and still load inside the 5,120 B budget of tests/theme/test_memory.cpp: 5,056 B
+// at 36, 5,264 B at 37.
 #ifndef THEME_MAX_SHOW_RULES
-#define THEME_MAX_SHOW_RULES 42
+#define THEME_MAX_SHOW_RULES 36
 #endif
 #define SMALLTV_STRINGIFY_(x) #x
 #define SMALLTV_STRINGIFY(x) SMALLTV_STRINGIFY_(x)
