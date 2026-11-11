@@ -227,8 +227,8 @@ MANIFESTS = {
     'show too big': manifest(data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, **{'in': [[0, 1e39]]})])]),
     'show 5 rules': manifest(data=[SOURCE], layers=[dict(TEXT, show=[SHOW] * 5)]),
     'show no ranges': manifest(data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, **{'in': []})])]),
-    'show 42 rules': manifest(data=[SOURCE], layers=show_layers(42)),
-    'show 43 rules': manifest(data=[SOURCE], layers=show_layers(43)),
+    'show 36 rules': manifest(data=[SOURCE], layers=show_layers(36)),
+    'show 37 rules': manifest(data=[SOURCE], layers=show_layers(37)),
     'stops not increasing': layer(bind={'color': {'source': 'time.second',
                                                   'stops': [{'at': 5, 'value': '#000000'}, {'at': 5, 'value': '#ffffff'}]}}),
 }
@@ -277,12 +277,12 @@ class ShowTests(unittest.TestCase):
                          ['layers[0].show[0].in[0]: expected numbers from -3.4e38 to 3.4e38, or null'])
         self.assertEqual(stheme.validate(self.theme([dict(SHOW, **{'in': [[3, 2]]})])),
                          ['layers[0].show[0].in[0]: low must not be above high'])
-        # 42 rules are accepted; one more is refused, at the layer that crosses the cap.
-        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(42))), [])
-        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(43))),
-                         ['layers[10].show: expected at most 42 rules in a theme'])
-        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(44))),
-                         ['layers[10].show: expected at most 42 rules in a theme'])
+        # 36 rules are accepted; one more is refused, at the layer that crosses the cap.
+        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(36))), [])
+        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(37))),
+                         ['layers[9].show: expected at most 36 rules in a theme'])
+        self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(38))),
+                         ['layers[9].show: expected at most 36 rules in a theme'])
 
     def test_auto_spec_becomes_2(self):
         self.assertEqual(stheme.needed_spec(self.theme([SHOW])), 2)

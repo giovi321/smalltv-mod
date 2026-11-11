@@ -298,10 +298,11 @@ int main() {
     // The sweep takes as many layers of 4 rules as the cap holds; the rest of the
     // cap (MaxShowRules % 4 rules) is one more layer, in the cap tests below. The
     // cap may be set by a build flag, so none of this assumes a value.
-    // The default is 42 (the docs and the skill say so); a build that sets
+    // The default is 36 (the docs and the skill say so): the most rules a theme can
+    // hold inside the load budget of test_memory.cpp. A build that sets
     // THEME_MAX_SHOW_RULES says what to expect with -DEXPECTED_MAX_SHOW_RULES.
 #ifndef EXPECTED_MAX_SHOW_RULES
-#define EXPECTED_MAX_SHOW_RULES 42
+#define EXPECTED_MAX_SHOW_RULES 36
 #endif
     assert(MaxShowRules == size_t(EXPECTED_MAX_SHOW_RULES));
     assert(MaxShowRules / 4 + 2 < MaxLayers);
