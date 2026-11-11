@@ -478,8 +478,44 @@ static void testShortTranslations() {
   assert(!parseTheme(shortManifest(32, 5, "abcdef"), theme, error) && error.find("1024") != std::string::npos);
 }
 
+// A field's `decimals` (spec 2) is one byte in the field's record, and the
+// parser must not allocate for it. Four sources of eight fields is the most a
+// theme may declare; each field is stored as written, so the size of the
+// record is what a theme pays 32 times.
+static std::string decimalsManifest(bool withDecimals) {
+  std::string json = "{\"spec\":2,\"theme\":{\"id\":\"dec\",\"name\":\"Dec\",\"author\":\"A\",\"version\":\"1\"},"
+    "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},\"data\":[";
+  for (int s = 0; s < 4; ++s) {
+    if (s) json += ",";
+    json += "{\"id\":\"s" + std::to_string(s) + "\",\"url\":\"http://example.test/a.json\",\"interval\":60,\"fields\":[";
+    for (int f = 0; f < 8; ++f) {
+      if (f) json += ",";
+      json += "{\"id\":\"f" + std::to_string(f) + "\",\"path\":\"a\"";
+      if (withDecimals) json += ",\"decimals\":" + std::to_string(f % 4);
+      json += "}";
+    }
+    json += "]}";
+  }
+  return json + "],\"layers\":[]}";
+}
+static void testDecimalsRecord() {
+  const size_t record = sizeof(ThemeDataField), strings = 2 * sizeof(std::string);
+  printf("data field record: %zu B (two strings %zu B)\n", record, strings);
+  // `decimals` fits in the padding of the record, or adds one word at most.
+  assert(record <= strings + sizeof(void*));
+  const size_t plain = heldBy(decimalsManifest(false)), rounded = heldBy(decimalsManifest(true));
+  printf("32 data fields: %zu B held without decimals, %zu B with\n", plain, rounded);
+  // Same heap with the key as without it: nothing is allocated for it.
+  assert(rounded == plain);
+  Theme theme;
+  std::string error;
+  assert(parseTheme(decimalsManifest(true), theme, error));
+  assert(theme.data.size() == 4 && theme.data[3].fields[7].decimals == 3 && theme.data[0].fields[0].decimals == 0);
+}
+
 int main(int argc, char** argv) {
   testBlockList();
+  testDecimalsRecord();
   testManyEntries();
   testThemeIndex();
   testListReply();
