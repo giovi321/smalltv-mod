@@ -192,6 +192,9 @@ MANIFESTS = {
                                     for i in range(2)]),
     'device token': layer(value='{device.humidity}'),
     'device bad': layer(value='{device.pressure}'),
+    'week token': layer(value='KW {WW}'),
+    'spec1 week token': manifest(spec=1, layers=[dict(TEXT, value='{WW}')]),
+    'week token near miss': layer(value='{WWW}'),
     'data id time': manifest(data=[dict(SOURCE, id='time')]),
     'https no insecure': manifest(data=[dict(SOURCE, url='https://a/b')]),
     'interval 5': manifest(data=[dict(SOURCE, interval=5)]),
@@ -214,7 +217,7 @@ MANIFESTS = {
 @needs_native
 class ManifestParityTests(unittest.TestCase):
     def test_validators_agree(self):
-        self.assertEqual(len(MANIFESTS), 34)
+        self.assertEqual(len(MANIFESTS), 37)
         with tempfile.TemporaryDirectory() as d:
             path = Path(d)/'theme.json'
             for name, theme in MANIFESTS.items():
@@ -228,6 +231,29 @@ class ManifestParityTests(unittest.TestCase):
                     errors = stheme.validate(theme)
                     self.assertEqual(firmware is None, not errors,
                                      f'firmware: {firmware or "accepted"}; stheme: {errors[:1] or "accepted"}')
+
+
+class WeekTokenTests(unittest.TestCase):
+    """{WW} in the skill's own preview and spec detection (no native tool needed)."""
+
+    def test_preview_shows_the_iso_week(self):
+        # Boundary dates from the firmware test, then every day of 2020-2030
+        # against Python's own ISO calendar.
+        for date, week in ((dt.datetime(2027, 1, 1), '53'), (dt.datetime(2024, 12, 30), '01'),
+                           (dt.datetime(2023, 1, 1), '52'), (dt.datetime(2026, 10, 23), '43')):
+            self.assertEqual(stheme.expand('{WW}', date, {}, 0), week, date)
+        day = dt.datetime(2020, 1, 1)
+        while day.year < 2031:
+            self.assertEqual(stheme.expand('KW {WW}', day, {}, 0), f'KW {day.isocalendar()[1]:02d}', day)
+            day += dt.timedelta(days=1)
+        self.assertEqual(stheme.expand('KW {WW}', None, {}, 0), 'KW --')
+
+    def test_week_token_needs_spec_2(self):
+        theme = copy.deepcopy(BASE)
+        theme['layers'][0]['value'] = 'KW {WW}'
+        self.assertTrue(any('{WW}' in reason for reason in stheme.spec2_reasons(theme)))
+        theme['spec'] = 1
+        self.assertTrue(stheme.validate(theme))
 
 
 if __name__ == '__main__':
