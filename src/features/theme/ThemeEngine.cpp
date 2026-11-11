@@ -1038,7 +1038,10 @@ __attribute__((noinline)) static bool parseHeader(JsonObjectConst root, const Ma
       for (JsonObjectConst field : fields) {
         ThemeDataField item;
         Fields ff(field, "data[" + std::to_string(t.data.size()) + "].fields[" + std::to_string(data.fields.size()) + "]", error);
-        if (!ff.keys("|id|path|") || !ff.text("id", item.id, 24) || !ff.text("path", item.path, 96)) return false;
+        if (!ff.keys("|id|path|decimals|") || !ff.text("id", item.id, 24) || !ff.text("path", item.path, 96)) return false;
+        // `decimals` rounds the text of a fetched number (spec 2 only).
+        if (ff.has("decimals") && t.spec < 2) return ff.fail("decimals", fromFlash(fontNeedsSpec2));
+        if (!ff.number("decimals", 0, 3, item.decimals, false)) return false;
         if (!validId(item.id) || item.id.find('.') != std::string::npos) return ff.fail("id", "use ASCII letters, digits, '-' or '_'");
         for (const auto& old : data.fields) if (old.id == item.id) return ff.fail("id", "duplicate field ID");
         size_t pathPart = 0;
@@ -1358,6 +1361,50 @@ const std::string& layerText(const Theme& theme, const Layer& l, uint8_t languag
     }
   return l.value;
 }
+// Rounds a plain decimal number written as text to `places` decimals, half
+// away from zero. It works on the digits, so the result is what the text
+// says (1.15 -> 1.2) and not what the nearest double says (1.1499... -> 1.1).
+// Returns false and leaves `out` alone for anything else: words, "--", and
+// numbers with an exponent, which ArduinoJson writes only below 1e-5 or from
+// 1e9 up.
+static bool roundDecimal(const std::string& value, int places, std::string& out) {
+  const char* begin = value.c_str();
+  const char* end = begin + value.size();
+  while (begin != end && asciiSpace(*begin)) ++begin;
+  while (begin != end && asciiSpace(end[-1])) --end;
+  if (begin == end || !decimalSyntax(begin, end) || std::find_if(begin, end, [](char c) { return c == 'e' || c == 'E'; }) != end) return false;
+  const bool negative = *begin == '-';
+  if (*begin == '+' || *begin == '-') ++begin;
+  const char* point = std::find(begin, end, '.');
+  const char* fraction = point == end ? end : point + 1;
+  const size_t fractionSize = static_cast<size_t>(end - fraction), kept = static_cast<size_t>(places);
+  // The integer digits, then exactly `places` fraction digits.
+  std::string digits(begin, point);
+  for (size_t i = 0; i < kept; ++i) digits += i < fractionSize ? fraction[i] : '0';
+  if (kept < fractionSize && fraction[kept] >= '5') {
+    size_t i = digits.size();
+    while (i > 0 && digits[i - 1] == '9') digits[--i] = '0';
+    if (i == 0) digits.insert(digits.begin(), '1');
+    else ++digits[i - 1];
+  }
+  // One digit before the point at least, and no leading zeros.
+  while (digits.size() > kept + 1 && digits[0] == '0') digits.erase(0, 1);
+  if (digits.size() < kept + 1) digits.insert(0, kept + 1 - digits.size(), '0');
+  out = negative && digits.find_first_not_of('0') != std::string::npos ? "-" : "";
+  out.append(digits, 0, digits.size() - kept);
+  if (kept) out.append(".").append(digits, digits.size() - kept, kept);
+  return true;
+}
+// The `decimals` of the field that a "<source>.<field>" key names, or -1.
+static int fieldDecimals(const std::vector<ThemeDataSource>& data, const std::string& key) {
+  const size_t dot = key.find('.');
+  if (dot == std::string::npos) return -1;
+  for (const auto& source : data) {
+    if (key.compare(0, dot, source.id) != 0) continue;
+    for (const auto& field : source.fields) if (key.compare(dot + 1, std::string::npos, field.id) == 0) return field.decimals;
+  }
+  return -1;
+}
 // Substitutes every {token} in a validated text template: clock/date tokens
 // first (only when `t` is non-null and the field is in range), then a
 // matching fetched value, and "--" if neither resolves -- the same fallback
@@ -1373,11 +1420,23 @@ std::string expandText(const std::string& value, const tm* t, const std::vector<
   static const std::vector<ThemeValue> noDevice;
   return expandText(value, t, values, noDevice, language);
 }
+std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeValue>& device, uint8_t language) {
+  static const std::vector<ThemeDataSource> noData;
+  return expandText(value, t, values, noData, device, language);
+}
+// `data` is the theme's data block: a field's "decimals" rounds its text.
+std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeDataSource>& data) {
+  static const std::vector<ThemeValue> noDevice;
+  return expandText(value, t, values, data, noDevice, 0);
+}
+std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeDataSource>& data, const std::vector<ThemeValue>& device) {
+  return expandText(value, t, values, data, device, 0);
+}
 // `device` holds the firmware's values keyed "device.<name>"; a name it does
 // not provide stays "--". Validation only lets a spec 2 theme use them.
 // `language` is the index of Languages.h whose month and weekday names {MON},
 // {MONTH}, {WD} and {WEEKDAY} use.
-std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeValue>& device, uint8_t language) {
+std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeDataSource>& data, const std::vector<ThemeValue>& device, uint8_t language) {
   if (language >= kLanguageCount) language = 0;
   std::string out;
   for (size_t i = 0; i < value.size();) {
@@ -1417,6 +1476,8 @@ std::string expandText(const std::string& value, const tm* t, const std::vector<
     }
     if (v == "--") for (const auto& item : values) if (item.key == key) {
       v = item.value;
+      const int places = fieldDecimals(data, key);
+      if (places >= 0) roundDecimal(item.value, places, v);
       break;
     }
     if (v == "--") for (const auto& item : device) if (item.key == key) {
@@ -1867,8 +1928,9 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     if (l.type == LayerType::Text && (timeChanged || valuesChanged_ || languageChanged_)) {
       // Only spec 2 reads device.* values and follows the device language: a
       // spec 1 `device` data source with no fetched value shows "--", never
-      // what the firmware supplies, and spec 1 names stay English.
-      std::string text = theme_.spec >= 2 ? expandText(layerText(theme_, l, language_), time, values_, device_, language_) : expandText(l.value, time, values_);
+      // what the firmware supplies, and spec 1 names stay English. Only spec 2
+      // rounds a field with `decimals`, which a spec 1 theme cannot have.
+      std::string text = theme_.spec >= 2 ? expandText(layerText(theme_, l, language_), time, values_, theme_.data, device_, language_) : expandText(l.value, time, values_);
       if (text != s.text) {
         s.text = std::move(text);
         changed = true;

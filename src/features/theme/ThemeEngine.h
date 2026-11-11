@@ -143,8 +143,11 @@ struct LocalizedText {
   uint8_t language = 0;   // index of Languages.h, never 0 (English is `value`)
   std::string text;
 };
+// `decimals` rounds the value where a text layer shows it (0-3 places, spec 2
+// only); -1 means it is shown as fetched. Bindings always get the exact value.
 struct ThemeDataField {
   std::string id, path;
+  int8_t decimals = -1;
 };
 // One periodic JSON endpoint declared by a theme. `interval` is seconds
 // between refreshes; `insecureTls` is the explicit opt-in an HTTPS source
@@ -210,6 +213,10 @@ std::string expandText(const std::string& value, const tm* time, const std::vect
 // `language` picks the month and weekday names ({MON}, {WD}, ...); 0 is English.
 std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values, uint8_t language);
 std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values, const std::vector<ThemeValue>& device, uint8_t language);
+// With the theme's data block: a field's `decimals` rounds its number.
+std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values, const std::vector<ThemeDataSource>& data);
+std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values, const std::vector<ThemeDataSource>& data, const std::vector<ThemeValue>& device);
+std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values, const std::vector<ThemeDataSource>& data, const std::vector<ThemeValue>& device, uint8_t language);
 // The text of a layer in `language`: its translation, else the English value.
 const std::string& layerText(const Theme& theme, const Layer& layer, uint8_t language);
 std::string assetPath(const Layer& layer, uint16_t frame);

@@ -254,7 +254,16 @@ including the area needed to erase its previous contents.
 ```
 
 The `path` is a dotted path through JSON objects. Values are rendered as short
-strings; missing values show `--`. URLs must use `http://` or `https://`. Because
+strings; missing values show `--`. An optional `"decimals"` (0–3) rounds a
+field's number where text shows it, half away from zero: with `"decimals": 0`,
+`13.5` shows as `14` and `-0.4` as `0`; with `1`, `7` shows as `7.0`. The
+rounding works on the digits as fetched, so `1.15` with `1` shows as `1.2`.
+Bindings always use the exact value. Values that are not plain decimal numbers,
+including numbers with an exponent such as `1e-6`, are shown as fetched.
+`decimals` needs firmware from the next release (after v3.6.0) and a
+`"spec": 2` theme; a `"spec": 1` theme that uses it is refused with
+`data[n].fields[m].decimals: needs "spec": 2`. URLs must use `http://` or
+`https://`. Because
 this path cannot validate server certificates, an HTTPS source must explicitly
 set `"insecureTls": true`; omitting it rejects the package instead of silently
 accepting unauthenticated TLS. Data fetching is owned by theme mode and does not
