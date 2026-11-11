@@ -162,7 +162,7 @@ static void testWeekToken() {
     const long thursday = day - (wday + 6) % 7 + 3;
     const long weekYear = yearOfDay(thursday);
     const long want = (thursday - daysFromCivil(weekYear, 1, 1)) / 7 + 1;
-    char text[8];
+    char text[32];
     snprintf(text, sizeof text, "%02ld", want);
     const std::string got = weekOf(static_cast<int>(year), static_cast<int>(yday), static_cast<int>(wday));
     if (got != text) fprintf(stderr, "day %ld (year %ld, yday %ld, wday %ld): week %s, want %s\n", day, year, yday, wday, got.c_str(), text);

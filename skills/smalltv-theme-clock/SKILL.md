@@ -60,7 +60,7 @@ defaults. When working unattended, use the defaults and say which you assumed.
   text, muted, accent) so the layout still reads.
 - `"spec": "auto"` in the source. `build` resolves it to **1** unless the theme uses a
   spec 2-only feature (arc/hand/ticks shapes, `time.*`/`device.*` bindings, `{H}` `{MO}`
-  `{AMPM}`, `{device.*}`, per-language text), then **2**, and writes the number back to
+  `{AMPM}` `{WW}`, `{device.*}`, per-language text), then **2**, and writes the number back to
   `theme.json` so the firmware tools accept the folder. Spec 1 themes also open in SmallTV
   Studio; spec 2 needs firmware 3.4.0+ and Studio cannot edit it yet. If the user asks for
   localized month/day names, set `"spec": 2` explicitly (a spec 1 theme always shows English).
