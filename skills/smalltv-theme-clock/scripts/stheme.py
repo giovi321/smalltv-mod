@@ -3,7 +3,7 @@
 
 A pure-Python port of SmallTV Studio's core (validator, packer, RGB565
 renderer) extended with the spec 2 features of smalltv-mod: arcs, hands, tick
-marks, time.* / device.* sources, {H} {MO} {AMPM} and localized text. Needs
+marks, time.* / device.* sources, {H} {MO} {AMPM} {WW} and localized text. Needs
 Python 3.9+ and Pillow, nothing else.
 
   stheme.py scaffold DIR [--id ID --name NAME --author A --palette night]
@@ -42,7 +42,7 @@ MAX_LAYERS, MAX_BINDINGS, MAX_STOPS, MAX_TRANSLATION_BYTES = 32, 8, 8, 1024
 ANCHORS = ['top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right',
            'bottom-left', 'bottom-center', 'bottom-right']
 TOKENS = ['HH', 'hh', 'MM', 'SS', 'DD', 'MON', 'MONTH', 'WD', 'WEEKDAY', 'YYYY']
-TOKENS_SPEC2 = ['H', 'MO', 'AMPM']
+TOKENS_SPEC2 = ['H', 'MO', 'AMPM', 'WW']
 DEVICE_NAMES = ['focusToday', 'focusGoal', 'streak', 'humidity', 'temperature']
 TIME_NAMES = ['second', 'minute', 'hour', 'hour12', 'secondOfDay', 'day', 'month', 'weekday', 'moon']
 LANGS = ['en', 'pt', 'es', 'fr', 'de', 'it']
@@ -1017,7 +1017,7 @@ def expand(value, t, data, lang):
             wd = (t.weekday() + 1) % 7
             v = {'HH': f'{t.hour:02d}', 'hh': f'{(t.hour % 12) or 12:02d}', 'MM': f'{t.minute:02d}',
                  'SS': f'{t.second:02d}', 'DD': f'{t.day:02d}', 'YYYY': f'{t.year:04d}', 'MO': f'{t.month:02d}',
-                 'H': str(t.hour), 'AMPM': 'AM' if t.hour < 12 else 'PM',
+                 'H': str(t.hour), 'AMPM': 'AM' if t.hour < 12 else 'PM', 'WW': f'{t.isocalendar()[1]:02d}',
                  'MON': MONTHS_SHORT[lang][t.month - 1], 'MONTH': MONTHS[lang][t.month - 1],
                  'WD': DAYS_SHORT[lang][wd], 'WEEKDAY': DAYS[lang][wd]}.get(key)
         return v if v is not None else data.get(key, '--')
