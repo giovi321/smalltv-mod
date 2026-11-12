@@ -4,6 +4,15 @@
 #include <cmath>
 #include <iostream>
 using namespace smalltv;
+// run.sh builds this file twice: with ArduinoJson's default doubles, and with
+// -DARDUINOJSON_USE_DOUBLE=0 as the device builds it (floats). Each build names
+// what it expects, so a build that lost its flag fails here instead of quietly
+// testing the other number type.
+#if defined(EXPECT_FLOAT_JSON)
+static_assert(ARDUINOJSON_USE_DOUBLE == 0, "this build must parse numbers as floats, like the device");
+#elif defined(EXPECT_DOUBLE_JSON)
+static_assert(ARDUINOJSON_USE_DOUBLE == 1, "this build must parse numbers as doubles");
+#endif
 const char* base=R"({"spec":1,"theme":{"id":"test","name":"Test","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"layers":[{"id":"time","type":"text","x":120,"y":100,"anchor":"center","value":"{HH}:{MM}","size":48,"color":"#ffffff"}]})";
 const char* dataBase=R"({"spec":1,"theme":{"id":"test","name":"Test","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"weather","url":"https://example.test/weather.json","interval":60,"fields":[{"id":"temp","path":"main.temp"}]}],"layers":[{"id":"value","type":"text","x":0,"y":0,"value":"{weather.temp}","size":16,"color":"#ffffff"}]})";
 void rejected(JsonDocument& doc) {
