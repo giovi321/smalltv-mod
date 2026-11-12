@@ -1928,17 +1928,17 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
   languageChanged_ = false;
   return dirty;
 }
-// Alpha-composites an RGB565 foreground pixel over a background one, blending
-// each of the 5/6/5 channels independently with rounding (+127 before the
-// /255 integer division). Used for image/animation alpha and a package font's
-// coverage -- shapes and built-in font text are fully opaque where drawn.
-static uint16_t blend(uint16_t bg, uint16_t fg, uint8_t a) {
-  if (a == 255) return fg;
-  if (a == 0) return bg;
-  unsigned b = 255 - a;
-  return ((((fg >> 11) * a + (bg >> 11) * b + 127) / 255) << 11) |
-    (((((fg >> 5) & 63) * a + ((bg >> 5) & 63) * b + 127) / 255) << 5) |
-    (((fg & 31) * a + (bg & 31) * b + 127) / 255);
+// The base class's blendRow(): row() in pieces of 16 pixels (48 bytes of
+// buffer), blended over `pixels`.
+bool Assets::blendRow(AssetHandle handle, int y, int x, int count, uint16_t* pixels) {
+  uint16_t colors[16];
+  uint8_t alpha[16];
+  for (int done = 0; done < count; done += 16) {
+    const int piece = std::min(16, count - done);
+    if (!row(handle, y, x + done, piece, colors, alpha)) return false;
+    for (int i = 0; i < piece; ++i) pixels[done + i] = blend(pixels[done + i], colors[i], alpha[i]);
+  }
+  return true;
 }
 // True if (x, y) falls within strokeWidth/2 of the segment (lx,ly)-(lx2,ly2),
 // giving it round ends (a "capsule" shape): project the pixel onto the
@@ -2017,9 +2017,11 @@ static bool scrollContentColumn(const Layer& l, const LayerState& s, int textWid
 // (the package check makes sure), so walking the advances from the left
 // finds the one glyph under each pixel; only that glyph's row is read, into
 // `coverage`, and blended with the layer's colour over what is below.
-// Out of line: render() already holds three row buffers on the stack.
+// Out of line, and the coverage row is its own: it is not on the image path
+// (render() -> Package::blendRow()), the deepest one, so it costs no stack there.
 __attribute__((noinline)) static bool fontRow(const Theme& theme, const Layer& l, const LayerState& s, Rect r,
-                                              AssetHandle& handle, Assets& assets, uint16_t* pixels, uint8_t* coverage) {
+                                              AssetHandle& handle, Assets& assets, uint16_t* pixels) {
+  uint8_t coverage[MaxGlyphWidth];
   if (l.font > theme.fonts.size()) return false;
   const ThemeFont& font = theme.fonts[l.font - 1];
   if (handle == InvalidAsset) handle = assets.resolve("fonts/" + font.name + ".stf");
@@ -2052,8 +2054,7 @@ __attribute__((noinline)) static bool fontRow(const Theme& theme, const Layer& l
 // disjoint dirty regions (or several rows of the same region) still resolves
 // its asset exactly once.
 bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Display& display) {
-  uint16_t pixels[240], colors[240];
-  uint8_t alpha[240];
+  uint16_t pixels[240];
   if (e.theme().layers.size() > MaxLayers || e.states().size() != e.theme().layers.size()) return false;
   AssetHandle handles[MaxLayers];
   std::fill(handles, handles + MaxLayers, InvalidAsset);
@@ -2070,12 +2071,13 @@ bool render(const Engine& e, const std::vector<Rect>& dirty, Assets& assets, Dis
           // Assets stream by row too: only the `r.w` pixels this dirty region
           // actually needs are ever read, never a whole image or frame.
           if (handles[i] == InvalidAsset) handles[i] = assets.resolve(assetPath(l, s.frame));
-          if (handles[i] == InvalidAsset || !assets.row(handles[i], y - s.resolved.y, r.x - s.resolved.x, r.w, colors, alpha)) return false;
-          for (int x = 0; x < r.w; ++x) pixels[r.x - region.x + x] = blend(pixels[r.x - region.x + x], colors[x], alpha[x]);
+          // The asset blends the row over `pixels` itself: no colour and alpha
+          // rows here (720 bytes of the 4 KB loop stack, TRAPS T12).
+          if (handles[i] == InvalidAsset || !assets.blendRow(handles[i], y - s.resolved.y, r.x - s.resolved.x, r.w, pixels + (r.x - region.x))) return false;
           continue;
         }
         if (l.type == LayerType::Text && l.font) {
-          if (!fontRow(e.theme(), l, s, r, handles[i], assets, pixels + (r.x - region.x), alpha)) return false;
+          if (!fontRow(e.theme(), l, s, r, handles[i], assets, pixels + (r.x - region.x))) return false;
           continue;
         }
         // The rotation shapes' per-row setup: one sine for a whole row of
