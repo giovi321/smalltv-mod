@@ -25,7 +25,11 @@
 #include "RainData.h"
 #include "rain_clut.h"
 
-#define RAIN_FAST_BITS     9           // lookup huffman rapide (2^9 entrées)
+#define RAIN_FAST_BITS     8           // lookup huffman rapide (2^8 entrées)
+                                       // 9 bits = décodage plus rapide mais
+                                       // 1,5 Ko de BSS en plus ; 8 bits
+                                       // libère cette marge pour le pic du
+                                       // fetch (abort OOM vécu sur l'Ultra)
 #define RAIN_LOOKUP        (1 << RAIN_FAST_BITS)
 #define RAIN_OUT           240         // taille de sortie (écran)
 #define RAIN_MAX_IDAT      8           // chunks IDAT par fichier (2 en pratique)

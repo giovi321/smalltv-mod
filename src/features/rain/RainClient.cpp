@@ -59,6 +59,10 @@ static String   g_host;
 // exactement la marge du pic — abort « out of memory » vécu à ~62 s de boot.
 static uint8_t g_dlBuf[512];
 
+// Idem pour les objets HTTP : ~150 o de pile chacun au moment où le heap est
+// au plus serré. La boucle est mono-tâche, aucun risque de réentrance.
+static HTTPClient g_http;
+
 uint8_t   rainCount()                { return g_count; }
 uint32_t  rainFrameTime(uint8_t i)   { return (i < g_count) ? g_frames[i].time : 0; }
 bool      rainFrameNowcast(uint8_t i) { return (i < g_count) && g_frames[i].nowcast; }
@@ -153,7 +157,7 @@ static bool fetchFrameList(const Settings& s) {
   g_lastUrl = url;
 
   WiFiClient client;
-  HTTPClient http;
+  HTTPClient& http = g_http;
   // HTTP/1.0: the answer cannot be chunked, and the JSON is tiny.
   http.useHTTP10(true);
   http.setTimeout(s.httpTimeout);
@@ -243,7 +247,7 @@ static bool fetchFrame(const Settings& s, const String& host, uint8_t i, uint8_t
                                   // libère son buffer avant le décodage (heap serré)
 
   WiFiClient client;
-  HTTPClient http;
+  HTTPClient& http = g_http;
   http.useHTTP10(true);
   http.setTimeout(s.httpTimeout);
   http.setReuse(false);
