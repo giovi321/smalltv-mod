@@ -98,7 +98,6 @@ static inline void platformTimeBegin(const char* tz, const char* s1, const char*
   configTime(tz, s1, s2);     // ESP8266 core: TZ-string overload, sets TZ + starts SNTP
 }
 static inline void platformMdnsUpdate() { MDNS.update(); }
-static inline void platformAnalogWriteInit(uint8_t pin) { (void)pin; analogWriteRange(255); }
 static inline bool platformScanIsOpen(int i) { return WiFi.encryptionType(i) == ENC_TYPE_NONE; }
 static inline String platformUpdateError() { return Update.getErrorString(); }
 static inline uint32_t platformChipId() { return ESP.getChipId(); }

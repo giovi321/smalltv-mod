@@ -1,8 +1,12 @@
 #include "Gfx.h"
 #include "Platform.h"
 #include "SunTimes.h"
+#include "BacklightPlan.h"
 #include <Arduino_GFX_Library.h>
 #include <SPI.h>
+#if !defined(SMALLTV_FAMILY_ESP32)
+#include <sigma_delta.h>   // ESP8266 core: the hardware sigma-delta generator
+#endif
 
 // The SmallTV's ST7789 has its CS line tied to GND and only latches SPI in
 // **mode 3**. Arduino_GFX's stock Arduino_ST7789 forces SPI_MODE2 on the ESP8266
@@ -66,6 +70,44 @@ static Arduino_GFX*     gfx = nullptr;
 Arduino_GFX* gfxDev() { return gfx; }
 
 // ---------------------------------------------------------------------------
+// Backlight. The ESP32 family keeps analogWrite. The ESP8266 drives the pin
+// with the hardware sigma-delta generator instead of the core's software PWM:
+// that PWM runs from a timer interrupt, which Wi-Fi can delay, and a late edge
+// shows as a flash at low levels. The generator needs no interrupt. The pin is
+// never written while it is attached to the generator (BacklightPlan.h says
+// why the two ends are a fixed level and not duty 0 or 255).
+#if defined(SMALLTV_FAMILY_ESP32)
+static void backlightBegin() {
+  platformAnalogWriteInit(TFT_BL);
+}
+static void backlightSet(uint8_t steps, bool inverted) {
+  analogWrite(TFT_BL, inverted ? 255 - steps : steps);
+}
+#else
+static smalltv::BacklightPlan s_plan;
+static bool s_planValid = false;
+
+static void backlightBegin() {
+  sigmaDeltaEnable();
+  sigmaDeltaSetPrescaler(smalltv::BL_SD_PRESCALER);
+  s_planValid = false;   // the first level is always applied
+}
+static void backlightSet(uint8_t steps, bool inverted) {
+  const smalltv::BacklightPlan plan = smalltv::backlightPlan(steps, inverted);
+  if (s_planValid && smalltv::backlightPlanSame(plan, s_plan)) return;
+  if (plan.sigmaDelta) {
+    sigmaDeltaWrite(0, plan.duty);   // the duty first, so the pin never carries the old one
+    if (!sigmaDeltaIsPinAttached(TFT_BL)) sigmaDeltaAttachPin(TFT_BL);
+  } else {
+    sigmaDeltaDetachPin(TFT_BL);
+    digitalWrite(TFT_BL, plan.level ? HIGH : LOW);
+  }
+  s_plan = plan;
+  s_planValid = true;
+}
+#endif
+
+// ---------------------------------------------------------------------------
 void gfxBegin(const Settings& s) {
 #ifdef TFT_PWR_PIN
   // Boards with a switched panel power rail (NM-TV-154): energize the display
@@ -77,7 +119,7 @@ void gfxBegin(const Settings& s) {
   // if panel init has trouble. A dark backlight then means the sketch didn't get
   // this far (early crash / bad flash) — a useful boot indicator.
   pinMode(TFT_BL, OUTPUT);
-  platformAnalogWriteInit(TFT_BL);
+  backlightBegin();
   gfxSetBrightness(s.brightness, s.backlightInverted);
 
 #if defined(SMALLTV_FAMILY_ESP32)
@@ -111,7 +153,7 @@ void gfxBegin(const Settings& s) {
 }
 
 void gfxSetBrightnessSteps(uint8_t steps, bool inverted) {
-  analogWrite(TFT_BL, inverted ? 255 - steps : steps);
+  backlightSet(steps, inverted);
 }
 
 void gfxSetBrightness(uint8_t pct, bool inverted) {
