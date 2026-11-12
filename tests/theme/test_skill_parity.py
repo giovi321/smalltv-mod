@@ -261,7 +261,7 @@ class ShowTests(unittest.TestCase):
     def test_accepts_and_refuses_like_the_firmware(self):
         self.assertEqual(stheme.validate(self.theme([SHOW])), [])
         self.assertEqual(stheme.validate(self.theme([dict(SHOW, source='w.age', missing=True)])), [])
-        self.assertEqual(stheme.validate(self.theme([SHOW], spec=1)), ['layers[0]: show rules needs "spec": 2 (or "spec": "auto")'])
+        self.assertEqual(stheme.validate(self.theme([SHOW], spec=1)), ['layers[0].show: needs "spec": 2'])
         bad = {
             'time.second': 'layers[0].show[0].source: expected a declared data field',
             'w.other': 'layers[0].show[0].source: expected a declared data field',
@@ -283,6 +283,11 @@ class ShowTests(unittest.TestCase):
                          ['layers[9].show: expected at most 36 rules in a theme'])
         self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(38))),
                          ['layers[9].show: expected at most 36 rules in a theme'])
+
+    def test_spec_1_text_of_other_features_is_unchanged(self):
+        # Only the show message follows the firmware's text; the rest keep the skill's own hint.
+        self.assertEqual(stheme.validate(manifest(spec=1, layers=[arc()])),
+                         ['layers[0]: arc shape needs "spec": 2 (or "spec": "auto")'])
 
     def test_auto_spec_becomes_2(self):
         self.assertEqual(stheme.needed_spec(self.theme([SHOW])), 2)
