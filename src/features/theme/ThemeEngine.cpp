@@ -1944,7 +1944,7 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
       // spec 1 `device` data source with no fetched value shows "--", never
       // what the firmware supplies, and spec 1 names stay English. Only spec 2
       // rounds a field with `decimals`, which a spec 1 theme cannot have.
-      std::string text = theme_.spec >= 2 ? expandText(layerText(theme_, l, language_), time, values_, theme_.data, device_, language_) : expandText(l.value, time, values_);
+      std::string text = theme_.spec >= 2 ? expandTextWith(layerText(theme_, l, language_), time, values_, &theme_.data, device_, language_) : expandText(l.value, time, values_);
       if (text != s.text) {
         s.text = std::move(text);
         changed = true;
