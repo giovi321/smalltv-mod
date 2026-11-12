@@ -1485,6 +1485,7 @@ static int isoWeek(const tm& t) {
 // Returns false and leaves `out` alone for anything else: words, "--", and
 // numbers with an exponent, which ArduinoJson writes only below 1e-5 or from
 // 1e9 up.
+static const size_t kRoundDigits = 34;   // 31 characters of a fetched value and 3 places
 static bool roundDecimal(const std::string& value, int places, std::string& out) {
   const char* begin = value.c_str();
   const char* end = begin + value.size();
@@ -1496,33 +1497,53 @@ static bool roundDecimal(const std::string& value, int places, std::string& out)
   const char* point = std::find(begin, end, '.');
   const char* fraction = point == end ? end : point + 1;
   const size_t fractionSize = static_cast<size_t>(end - fraction), kept = static_cast<size_t>(places);
-  // The integer digits, then exactly `places` fraction digits.
-  std::string digits(begin, point);
-  for (size_t i = 0; i < kept; ++i) digits += i < fractionSize ? fraction[i] : '0';
+  // The integer digits, then exactly `places` fraction digits, in a buffer on
+  // the stack (no allocation for it). A fetched value has at most 31
+  // characters, so 31 digits and 3 places is the most there is; a longer text
+  // (never fetched) is shown as it is.
+  char digits[kRoundDigits];
+  size_t size = static_cast<size_t>(point - begin);
+  if (size + kept > sizeof(digits)) return false;
+  std::copy(begin, point, digits);
+  for (size_t i = 0; i < kept; ++i) digits[size++] = i < fractionSize ? fraction[i] : '0';
+  // A carry out of the first digit becomes a leading "1" (`carry`). The
+  // result is written with push-back only (no string erase or insert, whose
+  // error messages cost static RAM on the ESP8266): `skip` leading zeros are
+  // left out, and `pad` zeros are added, so one digit stands before the point.
+  bool carry = false;
   if (kept < fractionSize && fraction[kept] >= '5') {
-    size_t i = digits.size();
+    size_t i = size;
     while (i > 0 && digits[i - 1] == '9') digits[--i] = '0';
-    if (i == 0) digits.insert(digits.begin(), '1');
+    if (i == 0) carry = true;
     else ++digits[i - 1];
   }
-  // One digit before the point at least, and no leading zeros.
-  while (digits.size() > kept + 1 && digits[0] == '0') digits.erase(0, 1);
-  if (digits.size() < kept + 1) digits.insert(0, kept + 1 - digits.size(), '0');
-  out = negative && digits.find_first_not_of('0') != std::string::npos ? "-" : "";
-  out.append(digits, 0, digits.size() - kept);
-  if (kept) out.append(".").append(digits, digits.size() - kept, kept);
+  size_t skip = 0, pad = 0;
+  if (!carry) {
+    while (size - skip > kept + 1 && digits[skip] == '0') ++skip;
+    if (size < kept + 1) pad = kept + 1 - size;
+  }
+  bool nonZero = carry;
+  for (size_t k = skip; k < size && !nonZero; ++k) nonZero = digits[k] != '0';
+  const size_t lead = carry ? 1 : 0, total = lead + pad + size - skip;
+  out = negative && nonZero ? "-" : "";
+  for (size_t k = 0; k < total; ++k) {
+    if (k == total - kept) out += '.';
+    out += k < lead ? '1' : k < lead + pad ? '0' : digits[skip + k - lead - pad];
+  }
   return true;
 }
 // The `decimals` of the field that a "<source>.<field>" key names, or -1.
-static int fieldDecimals(const std::vector<ThemeDataSource>& data, const std::string& key) {
+// `data` is null when the caller has no data block.
+static int fieldDecimals(const std::vector<ThemeDataSource>* data, const std::string& key) {
   const size_t dot = key.find('.');
-  if (dot == std::string::npos) return -1;
-  for (const auto& source : data) {
+  if (!data || dot == std::string::npos) return -1;
+  for (const auto& source : *data) {
     if (key.compare(0, dot, source.id) != 0) continue;
     for (const auto& field : source.fields) if (key.compare(dot + 1, std::string::npos, field.id) == 0) return field.decimals;
   }
   return -1;
 }
+static std::string expandTextWith(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeDataSource>* data, const std::vector<ThemeValue>& device, uint8_t language);
 // Substitutes every {token} in a validated text template: clock/date tokens
 // first (only when `t` is non-null and the field is in range), then a
 // matching fetched value, and "--" if neither resolves -- the same fallback
@@ -1539,8 +1560,7 @@ std::string expandText(const std::string& value, const tm* t, const std::vector<
   return expandText(value, t, values, noDevice, language);
 }
 std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeValue>& device, uint8_t language) {
-  static const std::vector<ThemeDataSource> noData;
-  return expandText(value, t, values, noData, device, language);
+  return expandTextWith(value, t, values, nullptr, device, language);
 }
 // `data` is the theme's data block: a field's "decimals" rounds its text.
 std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeDataSource>& data) {
@@ -1555,6 +1575,9 @@ std::string expandText(const std::string& value, const tm* t, const std::vector<
 // `language` is the index of Languages.h whose month and weekday names {MON},
 // {MONTH}, {WD} and {WEEKDAY} use.
 std::string expandText(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeDataSource>& data, const std::vector<ThemeValue>& device, uint8_t language) {
+  return expandTextWith(value, t, values, &data, device, language);
+}
+static std::string expandTextWith(const std::string& value, const tm* t, const std::vector<ThemeValue>& values, const std::vector<ThemeDataSource>* data, const std::vector<ThemeValue>& device, uint8_t language) {
   if (language >= kLanguageCount) language = 0;
   std::string out;
   for (size_t i = 0; i < value.size();) {
