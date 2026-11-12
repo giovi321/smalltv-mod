@@ -398,8 +398,9 @@
 #define RAIN_COLOR_SCHEME  2               // Universal Blue (blue -> purple ramp)
 #define RAIN_USER_AGENT    "Mozilla/5.0 (SmallTV)"
 
-// Max frames kept in LittleFS (2h of past = 13; +3 nowcast slots if they return).
-#define MAX_RAIN_FRAMES    16
+// Max frames kept in LittleFS (2h of past = 13). 8-bit frames = 57,600 B each,
+// so 13 fit the 1 MB LittleFS alongside the other files (~760 KB used).
+#define MAX_RAIN_FRAMES    13
 #define RAIN_DIR           "/rain"
 
 // Defaults (lat/lon 0,0 is the "not set yet" sentinel -> shows a prompt).

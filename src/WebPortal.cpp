@@ -467,6 +467,7 @@ static void handleRefresh() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
+
 #if WITH_HA
 // Purge every HA screen: empties the local store + deletes /ha_screens.json,
 // then deletes the broker's retained copies by publishing an empty retained

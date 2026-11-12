@@ -16,7 +16,7 @@ static const int CY = TFT_HEIGHT / 2;
 static const int RR = 112;                 // outer ring radius, px
 
 // Palette tinted through the display colour correction (rebuilt per render).
-static uint16_t g_pal[16];
+static uint16_t g_pal[256];
 
 // dist/bearing polar -> screen xy (bearing 0 = N = up, cw).
 static void polar(float distPx, float brgDeg, int& x, int& y) {
@@ -35,9 +35,13 @@ static void geo(float homeLat, float homeLon, float lat, float lon,
   if (brg < 0) brg += 360.0f;
 }
 
-// ---- the static radar background (drawn under, then over, the rain) --------
+// ---- the static radar background (under the rain field) ---------------------
 static void drawBase(Arduino_GFX* gfx) {
   gfx->fillScreen(C_BLACK);
+}
+
+// ---- the scope lines (over the rain field, like a radar scope) --------------
+static void drawScope(Arduino_GFX* gfx) {
   gfx->drawCircle(CX, CY, RR, C_DGRAY);
   gfx->drawCircle(CX, CY, RR / 2, C_DGRAY);
   gfx->drawFastVLine(CX, CY - RR, 2 * RR, C_DGRAY);
@@ -45,8 +49,8 @@ static void drawBase(Arduino_GFX* gfx) {
   gfxDrawCentered("N", CY - RR + 2, 1, C_GRAY);   // just inside the top of the ring
 }
 
-// ---- one frame: LittleFS nibbles -> RGB565 rows -----------------------------
-static uint8_t  g_nib[120];
+// ---- one frame: LittleFS indices -> RGB565 rows -----------------------------
+static uint8_t  g_idx[TFT_WIDTH];
 static uint16_t g_row[TFT_WIDTH];
 
 static void blitFrame(uint8_t idx) {
@@ -55,14 +59,11 @@ static void blitFrame(uint8_t idx) {
   File f = LittleFS.open(path, "r");
   if (!f) return;
   Arduino_GFX* gfx = gfxDev();
-  uint8_t*  nib = g_nib;
+  uint8_t*  idx8 = g_idx;
   uint16_t* row = g_row;
   for (int y = 0; y < TFT_HEIGHT; y++) {
-    if (f.read(nib, sizeof nib) != sizeof nib) break;
-    for (int x = 0; x < TFT_WIDTH; x++) {
-      uint8_t lv = (x & 1) ? (nib[x >> 1] & 0x0F) : (nib[x >> 1] >> 4);
-      row[x] = g_pal[lv];
-    }
+    if (f.read(idx8, TFT_WIDTH) != TFT_WIDTH) break;
+    for (int x = 0; x < TFT_WIDTH; x++) row[x] = g_pal[idx8[x]];
     gfx->draw16bitRGBBitmap(0, y, row, TFT_WIDTH, 1);
   }
   f.close();
@@ -160,12 +161,20 @@ static void drawRain(const Settings& s, uint8_t animIdx) {
   if (!gfx) return;
   uint8_t n = rainCount();
 
-  for (int i = 0; i < 16; i++)
-    g_pal[i] = gfxTint(pgm_read_word(&kRainPalette[i]));
+  for (int i = 0; i < RAIN_COLOR_COUNT; i++) {
+    // Byte-wise copy: 16-bit loads from irom0 raise LoadStoreError on the
+    // ESP8266 (crash vécu sur l'Ultra) — memcpy_P works.
+    uint8_t col[3];
+    memcpy_P(col, kRainColors[i], sizeof col);
+    g_pal[i] = gfxTint((uint16_t)(((col[0] >> 3) << 11) | ((col[1] >> 2) << 5) | (col[2] >> 3)));
+  }
 
-  if (n > 0) blitFrame(animIdx);
-
+  // Fond noir, puis la frame (nuages + pluie, composite prémultiplié), puis
+  // les cercles/croix PAR-DESSUS le champ. Ordre vécu : drawBase après
+  // blitFrame effaçait la frame au fillScreen (flash nuages puis scope vide).
   drawBase(gfx);
+  if (n > 0) blitFrame(animIdx);
+  drawScope(gfx);
   drawCities(s, gfx);
 
   // Home marker on top.

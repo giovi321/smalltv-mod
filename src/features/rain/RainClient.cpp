@@ -9,7 +9,7 @@
 //      configured range: K = round(2 * range / kmPerPx), so the 240x240
 //      output covers about twice the range ring.
 //   3. The custom decoder (RainPng.cpp) crops, upscales and quantizes each
-//      frame into /rain/fNN.raw (240x240, 4-bit, 28,800 B).
+//      frame into /rain/fNN.raw (240x240, 8-bit indices, 57,600 B).
 // On any failure the old frames stay on disk and the error is flagged —
 // the animation keeps looping the stale set.
 #include "RainClient.h"
@@ -199,6 +199,8 @@ static bool fetchFrame(const Settings& s, const String& host, uint8_t i) {
   url += String(rainLon(s), 6);
   url += F("/2/1_1.png");
   g_lastUrl = url;
+  g_pending[i].path = String();   // le chemin vit maintenant dans l'URL :
+                                  // libère son buffer avant le décodage (heap serré)
 
   WiFiClient client;
   HTTPClient http;
@@ -234,6 +236,8 @@ static bool fetchFrame(const Settings& s, const String& host, uint8_t i) {
   http.end();
   tmp.close();
   if (total == 0) { g_stage = RAIN_HTTP_ERROR; return false; }
+
+  url = String();   // libère le buffer de l'URL avant le décodage
 
   // Decode: centre crop + bilinear upscale + quantization into the frame.
   char path[24];

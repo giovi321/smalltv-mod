@@ -2,70 +2,63 @@
 //
 // Pourquoi pas PNGdec : ses buffers statiques (~38 Ko) dépassent le heap de
 // l'ESP8266. Les tuiles RainViewer utilisent le filtre « None » sur toutes
-// leurs lignes (vérifié), donc aucun dé-filtrage n'est nécessaire : la
-// fenêtre LZ stocke le RGB565 du pixel (2 octets) au lieu des 4 octets RGBA
-// bruts — 16 Ko au lieu de 32 Ko, alloués sur le heap le temps du décodage.
-// Le port est validé sur PC (tools/raindecode_proto) : séquence de copies
-// bit-identique au parseur de référence, 90-95 % des octets de sortie
-// identiques à un décodage zlib exact, le reste = mélange cosmétique des
-// back-références désalignées (les canaux de deux pixels sources se
-// mélangent, ±1 niveau d'intensité).
+// leurs lignes (vérifié), donc aucun dé-filtrage n'est nécessaire.
+//
+// Fenêtre LZ : 8192 pixels × 1 octet = indice kRainColors (6 bits) + classe
+// d'alpha (2 bits, {0,85,170,255}). Sans l'alpha en histoire, une copie
+// reconstruisait alpha 255 : les pixels mixtes (littéral + copie — 99 % du
+// flux) étaient trop clairs ou trop sombres sur les nuages semi-transparents
+// (vécu sur l'Ultra : écarts nets vs le rendu RainViewer). Les octets copiés
+// sont reconstruits en brut (couleur × 255/alpha en facteurs entiers), puis
+// la prémultiplication de finishPixel redonne la couleur affichée. Un pixel
+// entièrement copié depuis la même entrée affiche directement la couleur de
+// la source, sans re-quantifier (la LUT n'est pas idempotente sur toutes les
+// couleurs de la palette).
+// La profondeur de 8192 pixels couvre la fenêtre deflate native (32 Ko
+// d'octets bruts ≈ 8184 pixels) : la réduire casse le décodage (89 %
+// d'erreurs à 4096, vécu).
+// Le malloc de la fenêtre (8 Ko) exigeait 4 Ko de heap libérés en passant la
+// LUT de couleurs en flash (rain_clut.h, précalculée par
+// tools/make_rain_clut.py — le plus gros bloc libre mesuré au décodage était
+// de 7232 o sur l'Ultra).
 #include "RainPng.h"
 #include "RainData.h"
+#include "rain_clut.h"
 
-#define RAIN_WINDOW_PIXELS 8192        // 32 Ko bruts / 4 octets-par-pixel
+#define RAIN_WINDOW_PIXELS 8192        // profondeur de la fenêtre LZ (pixels) :
+                                       // réduire casse le décodage (89 %
+                                       // d'erreurs à 4096, vérifié)
 #define RAIN_FAST_BITS     9           // lookup huffman rapide (2^9 entrées)
 #define RAIN_LOOKUP        (1 << RAIN_FAST_BITS)
 #define RAIN_OUT           240         // taille de sortie (écran)
 #define RAIN_MAX_IDAT      8           // chunks IDAT par fichier (2 en pratique)
 
-// ---------------------------------------------------------------------------
-// Quantification : couleur RGB565 -> niveau de palette (LUT RGB332)
-// ---------------------------------------------------------------------------
-static uint8_t g_lut[256];
-static bool    g_lutReady = false;
-
-void rainLevelLutBuild() {
-  for (int i = 0; i < 256; i++) {
-    int r3 = i >> 5, g3 = (i >> 2) & 7, b2 = i & 3;
-    // couleur représentative (centre de la cellule RGB332)
-    uint16_t c = (uint16_t)(((r3 * 4 + 2) << 11) | ((g3 * 8 + 4) << 5) | (b2 * 8 + 4));
-    int r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
-    uint8_t best = 0;
-    int bestD = 1 << 30;
-    for (uint8_t k = 0; k < 20; k++) {
-      uint16_t t = pgm_read_word(&kRainSourceRamp[k]);
-      int dr = r - ((t >> 11) & 31);
-      int dg = g - ((t >> 5) & 63);
-      int db = b - (t & 31);
-      int d = dr * dr + dg * dg + db * db;
-      if (d < bestD) { bestD = d; best = k; }
-    }
-    g_lut[i] = 1 + (uint8_t)(best * 14 / 19);
-  }
-  g_lutReady = true;
+// Classes d'alpha (2 bits) stockées avec l'indice de couleur : valeur réelle
+// et facteur de reconstruction brut (×255/valeur : ×1, ×3/2, ×3, entiers).
+static const uint8_t kAlphaVal[4] = {0, 85, 170, 255};
+static uint8_t alphaClass(uint8_t a) {
+  return a < 43 ? 0 : (a < 128 ? 1 : (a < 213 ? 2 : 3));
 }
 
-uint8_t rainLevelLut(uint16_t c) {
-  if (c == 0) return 0;   // transparent (les tuiles n'ont jamais de noir opaque)
-  return g_lut[((c >> 13) << 5) | (((c >> 8) & 7) << 2) | ((c >> 3) & 3)];
+// ---------------------------------------------------------------------------
+// Couleur prémultipliée RGB565 -> indice dans kRainColors (LUT R5G5B2 de
+// 4096 entrées en flash, précalculée par tools/make_rain_clut.py). Clé
+// R5G5B2 : les gris sombres de la couche nuageuse diffèrent surtout en R/G,
+// préservés ; les bleus de la rampe pluie diffèrent surtout en G.
+// ---------------------------------------------------------------------------
+static uint8_t g_cols[RAIN_COLOR_COUNT][3];   // copie RAM de kRainColors (copies LZ)
+static bool    g_colsReady = false;
+
+void rainColorTableInit() {
+  for (uint8_t k = 0; k < RAIN_COLOR_COUNT; k++)
+    memcpy_P(g_cols[k], kRainColors[k], 3);
+  g_colsReady = true;
 }
 
-// Version lente exacte (tests natifs / diagnostics).
-uint8_t rainLevelFor(uint16_t c) {
-  if (c == 0) return 0;
-  int r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
-  uint8_t best = 0;
-  int bestD = 1 << 30;
-  for (uint8_t k = 0; k < 20; k++) {
-    uint16_t t = pgm_read_word(&kRainSourceRamp[k]);
-    int dr = r - ((t >> 11) & 31);
-    int dg = g - ((t >> 5) & 63);
-    int db = b - (t & 31);
-    int d = dr * dr + dg * dg + db * db;
-    if (d < bestD) { bestD = d; best = k; }
-  }
-  return 1 + (uint8_t)(best * 14 / 19);
+uint8_t rainColorIndex(uint16_t c) {
+  if (c == 0) return 0;   // transparent
+  uint16_t key = (uint16_t)(((c >> 11) << 7) | ((((c >> 5) & 63) >> 1) << 2) | ((c & 31) >> 3));
+  return pgm_read_byte(&kRainClut[key]);
 }
 
 // ---------------------------------------------------------------------------
@@ -78,13 +71,16 @@ struct IdatSeg {
   uint32_t len;
 };
 
+// Buffer de lecture du BitSrc : statique, 512 B sur la pile feraient déborder
+// le cont stack de l'ESP8266 (~688 B de marge) pendant le décodage (vécu).
+static uint8_t g_srcBuf[512];
+
 struct BitSrc {
   File*          f;
   const IdatSeg* segs = nullptr;
   int            segCount = 0;
   int            segIdx = 0;
   uint32_t       segLeft = 0;    // octets restants dans le segment courant
-  uint8_t        buf[512];
   int            bufPos = 0, bufLen = 0;
 
   bool refill() {
@@ -94,8 +90,8 @@ struct BitSrc {
       segLeft = segs[segIdx].len;
       segIdx++;
     }
-    uint32_t want = segLeft < sizeof(buf) ? segLeft : (uint32_t)sizeof(buf);
-    int n = f->read(buf, want);
+    uint32_t want = segLeft < sizeof(g_srcBuf) ? segLeft : (uint32_t)sizeof(g_srcBuf);
+    int n = f->read(g_srcBuf, want);
     if (n <= 0) return false;
     segLeft -= (uint32_t)n;
     bufLen = n;
@@ -104,7 +100,7 @@ struct BitSrc {
   }
   int next() {
     if (bufPos >= bufLen && !refill()) return -1;
-    return buf[bufPos++];
+    return g_srcBuf[bufPos++];
   }
 };
 
@@ -258,17 +254,20 @@ static void fixedInit() {
 }
 
 // ---------------------------------------------------------------------------
-// Sortie quantifiée : fenêtre RGB565 + assemblage pixels + crop/upscale
+// Sortie quantifiée : fenêtre d'entrées + assemblage pixels + crop/upscale
 // ---------------------------------------------------------------------------
 struct QuantOut {
-  uint16_t* win;                       // 8192 pixels RGB565 (heap)
+  uint8_t*  win;                       // 8192 entrées : indice<<2 | classe alpha
   File*     dst;
   int       w;                         // largeur de la tuile
   int       cropK, cx0, cy0;
   int       stride;
   uint32_t  pixels = 0;
   int       chan = -1;                 // -1 = filtre attendu, 0..3 = R,G,B,A
-  uint8_t   r = 0, g = 0, b = 0;
+  uint16_t  r = 0, g = 0, b = 0;       // canaux bruts (reconstruction ×3 : ≤765)
+  uint8_t   a = 0;
+  uint8_t   histE = 0xFF;              // entrée de fenêtre des octets copiés :
+                                       // 0xFF = aucun, 0xFE = sources mixtes
   // upscale
   uint16_t  rowA[RAIN_OUT], rowB[RAIN_OUT];   // lignes source RGB565 du crop
   int       curRow = -1;
@@ -281,6 +280,15 @@ struct QuantOut {
     cropK = k;
     cx0 = (tile - k) / 2;
     cy0 = (tile - k) / 2;
+    // g_q est statique : remise à zéro de l'état par décodage (les
+    // initialiseurs de membre ne jouent qu'au premier). Sans ça le 2e
+    // décodage repart de pixels = 65536 (compte 2x/3x, vécu sur l'Ultra).
+    pixels = 0;
+    chan = -1;
+    r = g = b = 0;
+    a = 0;
+    histE = 0xFF;
+    curRow = -1;
     // tables d'interpolation horizontale (8.8 fixe)
     int A = k - 1;
     if (A <= 0) A = 1;                  // crop 1 px : tout est le même pixel
@@ -291,20 +299,71 @@ struct QuantOut {
     }
   }
 
-  uint16_t winGet(uint32_t idx) { return win[idx & (RAIN_WINDOW_PIXELS - 1)]; }
+  void winSet(uint32_t n, uint8_t v) { win[n & (RAIN_WINDOW_PIXELS - 1)] = v; }
 
-  void byte(uint8_t v) {
-    if (chan < 0) { chan = 0; r = g = b = 0; return; }   // octet de filtre (None)
+  uint8_t winGet(uint32_t idx) { return win[idx & (RAIN_WINDOW_PIXELS - 1)]; }
+
+  // Octet littéral : RGBA brut du flux déflaté (prémultiplié par finishPixel
+  // une fois l'alpha connu).
+  void byte(uint16_t v) {
+    if (chan < 0) { chan = 0; r = g = b = 0; a = 0; histE = 0xFF; return; }  // filtre (None)
+    histE = 0xFE;                       // brut : le pixel n'est pas « tout-histoire »
     if (chan == 0) r = v;
     else if (chan == 1) g = v;
     else if (chan == 2) b = v;
+    else a = (uint8_t)v;
+    chan++;
+    if (chan == 4) finishPixel();
+  }
+
+  // Octet copié depuis la fenêtre (entrée e = indice<<2 | classe alpha,
+  // sch = canal SOURCE — peut différer du canal courant si la copie est
+  // désalignée ; la destination est le canal courant) : valeur reconstruite
+  // en brut (couleur × 255/alpha), la prémultiplication de finishPixel
+  // redonne la couleur affichée.
+  void byteHist(uint8_t e, int sch) {
+    if (chan < 0) { chan = 0; r = g = b = 0; a = 0; histE = 0xFF; return; }  // filtre
+    if (histE == 0xFF) histE = e;
+    else if (histE != e) histE = 0xFE;  // octets de plusieurs sources : pixel mixte
+    uint8_t idx = e >> 2;
+    uint8_t av = kAlphaVal[e & 3];
+    uint16_t v;
+    if (sch == 3) {
+      v = (idx == 0) ? 0 : av;
+    } else {
+      v = g_cols[idx][sch];
+      if (av == 170) v += v >> 1;       // ×255/170 = ×3/2
+      else if (av == 85) v *= 3;        // ×255/85  = ×3
+    }
+    if (chan == 0) r = v;
+    else if (chan == 1) g = v;
+    else if (chan == 2) b = v;
+    else a = (uint8_t)v;
     chan++;
     if (chan == 4) finishPixel();
   }
 
   void finishPixel() {
-    uint16_t c = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
-    win[pixels & (RAIN_WINDOW_PIXELS - 1)] = c;
+    uint8_t idx;
+    uint16_t c;
+    if (histE != 0xFF && histE != 0xFE) {
+      // Pixel entièrement copié depuis la même entrée : la couleur affichée
+      // est exactement celle de la source — sans re-quantifier (la LUT n'est
+      // pas idempotente sur toutes les couleurs de la palette, vécu).
+      idx = histE >> 2;
+      c = (uint16_t)(((g_cols[idx][0] >> 3) << 11) |
+                     ((g_cols[idx][1] >> 2) << 5) |
+                     (g_cols[idx][2] >> 3));
+      winSet(pixels, histE);
+    } else {
+      // Prémultiplication sur noir (le fond de l'écran) : x/255 ~ (x + 1 + x>>8)>>8
+      uint32_t rr = ((uint32_t)r * a + 1 + ((uint32_t)r * a >> 8)) >> 8;
+      uint32_t gg = ((uint32_t)g * a + 1 + ((uint32_t)g * a >> 8)) >> 8;
+      uint32_t bb = ((uint32_t)b * a + 1 + ((uint32_t)b * a >> 8)) >> 8;
+      c = (uint16_t)(((rr >> 3) << 11) | ((gg >> 2) << 5) | (bb >> 3));
+      idx = rainColorIndex(c);
+      winSet(pixels, (uint8_t)((idx << 2) | alphaClass(a)));
+    }
     int x = (int)(pixels % (uint32_t)w);
     int y = (int)(pixels / (uint32_t)w);
     if (x >= cx0 && x < cx0 + cropK && y >= cy0 && y < cy0 + cropK) {
@@ -319,6 +378,8 @@ struct QuantOut {
     pixels++;
     chan = ((int)(pixels % (uint32_t)w) == 0) ? -1 : 0;   // fin de ligne -> filtre
     r = g = b = 0;
+    a = 0;
+    histE = 0xFF;
   }
 
   // Émet les lignes de sortie dont la ligne source d'appui vaut `r`
@@ -339,30 +400,26 @@ struct QuantOut {
   void emitRow(int oy, uint8_t ty, int ra, int rb) {
     const uint16_t* A = (ra == rb) ? rowB : rowA;
     const uint16_t* B = rowB;
-    uint8_t buf[120];
+    static uint8_t buf[RAIN_OUT];   // statique : économie de pile (voir g_srcBuf)
     for (int x = 0; x < RAIN_OUT; x++) {
       int x0 = x0tab[x];
       int x1 = (x0 + 1 < cropK) ? x0 + 1 : x0;
       uint8_t tx = txTab[x];
       uint16_t c = bilin(A[x0], A[x1], B[x0], B[x1], tx, ty);
-      uint8_t lv = rainLevelLut(c);
-      if (x & 1) buf[x >> 1] |= lv;
-      else       buf[x >> 1] = lv << 4;
+      buf[x] = rainColorIndex(c);
     }
     dst->write(buf, sizeof buf);
   }
 
   // Dernière ligne (oy = 239, ty = 0) : la source est la dernière ligne du crop.
   void emitLastRow() {
-    uint8_t buf[120];
+    static uint8_t buf[RAIN_OUT];   // statique : économie de pile (voir g_srcBuf)
     for (int x = 0; x < RAIN_OUT; x++) {
       int x0 = x0tab[x];
       int x1 = (x0 + 1 < cropK) ? x0 + 1 : x0;
       uint8_t tx = txTab[x];
       uint16_t c = bilin(rowB[x0], rowB[x1], rowB[x0], rowB[x1], tx, 0);
-      uint8_t lv = rainLevelLut(c);
-      if (x & 1) buf[x >> 1] |= lv;
-      else       buf[x >> 1] = lv << 4;
+      buf[x] = rainColorIndex(c);
     }
     dst->write(buf, sizeof buf);
   }
@@ -371,9 +428,9 @@ struct QuantOut {
   void flush() {
     if (cropK < 2) {
       // crop 1 px : toute la sortie = ce pixel
-      uint8_t buf[120];
-      uint8_t lv = rainLevelLut(rowB[0]);
-      for (int i = 0; i < 120; i++) buf[i] = (uint8_t)((lv << 4) | lv);
+      static uint8_t buf[RAIN_OUT];
+      uint8_t idx = rainColorIndex(rowB[0]);
+      for (int i = 0; i < RAIN_OUT; i++) buf[i] = idx;
       for (int oy = 0; oy < RAIN_OUT; oy++) dst->write(buf, sizeof buf);
       return;
     }
@@ -403,8 +460,8 @@ static QuantOut g_q;
 
 // ---------------------------------------------------------------------------
 // Copie back-référence : distance/longueur en octets bruts. Chaque octet de
-// sortie est reconstruit canal par canal depuis le pixel source (le filtre
-// None garantit qu'aucun dé-filtrage n'est nécessaire).
+// sortie est reconstruit canal par canal depuis l'entrée de fenêtre du pixel
+// source (le filtre None garantit qu'aucun dé-filtrage n'est nécessaire).
 // ---------------------------------------------------------------------------
 static void copyBytes(QuantOut& q, int d, int l) {
   for (int i = 0; i < l; i++) {
@@ -415,19 +472,18 @@ static void copyBytes(QuantOut& q, int d, int l) {
     uint32_t sk = src / (uint32_t)q.stride + 1;   // filtres à positions <= src
     uint32_t pix = (src - sk) / 4;
     int chan = (int)((src - sk) % 4);             // 0=R, 1=G, 2=B, 3=A
-    uint16_t c;
     if (pix == q.pixels) {
-      // le pixel en cours : ses canaux déjà émis vivent dans les registres
-      c = (uint16_t)(((q.r >> 3) << 11) | ((q.g >> 2) << 5) | (q.b >> 3));
+      // Le pixel en cours : ses canaux déjà émis vivent en brut dans les
+      // registres (le flux déflaté contient du RGBA brut ; la prémultipli-
+      // cation se fait dans finishPixel une fois l'alpha arrivé). Son alpha
+      // est déjà arrivé quand une copie le lit (la source est en arrière).
+      if (chan == 0)      q.byte(q.r);
+      else if (chan == 1) q.byte(q.g);
+      else if (chan == 2) q.byte(q.b);
+      else                q.byte(q.a);
     } else {
-      c = q.winGet(pix);
+      q.byteHist(q.winGet(pix), chan);
     }
-    uint8_t ch;
-    if (chan == 0)      ch = (uint8_t)(((c >> 11) << 3) | ((c >> 11) >> 2));
-    else if (chan == 1) ch = (uint8_t)((((c >> 5) & 63) << 2) | ((c >> 5) >> 4));
-    else if (chan == 2) ch = (uint8_t)(((c & 31) << 3) | ((c & 31) >> 2));
-    else                ch = (c == 0) ? 0 : 255;  // A : transparent ssi RGB noir
-    q.byte(ch);
   }
 }
 
@@ -535,13 +591,19 @@ static bool inflate(BitR& br, QuantOut& q) {
 // ---------------------------------------------------------------------------
 // Entrée principale
 // ---------------------------------------------------------------------------
+// Codes d'échec (dans les commentaires des appels à fail) : 1 = lecture
+// courte, 2 = pas un PNG, 3 = parcours de chunks impossible, 4 = IHDR
+// inattendu, 5 = pas d'IDAT, 6 = malloc de la fenêtre, 7 = flux défectueux,
+// 8 = compte de pixels.
+static bool fail(int) { return false; }
+
 bool rainDecodeToFs(File& src, File& dst, int tileSize, int cropK) {
-  if (!g_lutReady) rainLevelLutBuild();
+  if (!g_colsReady) rainColorTableInit();
 
   // --- signature + parcours des chunks --------------------------------
   uint8_t sig[8];
-  if (src.read(sig, 8) != 8) return false;
-  if (memcmp(sig, "\x89PNG\r\n\x1a\n", 8) != 0) return false;
+  if (src.read(sig, 8) != 8) return fail(1);
+  if (memcmp(sig, "\x89PNG\r\n\x1a\n", 8) != 0) return fail(2);
 
   int      w = 0, h = 0, bpp = 0, ctype = 0, interlace = 0;
   IdatSeg  segs[RAIN_MAX_IDAT];
@@ -550,13 +612,13 @@ bool rainDecodeToFs(File& src, File& dst, int tileSize, int cropK) {
 
   uint8_t lenBuf[4], type[4];
   for (;;) {
-    if (src.read(lenBuf, 4) != 4) return false;
+    if (src.read(lenBuf, 4) != 4) return fail(3);
     uint32_t len = ((uint32_t)lenBuf[0] << 24) | ((uint32_t)lenBuf[1] << 16) |
                    ((uint32_t)lenBuf[2] << 8) | lenBuf[3];
-    if (src.read(type, 4) != 4) return false;
+    if (src.read(type, 4) != 4) return fail(3);
     if (memcmp(type, "IHDR", 4) == 0) {
       uint8_t ihdr[13];
-      if (src.read(ihdr, 13) != 13) return false;
+      if (src.read(ihdr, 13) != 13) return fail(3);
       w = ((int)ihdr[0] << 24) | ((int)ihdr[1] << 16) | ((int)ihdr[2] << 8) | ihdr[3];
       h = ((int)ihdr[4] << 24) | ((int)ihdr[5] << 16) | ((int)ihdr[6] << 8) | ihdr[7];
       bpp = ihdr[8];
@@ -581,15 +643,15 @@ bool rainDecodeToFs(File& src, File& dst, int tileSize, int cropK) {
   // Les tuiles radar sont RGBA 8-bit non entrelacées ; rien d'autre n'est
   // attendu (les tuiles indexées 4-bit servies à z>=8 sont des cartes).
   if (w != tileSize || h != tileSize || bpp != 8 || ctype != 6 || interlace != 0)
-    return false;
-  if (idatLen == 0 || idatLen < 6) return false;
+    return fail(4);
+  if (idatLen == 0 || idatLen < 6) return fail(5);
 
   // --- décompression --------------------------------------------------
   if (cropK < 1 || cropK > RAIN_OUT) cropK = RAIN_OUT;
 
-  uint16_t* win = (uint16_t*)malloc(RAIN_WINDOW_PIXELS * 2);
-  if (!win) return false;
-  memset(win, 0, RAIN_WINDOW_PIXELS * 2);
+  uint8_t* win = (uint8_t*)malloc(RAIN_WINDOW_PIXELS);
+  if (!win) return fail(6);
+  memset(win, 0, RAIN_WINDOW_PIXELS);
 
   QuantOut& q = g_q;
   q.win = win;
@@ -607,7 +669,7 @@ bool rainDecodeToFs(File& src, File& dst, int tileSize, int cropK) {
   if (ok && q.pixels == (uint32_t)tileSize * (uint32_t)tileSize)
     q.flush();
   else
-    ok = false;
+    ok = fail(ok ? 8 : 7);   // 7 = flux défectueux, 8 = compte de pixels
 
   free(win);
   return ok;
