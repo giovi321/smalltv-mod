@@ -20,6 +20,7 @@
 #include "Clock.h"
 #include "WgClient.h"
 #if WITH_THEME
+#include "features/theme/ThemeDataClient.h"
 #include "features/theme/ThemeWeb.h"
 #endif
 #include "SettingsTransaction.h"
@@ -196,6 +197,16 @@ static smalltv::StatusTicker statusTicker(size_t i) {
 // last value, and uptime and heap change meanwhile, so it goes out chunked.
 // 3.2.1 built a document and a String of it; six requests at once then left
 // the ESP8266 with a 648-byte largest block, and a diag build crashed.
+#if WITH_THEME
+// The theme data fetch keys of the status. A sibling of handleStatus, not
+// inlined into it, so its locals never sit in the handler's frame (the ESP8266
+// loop stack is 4 KB, and a called function's frame stacks on top of its
+// caller's whole frame).
+__attribute__((noinline)) static void statusFetch(smalltv::PieceWriter<128>& out) {
+  const smalltv::FetchStats& stats = themeFetchStats();
+  smalltv::writeStatusFetch(out, stats.refused, stats.last);
+}
+#endif
 static void handleStatus() {
   if (!requireAuth()) return;
   const String ssid = netSSID(), ip = netIP();
@@ -254,6 +265,9 @@ static void handleStatus() {
     k.uptime = cr.uptimeS;
     smalltv::writeStatusCrash(out, k);
   }
+#if WITH_THEME
+  statusFetch(out);
+#endif
 #if WITH_TICKER
   smalltv::writeStatusTickers(out, stocksCount(), statusTicker);
 #endif

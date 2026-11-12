@@ -1,19 +1,20 @@
 // Deterministic mutation fuzzer for the parsers that take untrusted bytes:
 // .stheme packages (STH1 container + STI1/STI2 images), theme manifests, theme
-// index (the listing fields of every installed theme) and the settings JSON
-// accepted by /api/import.
+// index (the listing fields of every installed theme), the settings JSON
+// accepted by /api/import and the JSON replies of theme data sources.
 //
 // Built by tests/fuzz/run.sh with -m32 and ASan+UBSan, with
 // -fno-sanitize-recover, so the first memory error or undefined behaviour
 // aborts the run. The default mode needs no fuzzing engine: it replays the
 // seed corpus, then a fixed number of mutants drawn from a seeded PRNG, so a
 // failing run can be repeated exactly. With -DFUZZ_LIBFUZZER and one of
-// -DFUZZ_TARGET_PACKAGE/_MANIFEST/_META/_IMPORT/_FONT it exposes the same targets to
+// -DFUZZ_TARGET_PACKAGE/_MANIFEST/_META/_IMPORT/_FONT/_DATA it exposes the same targets to
 // libFuzzer instead.
 #include <ESP8266WiFi.h>
 #include <LittleFS.h>
 #include "Settings.h"
 #include "features/theme/ThemeCatalog.h"
+#include "features/theme/ThemeData.h"
 #include "features/theme/ThemePackage.h"
 #include <algorithm>
 #include <cstdio>
@@ -78,7 +79,7 @@ struct Rng {
   bool chance(uint32_t oneIn) { return below(oneIn) == 0; }
 };
 
-unsigned accepted[5];   // inputs each target parsed successfully: shows the mutants get past validation
+unsigned accepted[6];  // inputs each target parsed successfully: shows the mutants get past validation
 
 // Walks everything a loaded package offers to the renderer.
 void exercise(Package& package, const Theme& theme, Rng& rng) {
@@ -243,9 +244,60 @@ void fuzzImport(const Bytes& input, uint64_t) {
 
 // The font target loads and draws a package with package fonts (STF) the
 // same way the package target does; only its seeds and mutants differ.
-enum Target { PackageTarget, ManifestTarget, MetaTarget, ImportTarget, FontTarget, TargetCount };
-const char* const targetNames[TargetCount] = {"package", "manifest", "meta", "import", "font"};
-void (*const targetFns[TargetCount])(const Bytes&, uint64_t) = {fuzzPackage, fuzzManifest, fuzzMeta, fuzzImport, fuzzPackage};
+// The enum comes first: fuzzData counts its accepted replies by index.
+enum Target { PackageTarget, ManifestTarget, MetaTarget, ImportTarget, FontTarget, DataTarget, TargetCount };
+
+// A fetched theme-data reply: it goes through readDataValues() (the reader,
+// the filter and the parse budget the device uses) with paths that name keys,
+// digit keys, parts that go into a list and empty parts. The device refuses a
+// reply over 2,048 bytes (MaxDataBody) and so does this.
+void fuzzData(const Bytes& input, uint64_t seed) {
+  static const char* const paths[] = {"daily.temperature_2m_max", "daily.temperature_2m_min", "daily.time", "current.temperature_2m",
+                                      "a.b", "a.b.c", "a", "0", "a.0", "daily.0", "x..y", "current.weather_code"};
+  ThemeDataSource source;
+  source.id = "d";
+  for (size_t i = 0; i < 8; ++i) {   // a different 8 of the 12 each case
+    ThemeDataField field;            // not brace-initialised: it has a default member initializer
+    field.id = "f" + std::to_string(i);
+    field.path = paths[(seed + i) % 12];
+    source.fields.push_back(field);
+  }
+  // The reply goes through the reader the device uses (readDataValues): the
+  // input in pieces of 1 to 64 bytes, then the close. A reply over 2,048 bytes
+  // is refused there, so the input is not cut; the filter and the budget are
+  // the device's too.
+  struct Pieces {
+    Pieces(const Bytes& b, uint64_t s) : bytes(b), seed(s) {}
+    const Bytes& bytes;
+    uint64_t seed;
+    size_t at = 0;
+    uint32_t t = 0;
+    uint32_t now() const { return t; }
+    bool cancelled() const { return false; }
+    int available() const { return at < bytes.size() ? int(std::min<size_t>(bytes.size() - at, 1 + (seed + at) % 64)) : 0; }
+    int read(uint8_t* dest, size_t count) {
+      size_t n = std::min(count, bytes.size() - at);
+      memcpy(dest, bytes.data() + at, n);
+      at += n;
+      return int(n);
+    }
+    bool connected() const { return at < bytes.size(); }
+    void idle() { ++t; }
+  };
+  Pieces stream(input, seed);
+  std::vector<ThemeValue> values{{"keep", "1"}};
+  if (!readDataValues(stream, -1, source, values)) {
+    if (values.size() != 1) abort();   // a refused reply adds nothing
+    return;
+  }
+  ++accepted[DataTarget];
+  if (values.size() != 9 || values[0].key != "keep") abort();
+  for (size_t i = 1; i < values.size(); ++i)
+    if (values[i].key != "d.f" + std::to_string(i - 1) || values[i].value.size() > 39) abort();
+}
+
+const char* const targetNames[TargetCount] = {"package", "manifest", "meta", "import", "font", "data"};
+void (*const targetFns[TargetCount])(const Bytes&, uint64_t) = {fuzzPackage, fuzzManifest, fuzzMeta, fuzzImport, fuzzPackage, fuzzData};
 
 }  // namespace
 
@@ -261,8 +313,10 @@ void (*const targetFns[TargetCount])(const Bytes&, uint64_t) = {fuzzPackage, fuz
 #define FUZZ_TARGET ImportTarget
 #elif defined(FUZZ_TARGET_FONT)
 #define FUZZ_TARGET FontTarget
+#elif defined(FUZZ_TARGET_DATA)
+#define FUZZ_TARGET DataTarget
 #else
-#error "define one of FUZZ_TARGET_PACKAGE, FUZZ_TARGET_MANIFEST, FUZZ_TARGET_META, FUZZ_TARGET_IMPORT, FUZZ_TARGET_FONT"
+#error "define one of FUZZ_TARGET_PACKAGE, FUZZ_TARGET_MANIFEST, FUZZ_TARGET_META, FUZZ_TARGET_IMPORT, FUZZ_TARGET_FONT, FUZZ_TARGET_DATA"
 #endif
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   uint64_t seed = 0;
@@ -655,7 +709,7 @@ int main(int argc, char** argv) {
     else if (a == "--repro") repro = value();
     else if (a == "--crash-dir") crashDir = value();
     else {
-      fprintf(stderr, "usage: %s [--iters N] [--seed S] [--root REPO] [--target package|manifest|meta|import|font] [--repro FILE] [--crash-dir DIR]\n", argv[0]);
+      fprintf(stderr, "usage: %s [--iters N] [--seed S] [--root REPO] [--target package|manifest|meta|import|font|data] [--repro FILE] [--crash-dir DIR]\n", argv[0]);
       return 2;
     }
   }
@@ -701,6 +755,8 @@ int main(int argc, char** argv) {
     if (readFile(p, data)) corpus[MetaTarget].push_back(data);
   for (const auto& p : listDir(root + "/tests/fuzz/corpus/import"))
     if (readFile(p, data)) corpus[ImportTarget].push_back(data);
+  for (const auto& p : listDir(root + "/tests/fuzz/corpus/data"))
+    if (p.size() > 5 && p.compare(p.size() - 5, 5, ".json") == 0 && readFile(p, data)) corpus[DataTarget].push_back(data);
   {   // a manifest seed from the small package, and the device's own export
     std::vector<Record> records;
     splitPackage(smallPackage(), records);

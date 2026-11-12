@@ -49,7 +49,7 @@ void ThemeMode::unload() {
   package_.reset();
   file_.reset();
   dataNextMs_.clear();
-  dataScheduled_.clear();
+  dataTries_.clear();
   dataValues_.clear();
   dataAges_.reset(0);
   dataCursor_ = 0;
@@ -85,7 +85,9 @@ void ThemeMode::refreshData() {
     // A success merges its values into the running set and sets the age to 0.
     changed = smalltv::collectFetch(*result, dataAges_, dataValues_);
     // Schedule from completion, preserving the interval even for slow sources.
-    dataNextMs_[result->index] = millis() + sources[result->index].interval * 1000UL;
+    // A failure is tried again sooner (1, 2, 4, 8 minutes, never beyond the
+    // interval); a success returns to the interval.
+    dataNextMs_[result->index] = millis() + smalltv::fetchWaitMs(sources[result->index].interval, result->success, dataTries_[result->index]);
   }
   // The ages change once a minute. The engine gets the values only when they
   // changed: a fetch's new values, or a new age.
@@ -97,10 +99,12 @@ void ThemeMode::refreshData() {
   // so a source that just fired goes to the back of the round-robin queue.
   for (size_t offset = 0; offset < sources.size(); ++offset) {
     size_t i = (dataCursor_ + offset) % sources.size();
-    if (dataScheduled_[i] && static_cast<int32_t>(millis() - dataNextMs_[i]) < 0) continue;
+    if (!smalltv::fetchDue(dataTries_[i], dataNextMs_[i], millis())) continue;
     auto request = dataRequests_.start(sources[i], i);
+    // A fetch refused for lack of memory counts as a failure: it ends here and
+    // the take() above collects it on the next call.
     if (!startThemeDataFetch(request)) request->finish(false);
-    dataScheduled_[i] = true;
+    smalltv::fetchStarted(dataTries_[i]);
     dataCursor_ = (i + 1) % sources.size();
     break;
   }
@@ -159,7 +163,7 @@ void ThemeMode::service(const Settings& s) {
       // After a release the same package loads again, so its sources match.
       if (!keepData_ || dataNextMs_.size() != theme.data.size()) {
         dataNextMs_.assign(theme.data.size(), 0);
-        dataScheduled_.assign(theme.data.size(), false);
+        dataTries_.assign(theme.data.size(), 0);
         dataValues_.clear();
         // Only a spec 2 theme can use "<source>.age"; a spec 1 theme gets none.
         dataAges_.reset(theme.data.size(), theme.spec >= 2);

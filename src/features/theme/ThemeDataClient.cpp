@@ -1,7 +1,6 @@
 #include "ThemeDataClient.h"
 #if WITH_THEME
 #include "Platform.h"
-#include <ArduinoJson.h>
 #if !defined(SMALLTV_ESP8266)
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -75,40 +74,23 @@ struct BodyStream {
   void idle() { delay(1); }
 };
 
-std::string jsonValue(JsonVariantConst value) {
-  if (value.isNull()) return "--";
-  if (value.is<const char*>()) {
-    std::string s = value.as<const char*>();
-    if (s.size() > 31) s.resize(31);
-    return s;
-  }
-  if (!value.is<bool>() && !value.is<int>() && !value.is<long>() && !value.is<float>() && !value.is<double>()) return "--";
-  char encoded[40] = {};
-  size_t n = serializeJson(value, encoded, sizeof(encoded) - 1);
-  encoded[n] = 0;
-  if (n >= sizeof(encoded) - 1) return "--";
-  return std::string(encoded);
-}
-JsonVariantConst jsonPath(JsonVariantConst root, const std::string& path) {
-  size_t start = 0;
-  while (start < path.size()) {
-    size_t dot = path.find('.', start);
-    std::string part = path.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
-    if (part.empty() || !root.is<JsonObjectConst>()) return JsonVariantConst();
-    root = root[part.c_str()];
-    if (dot == std::string::npos) break;
-    start = dot + 1;
-  }
-  return root;
-}
-bool fetchThemeSource(smalltv::DataFetch& request) {
-  if (request.cancelled()) return false;
+// How a fetch ended, for the status (ThemeData.h, FetchStats).
+enum class Outcome { Ok, Refused, Failed };
+smalltv::FetchStats g_fetchStats;
+void noteFetch(Outcome outcome) { g_fetchStats.note(static_cast<int>(outcome)); }
+
+// The request and the parse in one call: the reply goes from the socket
+// straight into the filtered parse (readDataValues), so it is never held as a
+// string. The network objects stay alive for the parse; they hold the heap
+// FetchFreeHeap guesses at, and the parse takes at most DataParseBudget more.
+__attribute__((noinline)) Outcome fetchValues(smalltv::DataFetch& request) {
+  if (request.cancelled()) return Outcome::Failed;
   Deadline deadline(request);
   std::unique_ptr<NetClient> client;
   if (request.source.url.rfind("https://", 0) == 0) {
-    if (ESP.getFreeHeap() < 18000) return false;
+    if (ESP.getFreeHeap() < 18000) return Outcome::Refused;
     auto secure = new(std::nothrow) BoundedClient<SecureClient>(deadline);
-    if (!secure) return false;
+    if (!secure) return Outcome::Failed;
     // HTTPS reaches this path only after the manifest explicitly opted in.
     secure->setInsecure();
 #if !defined(SMALLTV_ESP8266)
@@ -116,7 +98,7 @@ bool fetchThemeSource(smalltv::DataFetch& request) {
 #endif
     client.reset(secure);
   } else client.reset(new(std::nothrow) BoundedClient<WiFiClient>(deadline));
-  if (!client) return false;
+  if (!client) return Outcome::Failed;
   // ESP8266's WiFiClient/HTTPClient have no separate connect-phase timeout;
   // Deadline (via BoundedClient::allowed()) already bounds every socket call
   // on every platform, so these are ESP32-only belt-and-suspenders.
@@ -130,21 +112,25 @@ bool fetchThemeSource(smalltv::DataFetch& request) {
   http.setTimeout(smalltv::DataTimeoutMs);
   http.setReuse(false);
   http.useHTTP10(true);
-  if (!http.begin(*client, request.source.url.c_str())) return false;
+  if (!http.begin(*client, request.source.url.c_str())) return Outcome::Failed;
   http.addHeader("Accept", "application/json");
-  if (http.GET() != HTTP_CODE_OK || deadline.expired()) return false;
-  std::string body;
+  if (http.GET() != HTTP_CODE_OK || deadline.expired()) return Outcome::Failed;
+#if defined(SMALLTV_ESP8266)
+  // The network objects are up now, so the heap that is free is what the parse
+  // has. The allocator keeps the parse inside DataParseBudget; refuse when
+  // that much is not there rather than let a failed allocation restart the
+  // device. The source keeps its old values.
+  if (ESP.getFreeHeap() < smalltv::FetchParseHeap) return Outcome::Refused;
+#endif
   BodyStream stream{http.getStream(), *client, deadline};
-  bool complete = smalltv::readDataBody(stream, http.getSize(), body);
+  const bool complete = smalltv::readDataValues(stream, http.getSize(), request.source, request.values);
   http.end();
-  if (!complete || request.cancelled()) return false;
-  JsonDocument doc;
-  if (deserializeJson(doc, body, DeserializationOption::NestingLimit(8))) return false;
-  request.values.reserve(request.source.fields.size());
-  for (const auto& field : request.source.fields) {
-    request.values.push_back({request.source.id + "." + field.id, jsonValue(jsonPath(doc.as<JsonVariantConst>(), field.path))});
-  }
-  return !request.cancelled();
+  return complete && !request.cancelled() ? Outcome::Ok : Outcome::Failed;
+}
+bool fetchThemeSource(smalltv::DataFetch& request) {
+  const Outcome outcome = fetchValues(request);
+  if (!request.cancelled()) noteFetch(outcome);   // a fetch dropped by a theme change says nothing
+  return outcome == Outcome::Ok;
 }
 #if !defined(SMALLTV_ESP8266)
 void runFetch(void* parameter) {
@@ -160,6 +146,8 @@ void runFetch(void* parameter) {
 #endif
 }
 
+const smalltv::FetchStats& themeFetchStats() { return g_fetchStats; }
+
 #if defined(SMALLTV_ESP8266)
 // No FreeRTOS on this chip: run the bounded fetch synchronously on the
 // caller's own stack, the same "one blocking call per main-loop tick"
@@ -168,6 +156,12 @@ void runFetch(void* parameter) {
 // time, the same order of magnitude a TLS handshake already costs this
 // chip elsewhere.
 bool startThemeDataFetch(const std::shared_ptr<smalltv::DataFetch>& request) {
+  // Short of heap the fetch is refused rather than started: a failed
+  // allocation in the HTTP client would restart the device.
+  if (ESP.getFreeHeap() < smalltv::FetchFreeHeap || platformMaxFreeBlock() < smalltv::FetchLargestBlock) {
+    noteFetch(Outcome::Refused);
+    return false;
+  }
   request->finish(fetchThemeSource(*request));
   return true;
 }

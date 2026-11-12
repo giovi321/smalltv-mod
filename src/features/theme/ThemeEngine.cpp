@@ -1,4 +1,5 @@
 #include "ThemeEngine.h"
+#include "BudgetAllocator.h"
 #ifdef ARDUINO
 #include "config.h"
 #endif
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <utility>
 #ifdef ARDUINO
 #include <pgmspace.h>   // PROGMEM, memcpy_P (both cores ship it)
@@ -1303,6 +1305,131 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
   }
   if (f.has("bind") && !parseBindings(o, t, layerPath, error, l)) return false;
   return true;
+}
+// A fetched value as text: strings are cut to 31 bytes, numbers and booleans
+// are written as JSON, everything else (null, list, object) is "--".
+static std::string dataValue(JsonVariantConst value) {
+  if (value.isNull()) return "--";
+  if (value.is<const char*>()) {
+    std::string s = value.as<const char*>();
+    if (s.size() > 31) s.resize(31);
+    return s;
+  }
+  if (!value.is<bool>() && !value.is<int>() && !value.is<long>() && !value.is<float>() && !value.is<double>()) return "--";
+  char encoded[40] = {};
+  size_t n = serializeJson(value, encoded, sizeof(encoded) - 1);
+  encoded[n] = 0;
+  if (n >= sizeof(encoded) - 1) return "--";
+  return std::string(encoded);
+}
+// Follows a dotted path through objects; null when a part is missing or the
+// value at that step is not an object.
+static JsonVariantConst dataPath(JsonVariantConst root, const std::string& path) {
+  size_t start = 0;
+  while (start < path.size()) {
+    size_t dot = path.find('.', start);
+    std::string part = path.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
+    if (part.empty() || !root.is<JsonObjectConst>()) return JsonVariantConst();
+    root = root[part.c_str()];
+    if (dot == std::string::npos) break;
+    start = dot + 1;
+  }
+  return root;
+}
+namespace {
+// Builds the filter for a source: a tree with `true` where a field's path ends.
+// (A path with an empty part finds nothing in dataPath; here it only adds a key
+// that nothing has.)
+static void addFieldFilter(JsonVariant node, const std::string& path) {
+  size_t start = 0;
+  for (;;) {
+    if (node.is<bool>() && node.as<bool>()) return;   // everything under here is kept already
+    const size_t dot = path.find('.', start);
+    const std::string part = path.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
+    JsonObject object = node.is<JsonObject>() ? node.as<JsonObject>() : node.to<JsonObject>();
+    // Bound to the member itself (a JsonVariant assigned from another would
+    // copy its value instead).
+    JsonVariant member = object[part].isNull() ? object[part].to<JsonVariant>() : object[part].as<JsonVariant>();
+    if (dot == std::string::npos) {
+      member.set(true);
+      return;
+    }
+    // Assigning a JsonVariant copies the value it points to; to walk on, the
+    // handle itself is rebuilt in place (it holds two pointers and needs no
+    // destructor), which keeps this loop at one frame whatever the path's depth.
+    new (&node) JsonVariant(member);
+    start = dot + 1;
+  }
+}
+// A reply held in a string, in the reader form ArduinoJson takes.
+class StringReply : public DataReply {
+ public:
+  explicit StringReply(const std::string& text) : text_(text) {}
+  int read() override { return at_ < text_.size() ? static_cast<unsigned char>(text_[at_++]) : -1; }
+  size_t readBytes(char* dest, size_t count) override {
+    const size_t n = std::min(count, text_.size() - at_);
+    memcpy(dest, text_.data() + at_, n);
+    at_ += n;
+    return n;
+  }
+ private:
+  const std::string& text_;
+  size_t at_ = 0;
+};
+// Passes the bytes on and remembers the first one that is not white space.
+// With a filter, ArduinoJson skips what no field names and does not look at
+// what it skips: a root that is no JSON at all (an error page) passes as an
+// empty object. A reply must be an object or a list, so this says which it is.
+class RootWatch {
+ public:
+  explicit RootWatch(DataReply& reply) : reply_(reply) {}
+  int read() {
+    const int c = reply_.read();
+    if (c >= 0) see(static_cast<char>(c));
+    return c;
+  }
+  // (ArduinoJson reads JSON one byte at a time through read(); readBytes() is
+  // only for MessagePack, so a use of it would not compile here.)
+  bool container() const { return first_ == '{' || first_ == '['; }
+ private:
+  void see(char c) {
+    if (!first_ && c != ' ' && c != '\t' && c != '\r' && c != '\n') first_ = c;
+  }
+  DataReply& reply_;
+  char first_ = 0;
+};
+// The two steps around the parse are out of line, siblings of it: their
+// locals (path parts, the strings of a value) are gone while the parse runs
+// and the reader waits on the network, which is the deep part of the loop
+// stack (4 KB on the ESP8266; a called function's frame stacks on top of its
+// caller's whole frame, so work split into siblings costs less than nested).
+__attribute__((noinline)) bool buildFilter(JsonDocument& filter, const ThemeDataSource& source) {
+  for (const auto& field : source.fields) addFieldFilter(filter.as<JsonVariant>(), field.path);
+  return !filter.overflowed();
+}
+__attribute__((noinline)) void appendValues(const JsonDocument& doc, const ThemeDataSource& source, std::vector<ThemeValue>& values) {
+  values.reserve(values.size() + source.fields.size());
+  for (const auto& field : source.fields)
+    values.push_back({source.id + "." + field.id, dataValue(dataPath(doc.as<JsonVariantConst>(), field.path))});
+}
+// The filter, the parse and the values, for any reply that ArduinoJson can read.
+bool extractFiltered(DataReply& reply, const ThemeDataSource& source, std::vector<ThemeValue>& values, size_t budget) {
+  BudgetAllocator allocator(budget);
+  JsonDocument filter(&allocator);
+  if (!buildFilter(filter, source)) return false;
+  JsonDocument doc(&allocator);
+  RootWatch input(reply);
+  if (deserializeJson(doc, input, DeserializationOption::Filter(filter), DeserializationOption::NestingLimit(8)) || !input.container()) return false;
+  appendValues(doc, source, values);
+  return true;
+}
+}
+bool extractThemeValues(const std::string& body, const ThemeDataSource& source, std::vector<ThemeValue>& values, size_t budget) {
+  StringReply reply(body);
+  return extractFiltered(reply, source, values, budget);
+}
+bool extractThemeValues(DataReply& reply, const ThemeDataSource& source, std::vector<ThemeValue>& values, size_t budget) {
+  return extractFiltered(reply, source, values, budget);
 }
 std::string expandText(const std::string& value, const tm* t) {
   static const std::vector<ThemeValue> empty;

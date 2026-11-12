@@ -2,48 +2,146 @@
 #include "ThemeEngine.h"
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <memory>
 
 namespace smalltv {
 constexpr size_t MaxDataBody = 2048;
 constexpr uint32_t DataTimeoutMs = 3000;
 
-// Stream supplies a monotonic clock and nonblocking socket reads. Limit total
-// elapsed time, including slow trickles; a socket's idle timeout is insufficient.
+// The most heap the parse of one reply may take (the filter, the document and
+// ArduinoJson's strings together, counted by the allocator; see
+// extractThemeValues). ArduinoJson's first pool is 1,024 B on the device, so
+// this allows one pool and the strings next to it, and no second pool: the
+// real weather replies need 1.4 to 1.8 KB (tests/theme/test_memory.cpp).
+constexpr size_t DataParseBudget = 2048;
+
+// What a data fetch needs on the ESP8266 before it may start. An allocation
+// that fails in `new` (the HTTP client, the parse) restarts the device, so a
+// fetch short of heap is refused instead (the source stays as it was and is
+// tried again, see fetchWaitMs).
+//  - FetchFreeHeap: the HTTP client and the socket. A GUESS, not measured on
+//    the device.
+//  - FetchLargestBlock: the largest single block a fetch asks for. The reply
+//    is not held (it goes from the socket into a filtered parse), so this is
+//    ArduinoJson's first pool, 1,024 B plus 8 of the allocator's. Measured on
+//    the host (32-bit): 1,032 B for the real replies and the worst ones;
+//    tests/theme/test_memory.cpp ties the constant to that (at most 1,024
+//    over, 512 is the slack).
+//  - FetchParseHeap: free heap needed once the connection is up, just before
+//    the parse. Measured on the host: the peak of the parse (the filter, the
+//    document and the values) is 1,792 B for a 6-field weather reply and
+//    1,376 B for a 2-field one; a worst-case reply is stopped by
+//    DataParseBudget. Tied in test_memory.cpp, at most 1,024 over.
+constexpr uint32_t FetchFreeHeap = 4096;
+constexpr uint32_t FetchLargestBlock = 1536;
+constexpr uint32_t FetchParseHeap = 2048;
+
+// A reply as the parse takes it: bytes in the order they arrive, read from the
+// network only as the parser asks, so no copy of the reply is ever held.
+// Stream supplies a monotonic clock and nonblocking socket reads. The total
+// elapsed time is limited, slow trickles included; a socket's idle timeout is
+// insufficient.
 // `length` is the declared Content-Length, or -1 for chunked/unknown length
 // (HTTPClient already de-chunks the stream; here that just means "read until
-// the connection closes" instead of "read until N bytes"), capped either way
-// at MaxDataBody so a source cannot force an unbounded allocation.
+// the connection closes" instead of "read until N bytes"). Either way the
+// reply is capped at MaxDataBody: a longer one fails.
 template <class Stream>
-bool readDataBody(Stream& stream, int length, std::string& body) {
-  body.clear();
-  if (length == 0 || length < -1 || length > static_cast<int>(MaxDataBody)) return false;
-  body.reserve(length > 0 ? static_cast<size_t>(length) : MaxDataBody);
-  const uint32_t started = stream.now();
-  uint8_t buffer[128];
-  for (;;) {
-    if (stream.cancelled() || uint32_t(stream.now() - started) >= DataTimeoutMs) return false;
-    if (length > 0 && body.size() == static_cast<size_t>(length)) return true;
-    int available = stream.available();
-    if (available > 0) {
-      const size_t limit = length > 0 ? static_cast<size_t>(length) : MaxDataBody;
-      if (body.size() == limit) return false;
-      size_t count = std::min(sizeof(buffer), std::min(static_cast<size_t>(available), limit - body.size()));
-      int read = stream.read(buffer, count);
-      if (read > 0) {
-        body.append(reinterpret_cast<const char*>(buffer), read);
-        continue;
-      }
-    } else if (!stream.connected()) {
-      // On the ESP8266, available() lets the network stack run when it finds
-      // nothing and still returns 0, even if the rest of the reply arrived
-      // with the server's close meanwhile. Those bytes are waiting: read them.
-      if (stream.available() > 0) continue;
-      return length < 0 && !body.empty();
-    }
-    stream.idle();
+class BodyReader : public DataReply {
+ public:
+  BodyReader(Stream& stream, int length) : stream_(stream), length_(length), started_(stream.now()) {}
+  int read() override {
+    char c;
+    return readBytes(&c, 1) ? static_cast<unsigned char>(c) : -1;
   }
+  size_t readBytes(char* dest, size_t count) override {
+    if (at_ == have_ && !fill()) return 0;
+    const size_t n = std::min(count, have_ - at_);
+    memcpy(dest, buffer_ + at_, n);
+    at_ += n;
+    return n;
+  }
+  // The document is complete: the rest of the reply is read and dropped, so a
+  // reply that goes on past the cap, stops short of its declared length, or
+  // never ends still fails. True when the reply was whole.
+  bool finish() {
+    do at_ = have_; while (fill());
+    return !failed_ && (length_ < 0 || taken_ == static_cast<size_t>(length_));
+  }
+ private:
+  // Waits for at least one more byte. False at the end of the reply, or when
+  // the fetch must stop (deadline, cancel, past the cap); `failed_` tells which.
+  bool fill() {
+    at_ = have_ = 0;
+    for (;;) {
+      if (failed_ || ended_) return false;
+      if (stream_.cancelled() || uint32_t(stream_.now() - started_) >= DataTimeoutMs) {
+        failed_ = true;
+        return false;
+      }
+      if (length_ > 0 && taken_ == static_cast<size_t>(length_)) {
+        ended_ = true;
+        return false;
+      }
+      const int available = stream_.available();
+      if (available > 0) {
+        const size_t limit = length_ > 0 ? static_cast<size_t>(length_) : MaxDataBody;
+        if (taken_ == limit) {
+          failed_ = true;
+          return false;
+        }
+        const size_t count = std::min(sizeof(buffer_), std::min(static_cast<size_t>(available), limit - taken_));
+        const int got = stream_.read(buffer_, count);
+        if (got > 0) {
+          taken_ += got;
+          have_ = static_cast<size_t>(got);
+          return true;
+        }
+      } else if (!stream_.connected()) {
+        // On the ESP8266, available() lets the network stack run when it finds
+        // nothing and still returns 0, even if the rest of the reply arrived
+        // with the server's close meanwhile. Those bytes are waiting: read them.
+        if (stream_.available() > 0) continue;
+        ended_ = true;
+        return false;
+      }
+      stream_.idle();
+    }
+  }
+  Stream& stream_;
+  const int length_;
+  const uint32_t started_;
+  uint8_t buffer_[32];
+  size_t at_ = 0, have_ = 0, taken_ = 0;
+  bool failed_ = false, ended_ = false;
+};
+
+// Reads one reply and appends the source's values (extractThemeValues): false,
+// with `values` unchanged, for anything but a whole, valid reply.
+template <class Stream>
+bool readDataValues(Stream& stream, int length, const ThemeDataSource& source, std::vector<ThemeValue>& values, size_t budget = DataParseBudget) {
+  if (length == 0 || length < -1 || length > static_cast<int>(MaxDataBody)) return false;
+  BodyReader<Stream> reader(stream, length);
+  const size_t before = values.size();
+  if (!extractThemeValues(reader, source, values, budget)) return false;
+  if (reader.finish()) return true;
+  values.erase(values.begin() + before, values.end());
+  return false;
 }
+
+// How the theme data fetches ended since boot: how many were refused for lack
+// of memory, and how the last one ended. 4 bytes of RAM. `outcome` is
+// 0 ok, 1 refused, 2 failed (anything else is ignored).
+struct FetchStats {
+  uint16_t refused = 0;
+  uint8_t last = 0;   // 0 none yet, else outcome + 1
+  void note(int outcome) {
+    if (outcome < 0 || outcome > 2) return;
+    if (outcome == 1 && refused < 65535) ++refused;
+    last = uint8_t(outcome + 1);
+  }
+  bool any() const { return last != 0; }
+};
 
 // One in-flight (or just-completed) fetch, shared between the display loop
 // and whatever actually performs the request -- a FreeRTOS task on ESP32, or
@@ -173,6 +271,52 @@ inline bool collectFetch(DataFetch& result, DataAges& ages, std::vector<ThemeVal
     else existing->value = std::move(value.value);
   }
   return true;
+}
+
+// When a source is fetched again. Each source keeps one byte, `tries`:
+// 0 = never started; otherwise 1 + the number of fetches in a row that
+// failed (it stops at 255, so 254 failures count and then no more). One byte
+// holds both facts, so it replaces the old one-bit "scheduled" flag and adds
+// no allocation.
+//
+// After a failure the wait is 1, 2, 4 and 8 minutes, then the source's own
+// interval, and it stays there until a fetch works. A success goes straight
+// back to the interval and clears the count. A wait is never longer than the
+// interval, so a theme with a short interval fetches no less often than
+// before. At most 4 retries come sooner than the interval: a failed fetch
+// blocks the loop for up to 3 s on the ESP8266.
+constexpr uint32_t RetryFirstWaitMs = 60000;
+constexpr uint8_t RetryShortWaits = 4;
+
+// A source is due when it was never started, or when `nowMs` has reached
+// `nextMs`. The test is the signed difference, so it survives the wrap of
+// millis(); waits are at most a day (the interval is 86,400 s at most), far
+// under the 24.8 days that the signed test can tell apart.
+inline bool fetchDue(uint8_t tries, uint32_t nextMs, uint32_t nowMs) {
+  return tries == 0 || static_cast<int32_t>(nowMs - nextMs) >= 0;
+}
+// A fetch of the source starts: it is scheduled from now on. The count of
+// failures stays.
+inline void fetchStarted(uint8_t& tries) {
+  if (tries == 0) tries = 1;
+}
+// Failures in a row so far.
+inline uint8_t fetchFailures(uint8_t tries) { return tries == 0 ? 0 : tries - 1; }
+// A fetch of the source ended: updates the count and returns the wait until the
+// next one, in milliseconds. `intervalS` is the source's interval in seconds
+// (the theme parser allows 10 to 86,400, so the product cannot overflow).
+inline uint32_t fetchWaitMs(uint32_t intervalS, bool success, uint8_t& tries) {
+  const uint32_t intervalMs = intervalS * 1000u;
+  if (success) {
+    tries = 1;
+    return intervalMs;
+  }
+  if (tries == 0) tries = 1;
+  if (tries < 255) ++tries;
+  const uint8_t failures = fetchFailures(tries);
+  if (failures > RetryShortWaits) return intervalMs;
+  const uint32_t retryMs = RetryFirstWaitMs << (failures - 1);
+  return retryMs < intervalMs ? retryMs : intervalMs;
 }
 
 // The worker owns a shared reference, so changing/unloading a theme never frees

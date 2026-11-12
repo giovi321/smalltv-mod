@@ -204,6 +204,30 @@ class ManifestSource {
 };
 bool parseTheme(const std::string& json, Theme& out, std::string& error);
 bool parseTheme(ManifestSource& json, Theme& out, std::string& error);
+// Where the bytes of a fetched reply come from while it is parsed (the
+// ArduinoJson reader interface, so the parse takes them as they arrive and the
+// reply is never held whole in memory). read() gives one byte or -1 at the
+// end; readBytes() gives up to `count` bytes, 0 at the end. Both wait for the
+// network, and give the end when the fetch must stop (deadline, cancel).
+class DataReply {
+ public:
+  virtual int read() = 0;
+  virtual size_t readBytes(char* dest, size_t count) = 0;
+ protected:
+  ~DataReply() = default;
+};
+// Reads the fields of one data source out of a fetched JSON reply and appends
+// one `<source>.<field>` value for each. A field's path is a dotted path
+// through objects; a field that finds nothing reads "--". Returns false, with
+// `values` unchanged, if the reply is not an object or a list of JSON, nests
+// deeper than 8, or needs more than `budget` bytes of heap to parse.
+//
+// Only what the fields name is kept while parsing (an ArduinoJson filter built
+// from the paths): everything else is read and dropped. `budget` is the most
+// heap in bytes that the filter and the document may take together; 0 is no
+// limit (tests only).
+bool extractThemeValues(const std::string& body, const ThemeDataSource& source, std::vector<ThemeValue>& values, size_t budget = 0);
+bool extractThemeValues(DataReply& reply, const ThemeDataSource& source, std::vector<ThemeValue>& values, size_t budget = 0);
 std::string expandText(const std::string& value, const tm* time);
 std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values);
 std::string expandText(const std::string& value, const tm* time, const std::vector<ThemeValue>& values, const std::vector<ThemeValue>& device);
