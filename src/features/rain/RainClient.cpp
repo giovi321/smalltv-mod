@@ -43,6 +43,16 @@ static struct {
 } g_pending[MAX_RAIN_FRAMES];
 static uint8_t g_pendingCount = 0;
 
+// Le fetch est découpé en étapes, une par appel de rainService() : entre
+// deux étapes la boucle principale anime l'affichage (une étape = ~2-25 s :
+// la liste, puis un téléchargement + décodage par frame). Sans ce découpage,
+// l'écran restait figé ~4,5 min au boot (serveur et rendu mono-tâche, vécu).
+enum RainStep { STEP_IDLE, STEP_LIST, STEP_FRAME, STEP_COMMIT };
+static RainStep g_step = STEP_IDLE;
+static uint8_t  g_frameIdx = 0;      // prochaine frame du jeu en cours
+static uint8_t* g_win = nullptr;     // fenêtre LZ tenue pendant tout le fetch
+static String   g_host;
+
 uint8_t   rainCount()                { return g_count; }
 uint32_t  rainFrameTime(uint8_t i)   { return (i < g_count) ? g_frames[i].time : 0; }
 bool      rainFrameNowcast(uint8_t i) { return (i < g_count) && g_frames[i].nowcast; }
@@ -59,6 +69,7 @@ const String& rainLastUrl()    { return g_lastUrl; }
 const char* rainStageName() {
   switch (g_stage) {
     case RAIN_NO_HOME:      return "no home set";
+    case RAIN_FETCHING:     return "fetching";
     case RAIN_CONNECT_FAIL: return "connect failed";
     case RAIN_HTTP_ERROR:   return "http error";
     case RAIN_PARSE_FAIL:   return "parse failed";
@@ -101,6 +112,11 @@ static void loadMeta() {
 
 void rainInit(const Settings& s) {
   (void)s;
+  // Abort d'un fetch en cours (changement de mode ou de config) : la fenêtre
+  // LZ est rendue, l'état de la machine à étapes repart à zéro.
+  if (g_win) { free(g_win); g_win = nullptr; }
+  g_step = STEP_IDLE;
+  g_frameIdx = 0;
   loadMeta();
   g_error = false;
   g_lastOkMs = 0;
@@ -126,7 +142,7 @@ static uint8_t cropFor(float lat, uint16_t rangeKm) {
 }
 
 // ---- one HTTP GET + parse of the frame list --------------------------------
-static bool fetchFrameList(const Settings& s, String& hostOut) {
+static bool fetchFrameList(const Settings& s) {
   String url = String(scheme()) + F(RAIN_API_HOST) + F(RAIN_API_PATH);
   g_lastUrl = url;
 
@@ -156,9 +172,9 @@ static bool fetchFrameList(const Settings& s, String& hostOut) {
 
   const char* host = doc["host"] | "";
   if (!host[0]) { g_stage = RAIN_PARSE_FAIL; return false; }
-  hostOut = host;
-  if (hostOut.startsWith("https://")) hostOut.remove(0, 8);
-  else if (hostOut.startsWith("http://")) hostOut.remove(0, 7);
+  g_host = host;
+  if (g_host.startsWith("https://")) g_host.remove(0, 8);
+  else if (g_host.startsWith("http://")) g_host.remove(0, 7);
 
   g_generated = doc["generated"].as<uint32_t>();
   g_pendingCount = 0;
@@ -186,7 +202,7 @@ static bool fetchFrameList(const Settings& s, String& hostOut) {
 }
 
 // ---- one frame: download to /rain/tmp.png, decode to /rain/fNN.raw --------
-static bool fetchFrame(const Settings& s, const String& host, uint8_t i) {
+static bool fetchFrame(const Settings& s, const String& host, uint8_t i, uint8_t* win) {
   String url = String(scheme()) + host;
   url += g_pending[i].path;
   url += '/';
@@ -240,20 +256,29 @@ static bool fetchFrame(const Settings& s, const String& host, uint8_t i) {
   url = String();   // libère le buffer de l'URL avant le décodage
 
   // Decode: centre crop + bilinear upscale + quantization into the frame.
+  // Décodé dans un fichier temporaire : la frame en place n'est remplacée
+  // (rename atomique) qu'au succès — un échec ici ne doit jamais détruire
+  // une bonne frame (frame noire vécue : le .raw ouvert en « w » restait
+  // vide après un échec du décodage et l'animation affichait noir).
   char path[24];
   framePath(path, sizeof path, i);
   File src = LittleFS.open(RAIN_DIR "/tmp.png", "r");
-  File dst = LittleFS.open(path, "w");
+  File dst = LittleFS.open(RAIN_DIR "/tmp.raw", "w");
   if (!src || !dst) {
     if (src) src.close();
     if (dst) dst.close();
     g_stage = RAIN_FS_FAIL;
     return false;
   }
-  bool ok = rainDecodeToFs(src, dst, RAIN_TILE_SIZE, g_cropK);
+  bool ok = rainDecodeToFs(src, dst, RAIN_TILE_SIZE, g_cropK, win);
   src.close();
   dst.close();
   if (!ok) { g_stage = RAIN_PNG_FAIL; return false; }
+  if (!LittleFS.rename(RAIN_DIR "/tmp.raw", path)) {
+    LittleFS.remove(RAIN_DIR "/tmp.raw");
+    g_stage = RAIN_FS_FAIL;
+    return false;
+  }
   return true;
 }
 
@@ -289,25 +314,56 @@ static bool commitFrames() {
   return true;
 }
 
+// Fin du fetch en cours (succès ou échec) : rend la fenêtre LZ et remet
+// l'état de la machine à étapes à zéro. Les frames sur disque restent en
+// place — en cas d'échec, l'animation continue de boucler l'ancien jeu.
+static void fetchAbort() {
+  if (g_win) { free(g_win); g_win = nullptr; }
+  g_step = STEP_IDLE;
+  g_frameIdx = 0;
+}
+
 // ---------------------------------------------------------------------------
 void rainService(const Settings& s) {
   // No home set yet -> nothing to fetch (the mode shows a prompt instead).
   if (rainLat(s) == 0.0f && rainLon(s) == 0.0f) { g_stage = RAIN_NO_HOME; return; }
 
-  if ((int32_t)(millis() - g_nextPollMs) < 0) return;
-  g_nextPollMs = millis() + (uint32_t)s.rain.pollSec * 1000UL;
-  g_lastTryMs = millis();
+  if (g_step == STEP_IDLE) {
+    if ((int32_t)(millis() - g_nextPollMs) < 0) return;
+    g_nextPollMs = millis() + (uint32_t)s.rain.pollSec * 1000UL;
+    g_lastTryMs = millis();
+    g_cropK = cropFor(rainLat(s), s.rain.rangeKm);
+    g_stage = RAIN_FETCHING;
 
-  g_cropK = cropFor(rainLat(s), s.rain.rangeKm);
-
-  String host;
-  if (!fetchFrameList(s, host)) { g_error = true; return; }   // keep the old frames
-
-  // Fail fast on the first bad frame: the stale set stays on disk and the
-  // animation keeps looping it; the next poll (15 min) retries everything.
-  for (uint8_t i = 0; i < g_pendingCount; i++) {
-    if (!fetchFrame(s, host, i)) { g_error = true; return; }
+    // Fenêtre LZ allouée 1x par fetch (13 frames), AVANT le réseau : à cet
+    // instant le heap est au plus propre (15 min d'idle). En l'allouant ici,
+    // un échec arrive avant qu'aucun fichier ne soit touché, et on évite 13
+    // cycles malloc/free de 8 Ko qui fragmentaient le heap (vécu : maxblk
+    // < 8192 après ~3 h d'uptime → fetch en échec permanent).
+    g_win = (uint8_t*)malloc(RAIN_WINDOW_PIXELS);
+    if (!g_win) { g_error = true; g_stage = RAIN_PNG_FAIL; return; }
+    memset(g_win, 0, RAIN_WINDOW_PIXELS);
+    g_step = STEP_LIST;
+    return;   // la liste partira au prochain appel : l'écran anime d'abord
   }
 
-  if (!commitFrames()) { g_error = true; return; }
+  // Une étape par appel — la boucle principale anime l'affichage entre deux.
+  if (g_step == STEP_LIST) {
+    if (!fetchFrameList(s)) { g_error = true; fetchAbort(); return; }   // keep the old frames
+    g_step = STEP_FRAME;
+    g_frameIdx = 0;
+    return;
+  }
+  if (g_step == STEP_FRAME) {
+    // Fail fast on the first bad frame: the stale set stays on disk and the
+    // animation keeps looping it; the next poll (15 min) retries everything.
+    if (!fetchFrame(s, g_host, g_frameIdx, g_win)) { g_error = true; fetchAbort(); return; }
+    g_frameIdx++;
+    if (g_frameIdx >= g_pendingCount) g_step = STEP_COMMIT;
+    return;
+  }
+  if (g_step == STEP_COMMIT) {
+    if (!commitFrames()) g_error = true;
+    fetchAbort();
+  }
 }

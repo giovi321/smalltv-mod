@@ -102,8 +102,9 @@ static void drawCities(const Settings& s, Arduino_GFX* gfx) {
       nUsed++;
     }
 
-    gfx->fillCircle(x, y, (c.popK > 1000) ? 2 : 1, C_GRAY);
-    if (labeled < 6 && c.popK >= 150) {
+    uint8_t sz = (c.popK > 1000) ? 5 : 3;   // petit carré rouge (pin de carte)
+    gfx->fillRect(x - sz / 2, y - sz / 2, sz, sz, C_RED);
+    if (labeled < 6 && c.popK >= 20) {
       labeled++;
       gfx->setTextSize(1);
       gfx->setTextColor(C_GRAY);

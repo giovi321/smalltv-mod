@@ -17,17 +17,14 @@
 // La profondeur de 8192 pixels couvre la fenêtre deflate native (32 Ko
 // d'octets bruts ≈ 8184 pixels) : la réduire casse le décodage (89 %
 // d'erreurs à 4096, vécu).
-// Le malloc de la fenêtre (8 Ko) exigeait 4 Ko de heap libérés en passant la
-// LUT de couleurs en flash (rain_clut.h, précalculée par
-// tools/make_rain_clut.py — le plus gros bloc libre mesuré au décodage était
-// de 7232 o sur l'Ultra).
+// La fenêtre est allouée par l'appelant, une fois par fetch (voir RainPng.h).
+// Le malloc de 8 Ko exigeait 4 Ko de heap libérés en passant la LUT de
+// couleurs en flash (rain_clut.h, précalculée par tools/make_rain_clut.py —
+// le plus gros bloc libre mesuré au décodage était de 7232 o sur l'Ultra).
 #include "RainPng.h"
 #include "RainData.h"
 #include "rain_clut.h"
 
-#define RAIN_WINDOW_PIXELS 8192        // profondeur de la fenêtre LZ (pixels) :
-                                       // réduire casse le décodage (89 %
-                                       // d'erreurs à 4096, vérifié)
 #define RAIN_FAST_BITS     9           // lookup huffman rapide (2^9 entrées)
 #define RAIN_LOOKUP        (1 << RAIN_FAST_BITS)
 #define RAIN_OUT           240         // taille de sortie (écran)
@@ -593,11 +590,11 @@ static bool inflate(BitR& br, QuantOut& q) {
 // ---------------------------------------------------------------------------
 // Codes d'échec (dans les commentaires des appels à fail) : 1 = lecture
 // courte, 2 = pas un PNG, 3 = parcours de chunks impossible, 4 = IHDR
-// inattendu, 5 = pas d'IDAT, 6 = malloc de la fenêtre, 7 = flux défectueux,
-// 8 = compte de pixels.
+// inattendu, 5 = pas d'IDAT, 6 = fenêtre absente (allouée par l'appelant),
+// 7 = flux défectueux, 8 = compte de pixels.
 static bool fail(int) { return false; }
 
-bool rainDecodeToFs(File& src, File& dst, int tileSize, int cropK) {
+bool rainDecodeToFs(File& src, File& dst, int tileSize, int cropK, uint8_t* win) {
   if (!g_colsReady) rainColorTableInit();
 
   // --- signature + parcours des chunks --------------------------------
@@ -649,9 +646,7 @@ bool rainDecodeToFs(File& src, File& dst, int tileSize, int cropK) {
   // --- décompression --------------------------------------------------
   if (cropK < 1 || cropK > RAIN_OUT) cropK = RAIN_OUT;
 
-  uint8_t* win = (uint8_t*)malloc(RAIN_WINDOW_PIXELS);
   if (!win) return fail(6);
-  memset(win, 0, RAIN_WINDOW_PIXELS);
 
   QuantOut& q = g_q;
   q.win = win;
@@ -671,6 +666,5 @@ bool rainDecodeToFs(File& src, File& dst, int tileSize, int cropK) {
   else
     ok = fail(ok ? 8 : 7);   // 7 = flux défectueux, 8 = compte de pixels
 
-  free(win);
   return ok;
 }

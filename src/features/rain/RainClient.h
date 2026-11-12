@@ -18,6 +18,7 @@ uint32_t        rainGenerated();        // unix time the server generated the se
 // ---- diagnostics, reported by /api/status ---------------------------------
 enum RainStage : uint8_t {
   RAIN_IDLE = 0,      // no poll has run yet
+  RAIN_FETCHING,      // poll in progress (list step or frames being fetched)
   RAIN_NO_HOME,       // lat/lon still 0,0, so there is nothing to centre on
   RAIN_CONNECT_FAIL,  // http.begin() refused the URL, or the socket never opened
   RAIN_HTTP_ERROR,    // server answered with something other than 200
