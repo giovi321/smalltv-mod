@@ -788,7 +788,7 @@ exactly as before. The layer is drawn only while every rule in the list holds:
 
 | Field | Type | Required | Rule |
 | --- | --- | --- | --- |
-| `source` | string | yes | A declared data field, or `<source>.age` (see [Data age](#data-age-source-age)) |
+| `source` | string | yes | A declared data field, or `<source>.age` (see [Data age](#data-age-sourceage)) |
 | `in` | array | yes | 1–4 ranges `[low, high]`, ends included; `null` is an open end (not both); other ends must be numbers from −3.4e38 to 3.4e38 |
 | `missing` | boolean | no, default false | Whether the rule holds while the value is missing or not a number |
 
