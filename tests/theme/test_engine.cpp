@@ -253,6 +253,23 @@ int main() {
   assert(shown(".04", 1) == "0.0");
   assert(shown("+4.6", 0) == "5");
   assert(shown(" 4.6 ", 0) == "5");
+  // Edges of the digit work: padding, leading zeros, a carry into a new digit,
+  // the sign, and a value far longer than any real reading.
+  assert(shown(".5", 1) == "0.5");
+  assert(shown(".95", 1) == "1.0");
+  assert(shown("0", 2) == "0.00");
+  assert(shown("000.4", 0) == "0");
+  assert(shown("0.0005", 3) == "0.001");
+  assert(shown("0.0004", 3) == "0.000");
+  assert(shown("-0.0005", 3) == "-0.001");
+  assert(shown("-0.0004", 3) == "0.000");
+  assert(shown("-99.5", 0) == "-100");
+  assert(shown("1000.9996", 3) == "1001.000");
+  assert(shown("5.", 2) == "5.00");
+  assert(shown("0010.250", 1) == "10.3");
+  assert(shown(std::string(30, '9').c_str(), 2) == std::string(30, '9') + ".00");
+  assert(shown((std::string(30, '9') + ".5").c_str(), 0) == "1" + std::string(30, '0'));
+  assert(shown((std::string(30, '0') + "1.234").c_str(), 2) == "1.23");
   assert(shown("13.5", -1) == "13.5"); // not set: as fetched
   for (const char* asFetched : {"n/a", "--", "12abc", "1e-6", "1.5e3", "", "-", "."}) assert(shown(asFetched, 0) == asFetched);
   assert(expandText("{weather.temp}|{weather.other}", nullptr, {{"weather.temp", "4.6"}, {"weather.other", "4.6"}}, theme.data) == "5|4.6");
