@@ -210,6 +210,14 @@ jobs:
           c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc tests/test_crash_record.cpp -o /tmp/smalltv-crash-tests
           /tmp/smalltv-crash-tests
 
+      # The ESP8266 backlight runs on the hardware sigma-delta generator, not
+      # the core's software PWM. The plan (which level, which duty) is native
+      # code; a second test reads Gfx.cpp and the other sources and checks
+      # the wiring: order of detach and write, ESP32 branch unchanged, nothing
+      # else touches the backlight pin. Host-native, no libraries.
+      - name: Test backlight plan and wiring
+        run: sh tests/backlight/run.sh
+
       # One app image per target (web-UI OTA + GitHub self-update), the merged
       # factory images for first-time USB flashing of the ESP32 boards, and the
       # minimal loader used to install onto a SmallTV-ultra. Two boards get a
