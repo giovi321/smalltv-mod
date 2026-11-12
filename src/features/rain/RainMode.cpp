@@ -36,11 +36,13 @@ static void geo(float homeLat, float homeLon, float lat, float lon,
 }
 
 // UI size from the settings: 0 = small, 1 = medium (default), 2 = large.
-// The built-in font only scales in integer steps, so the text uses size 1
-// (6x8 glyphs) for small/medium and size 2 (12x16) for large, while k
-// scales the city squares and the declutter spacing (RadarMode precedent).
-// Small = the default look, Medium keeps it, Large doubles every text.
-static uint8_t rainTxt(const Settings& s) { return (s.rain.uiScale == 2) ? 2 : 1; }
+// The built-in font only scales in integer steps, so the text jumps from
+// size 1 (6x8 glyphs) to size 2 (12x16) between Small and Medium — there is
+// no in-between, and size 3 (18x24) is too tall for the headers. Medium is
+// therefore the large text with the regular squares, and Large keeps that
+// text and grows the squares further (RadarMode precedent). k scales the
+// city squares and the declutter spacing.
+static uint8_t rainTxt(const Settings& s) { return (s.rain.uiScale == 0) ? 1 : 2; }
 static float   rainK(const Settings& s) {
   return (s.rain.uiScale == 0) ? 0.65f : ((s.rain.uiScale == 2) ? 1.5f : 1.0f);
 }
