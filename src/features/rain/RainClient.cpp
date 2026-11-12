@@ -53,6 +53,12 @@ static uint8_t  g_frameIdx = 0;      // prochaine frame du jeu en cours
 static uint8_t* g_win = nullptr;     // fenêtre LZ tenue pendant tout le fetch
 static String   g_host;
 
+// Buffer de téléchargement d'une tuile. Statique exprès : sur l'ESP8266 la
+// pile partage la région du heap, et ces 512 o sur la pile pendant le
+// téléchargement (fenêtre LZ + buffers TCP + WiFi déjà alloués) mangeaient
+// exactement la marge du pic — abort « out of memory » vécu à ~62 s de boot.
+static uint8_t g_dlBuf[512];
+
 uint8_t   rainCount()                { return g_count; }
 uint32_t  rainFrameTime(uint8_t i)   { return (i < g_count) ? g_frames[i].time : 0; }
 bool      rainFrameNowcast(uint8_t i) { return (i < g_count) && g_frames[i].nowcast; }
@@ -165,8 +171,26 @@ static bool fetchFrameList(const Settings& s) {
     return false;
   }
 
+  // Filter so only the fields we need materialise: the doc is parsed while
+  // the 8 KB LZ window is already allocated and the heap margin at that
+  // point is a few KB, so every unexpected field is a crash risk.
+  JsonDocument filter;
+  filter["host"] = true;
+  filter["generated"] = true;
+  {
+    JsonObject f = filter["radar"]["past"][0].to<JsonObject>();
+    f["time"] = true;
+    f["path"] = true;
+  }
+  {
+    JsonObject f = filter["radar"]["nowcast"][0].to<JsonObject>();
+    f["time"] = true;
+    f["path"] = true;
+  }
+
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, http.getStream());
+  DeserializationError err = deserializeJson(
+      doc, http.getStream(), DeserializationOption::Filter(filter));
   http.end();
   if (err) { g_stage = RAIN_PARSE_FAIL; return false; }
 
@@ -239,13 +263,12 @@ static bool fetchFrame(const Settings& s, const String& host, uint8_t i, uint8_t
   File tmp = LittleFS.open(RAIN_DIR "/tmp.png", "w");
   if (!tmp) { http.end(); g_stage = RAIN_FS_FAIL; return false; }
   Stream& in = http.getStream();
-  uint8_t buf[512];
   uint32_t total = 0;
   // readBytes: same signature on the ESP8266 and ESP32 cores (Stream::read
   // differs between them).
   int n;
-  while ((n = (int)in.readBytes(buf, sizeof buf)) > 0) {
-    tmp.write(buf, (size_t)n);
+  while ((n = (int)in.readBytes(g_dlBuf, sizeof g_dlBuf)) > 0) {
+    tmp.write(g_dlBuf, (size_t)n);
     total += (uint32_t)n;
     if (total > 262144) break;   // sanity cap 256 KB
   }
