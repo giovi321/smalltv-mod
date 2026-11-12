@@ -199,6 +199,7 @@ struct RainSettings {
   uint16_t animSec;       // per-frame on-screen time in the loop
   bool     unitsMi;       // show distances in miles instead of km
   bool     showCities;    // nearby cities as reference dots
+  uint8_t  uiScale;       // text/city marker size: 0 = small, 1 = medium, 2 = large
 
   void setDefaults();
   void toJson(JsonObject o) const;

@@ -498,6 +498,7 @@ void RainSettings::setDefaults() {
   animSec = DEFAULT_RAIN_ANIM_SEC;
   unitsMi = false;
   showCities = true;
+  uiScale = 1;            // medium
 }
 
 void RainSettings::toJson(JsonObject o) const {
@@ -509,6 +510,7 @@ void RainSettings::toJson(JsonObject o) const {
   o["animSec"]    = animSec;
   o["unitsMi"]    = unitsMi;
   o["showCities"] = showCities;
+  o["uiScale"]    = uiScale;
 }
 
 void RainSettings::fromJson(JsonObjectConst o) {
@@ -524,6 +526,7 @@ void RainSettings::fromJson(JsonObjectConst o) {
   if (o["animSec"].is<int>())    animSec = constrain((int)o["animSec"], 3, 30);
   if (o["unitsMi"].is<bool>())   unitsMi = o["unitsMi"];
   if (o["showCities"].is<bool>()) showCities = o["showCities"];
+  if (o["uiScale"].is<int>())     uiScale = constrain((int)o["uiScale"], 0, 2);
 }
 
 // ===========================================================================

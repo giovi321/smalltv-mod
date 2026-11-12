@@ -379,7 +379,9 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <small class="hint" data-i18n="rain.rangeHint">The screen loops the last 2 hours of rain in 10-minute steps, refreshed from RainViewer. Forecast frames appear automatically if the provider serves them.</small>
   </div>
   <div class="card"><h2 data-i18n="rain.showTitle">What to show</h2>
-   <div class="chk"><input id="rainShowCities" type="checkbox"><label data-i18n="rain.cities">Nearby cities as reference dots (France &amp; Europe)</label></div>
+   <label data-i18n="rain.uiScale">Text &amp; city size</label>
+   <select id="rainUiScale"><option value="0">Small</option><option value="1">Medium</option><option value="2">Large</option></select>
+   <div class="chk" style="margin-top:12px"><input id="rainShowCities" type="checkbox"><label data-i18n="rain.cities">Nearby cities as reference dots (France &amp; Europe)</label></div>
    <small class="hint" data-i18n="rain.attribution">Weather data by RainViewer — personal use only.</small>
   </div>
  </section>
@@ -551,8 +553,8 @@ function modeChanged(){if(!$('mode'))return;
 // follows the device language (clock.lang).
 var LANG='en';
 var I18N={
- en:{'ui.langLabel':'UI language','rain.homeTitle':'Home location','rain.useDevice':'Use the device location (Display tab, Clock &amp; night mode card)','rain.lat':'Latitude','rain.lon':'Longitude','rain.homeHint':'The rain radar centres on this point. Decimal degrees, e.g. <code>52.3676</code>, <code>4.9041</code>. Leave at 0/0 and the screen prompts you to set it.','rain.rangeTitle':'Range &amp; cadence','rain.range':'Range (km)','rain.units':'Units','rain.refresh':'Refresh (s)','rain.anim':'Animation (s/frame)','rain.rangeHint':'The screen loops the last 2 hours of rain in 10-minute steps, refreshed from RainViewer. Forecast frames appear automatically if the provider serves them.','rain.showTitle':'What to show','rain.cities':'Nearby cities as reference dots (France &amp; Europe)','rain.attribution':'Weather data by RainViewer — personal use only.'},
- fr:{'ui.langLabel':'Langue de l’interface','rain.homeTitle':'Position','rain.useDevice':'Utiliser la position de l’appareil (onglet Display, carte Clock &amp; night mode)','rain.lat':'Latitude','rain.lon':'Longitude','rain.homeHint':'Le radar se centre sur ce point. Degrés décimaux, ex. <code>47.1519</code>, <code>-1.6084</code>. Laisser 0/0 pour que l’écran affiche une invite.','rain.rangeTitle':'Portée &amp; cadence','rain.range':'Portée (km)','rain.units':'Unités','rain.refresh':'Rafraîchissement (s)','rain.anim':'Animation (s/image)','rain.rangeHint':'L’écran boucle les 2 dernières heures de pluie par pas de 10 minutes, rafraîchies depuis RainViewer. Les images de prévision apparaissent automatiquement si le fournisseur les sert.','rain.showTitle':'Affichage','rain.cities':'Villes proches en points de repère (France &amp; Europe)','rain.attribution':'Données météo par RainViewer — usage personnel uniquement.'}
+ en:{'ui.langLabel':'UI language','rain.homeTitle':'Home location','rain.useDevice':'Use the device location (Display tab, Clock &amp; night mode card)','rain.lat':'Latitude','rain.lon':'Longitude','rain.homeHint':'The rain radar centres on this point. Decimal degrees, e.g. <code>52.3676</code>, <code>4.9041</code>. Leave at 0/0 and the screen prompts you to set it.','rain.rangeTitle':'Range &amp; cadence','rain.range':'Range (km)','rain.units':'Units','rain.refresh':'Refresh (s)','rain.anim':'Animation (s/frame)','rain.rangeHint':'The screen loops the last 2 hours of rain in 10-minute steps, refreshed from RainViewer. Forecast frames appear automatically if the provider serves them.','rain.showTitle':'What to show','rain.uiScale':'Text &amp; city size','rain.cities':'Nearby cities as reference dots (France &amp; Europe)','rain.attribution':'Weather data by RainViewer — personal use only.'},
+ fr:{'ui.langLabel':'Langue de l’interface','rain.homeTitle':'Position','rain.useDevice':'Utiliser la position de l’appareil (onglet Display, carte Clock &amp; night mode)','rain.lat':'Latitude','rain.lon':'Longitude','rain.homeHint':'Le radar se centre sur ce point. Degrés décimaux, ex. <code>47.1519</code>, <code>-1.6084</code>. Laisser 0/0 pour que l’écran affiche une invite.','rain.rangeTitle':'Portée &amp; cadence','rain.range':'Portée (km)','rain.units':'Unités','rain.refresh':'Rafraîchissement (s)','rain.anim':'Animation (s/image)','rain.rangeHint':'L’écran boucle les 2 dernières heures de pluie par pas de 10 minutes, rafraîchies depuis RainViewer. Les images de prévision apparaissent automatiquement si le fournisseur les sert.','rain.showTitle':'Affichage','rain.uiScale':'Taille des textes &amp; des villes','rain.cities':'Villes proches en points de repère (France &amp; Europe)','rain.attribution':'Données météo par RainViewer — usage personnel uniquement.'}
 };
 function i18nApply(){
  document.querySelectorAll('[data-i18n]').forEach(function(e){
@@ -665,6 +667,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('rainPollSec',rn.pollSec||900);
  sv('rainAnimSec',rn.animSec||8);
  sc('rainShowCities',rn.showCities!==false);
+ sv('rainUiScale',rn.uiScale!=null?rn.uiScale:1);
  // UI language (FR/EN, remembered per browser; default follows clock.lang)
  var savedLang=null; try{savedLang=localStorage.getItem('smalltv-lang')}catch(e){}
  LANG=(savedLang==='fr'||savedLang==='en')?savedLang:((c.clock&&c.clock.lang==='fr')?'fr':'en');
@@ -830,7 +833,7 @@ function collect(){
   var rn={useDevice:gc('rainUseDevice'), lat:parseFloat(gv('rainLat'))||0, lon:parseFloat(gv('rainLon'))||0,
    rangeKm:parseInt(gv('rainRangeKm'))||50, unitsMi:gv('rainUnitsMi')==='true',
    pollSec:parseInt(gv('rainPollSec'))||900, animSec:parseInt(gv('rainAnimSec'))||8,
-   showCities:gc('rainShowCities')};
+   showCities:gc('rainShowCities'), uiScale:parseInt(gv('rainUiScale'))||0};
   o.rain=rn;
  }
  return o;
