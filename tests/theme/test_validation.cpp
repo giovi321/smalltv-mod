@@ -1,8 +1,18 @@
 #include "ThemeEngine.h"
 #include <ArduinoJson.h>
 #include <cassert>
+#include <cmath>
 #include <iostream>
 using namespace smalltv;
+// run.sh builds this file twice: with ArduinoJson's default doubles, and with
+// -DARDUINOJSON_USE_DOUBLE=0 as the device builds it (floats). Each build names
+// what it expects, so a build that lost its flag fails here instead of quietly
+// testing the other number type.
+#if defined(EXPECT_FLOAT_JSON)
+static_assert(ARDUINOJSON_USE_DOUBLE == 0, "this build must parse numbers as floats, like the device");
+#elif defined(EXPECT_DOUBLE_JSON)
+static_assert(ARDUINOJSON_USE_DOUBLE == 1, "this build must parse numbers as doubles");
+#endif
 const char* base=R"({"spec":1,"theme":{"id":"test","name":"Test","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"layers":[{"id":"time","type":"text","x":120,"y":100,"anchor":"center","value":"{HH}:{MM}","size":48,"color":"#ffffff"}]})";
 const char* dataBase=R"({"spec":1,"theme":{"id":"test","name":"Test","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"weather","url":"https://example.test/weather.json","interval":60,"fields":[{"id":"temp","path":"main.temp"}]}],"layers":[{"id":"value","type":"text","x":0,"y":0,"value":"{weather.temp}","size":16,"color":"#ffffff"}]})";
 void rejected(JsonDocument& doc) {
@@ -12,6 +22,11 @@ void rejected(JsonDocument& doc) {
 void dataDocument(JsonDocument& doc) {
   deserializeJson(doc,dataBase);
   doc["data"][0]["insecureTls"]=true;
+}
+// `show` needs spec 2.
+void showDocument(JsonDocument& doc) {
+  dataDocument(doc);
+  doc["spec"]=2;
 }
 void validScroll(JsonObject layer) {
   layer["scroll"]["width"]=120;
@@ -287,5 +302,125 @@ int main() {
   tm t{};t.tm_hour=12;t.tm_year=100;t.tm_mon=0;t.tm_mday=1;t.tm_wday=6;
   assert(expandText("{hh} {HH} {DD} {MONTH} {WEEKDAY} {YYYY}",&t)=="12 12 01 January Saturday 2000");
   t.tm_hour=23;assert(expandText("{hh}",&t)=="11");assert(expandText("{HH}:{MM}",nullptr)=="--:--");
+  // `show`: up to 4 rules per layer, each a declared field and up to 4
+  // inclusive ranges; null is an open end. Rules are kept with their layer.
+  {
+    showDocument(d);
+    JsonObject rule=d["layers"][0]["show"].add<JsonObject>();
+    rule["source"]="weather.temp";
+    JsonArray in=rule["in"].to<JsonArray>();
+    JsonArray first=in.add<JsonArray>();first.add(-5);first.add(4.5);
+    JsonArray second=in.add<JsonArray>();second.add(20);second.add(nullptr);
+    JsonObject other=d["layers"][0]["show"].add<JsonObject>();
+    other["source"]="weather.temp";other["missing"]=true;
+    JsonArray low=other["in"].to<JsonArray>().add<JsonArray>();low.add(nullptr);low.add(30);
+    serializeJson(d,json);
+    assert(parseTheme(json,theme,error));
+    assert(theme.show.size()==2);
+    const ShowRule& a=theme.show[0];
+    // weather is data source 0 and temp its field 0.
+    assert(a.layer==0&&a.source==0&&a.field==0&&!a.missing&&a.count==2);
+    assert(a.low[0]==-5&&a.high[0]==4.5f&&a.low[1]==20);
+    assert(std::isinf(a.high[1])&&a.high[1]>0);
+    const ShowRule& b=theme.show[1];
+    assert(b.missing&&b.count==1&&std::isinf(b.low[0])&&b.low[0]<0&&b.high[0]==30);
+    // No `show`: no rules.
+    showDocument(d);serializeJson(d,json);assert(parseTheme(json,theme,error)&&theme.show.size()==0);
+    // Spec 1 refuses it, like fonts, arcs and localized text do.
+    dataDocument(d);
+    JsonObject old=d["layers"][0]["show"].add<JsonObject>();
+    old["source"]="weather.temp";old["in"].add<JsonArray>().add(1);old["in"][0].add(2);
+    serializeJson(d,json);
+    assert(!parseTheme(json,theme,error)&&error=="layers[0].show: needs \"spec\": 2");
+    // Both ends of a bound infinite or too big for a float: the message says so, not "null".
+    for(const char* in:{"[[-1e999,1e999]]","[[0,1e999]]","[[-1e999,0]]","[[1e39,2e39]]","[[0,4e38]]"}){
+      // The bound goes into the text itself: a document would write an infinity back as null.
+      showDocument(d);d["layers"][0]["show"]="@@SHOW@@";serializeJson(d,json);
+      const std::string marker="\"@@SHOW@@\"";
+      json.replace(json.find(marker),marker.size(),std::string("[{\"source\":\"weather.temp\",\"in\":")+in+"}]");
+      const bool ok=!parseTheme(json,theme,error)&&error=="layers[0].show[0].in[0]: expected numbers from -3.4e38 to 3.4e38, or null";
+      if(!ok){std::cerr<<in<<" -> "<<error<<"\n";assert(false);}
+    }
+    // A data source's age is accepted as a source (spec 2): hide a layer once its data is stale.
+    showDocument(d);JsonDocument ageDoc;assert(!deserializeJson(ageDoc,"[{\"source\":\"weather.age\",\"in\":[[null,30]],\"missing\":true}]"));
+    d["layers"][0]["show"]=ageDoc.as<JsonVariantConst>();serializeJson(d,json);
+    assert(parseTheme(json,theme,error)&&theme.show.size()==1&&theme.show[0].source==0&&theme.show[0].field==ShowAgeField);
+    // Two sources: a rule keeps the index of the one it names, and of the field in it.
+    showDocument(d);
+    JsonObject rainSrc=d["data"].add<JsonObject>();
+    rainSrc["id"]="rain";rainSrc["url"]="https://example.test/rain.json";rainSrc["interval"]=60;rainSrc["insecureTls"]=true;
+    rainSrc["fields"].add<JsonObject>()["id"]="mm";rainSrc["fields"][0]["path"]="mm";
+    JsonObject extra=rainSrc["fields"].add<JsonObject>();extra["id"]="prob";extra["path"]="prob";
+    JsonDocument twoDoc;assert(!deserializeJson(twoDoc,"[{\"source\":\"rain.prob\",\"in\":[[0,1]]},{\"source\":\"rain.age\",\"in\":[[0,1]]},{\"source\":\"weather.temp\",\"in\":[[0,1]]}]"));
+    d["layers"][0]["show"]=twoDoc.as<JsonVariantConst>();serializeJson(d,json);
+    assert(parseTheme(json,theme,error)&&theme.show.size()==3);
+    assert(theme.show[0].source==1&&theme.show[0].field==1);
+    assert(theme.show[1].source==1&&theme.show[1].field==ShowAgeField);
+    assert(theme.show[2].source==0&&theme.show[2].field==0);
+    // The biggest a float holds is still accepted.
+    showDocument(d);d["layers"][0]["show"]="@@SHOW@@";serializeJson(d,json);
+    json.replace(json.find("\"@@SHOW@@\""),10,"[{\"source\":\"weather.temp\",\"in\":[[-3.4e38,3.4e38]]}]");
+    const bool bigOk=parseTheme(json,theme,error);
+    if(!bigOk) std::cerr<<"float-sized bound refused: "<<error<<"\n";
+    // (ArduinoJson reads the number as a float, which may be an ulp off the literal's.)
+    assert(bigOk&&std::fabs(theme.show[0].low[0]/-3.4e38-1)<1e-5&&std::fabs(theme.show[0].high[0]/3.4e38-1)<1e-5);
+  }
+  // Each malformed rule is refused, with the error pointing at it.
+  // `message` is the exact reason after the location (nullptr: not checked). The
+  // messages sit in flash on the ESP8266, so a lost or garbled one must show here.
+  struct BadShow { const char* show; const char* where; const char* message; };
+  const BadShow badShows[]={
+    {"{}","layers[0].show:","expected 1 to 4 rules"},
+    {"[]","layers[0].show:","expected 1 to 4 rules"},
+    {"[1]","layers[0].show[0]:","expected an object"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"x\":1}]","layers[0].show[0].x:","unknown field"},
+    {"[{\"source\":\"weather.wind\",\"in\":[[0,1]]}]","layers[0].show[0].source:","expected a declared data field"},
+    {"[{\"source\":\"time.second\",\"in\":[[0,1]]}]","layers[0].show[0].source:","expected a declared data field"},
+    {"[{\"source\":\"device.humidity\",\"in\":[[0,1]]}]","layers[0].show[0].source:","expected a declared data field"},
+    {"[{\"in\":[[0,1]]}]","layers[0].show[0].source:",nullptr},
+    {"[{\"source\":\"weather.temp\"}]","layers[0].show[0].in:","expected 1 to 4 ranges"},
+    {"[{\"source\":\"weather.temp\",\"in\":[]}]","layers[0].show[0].in:","expected 1 to 4 ranges"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1],[2,3],[4,5],[6,7],[8,9]]}]","layers[0].show[0].in:","expected 1 to 4 ranges"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0]]}]","layers[0].show[0].in[0]:","expected [low, high]"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1,2]]}]","layers[0].show[0].in[0]:","expected [low, high]"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[2,1]]}]","layers[0].show[0].in[0]:","low must not be above high"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[null,null]]}]","layers[0].show[0].in[0]:","at most one end may be null"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[\"0\",1]]}]","layers[0].show[0].in[0]:","expected numbers or null"},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":1}]","layers[0].show[0].missing:",nullptr},
+    {"[{\"source\":\"weather.temp\",\"in\":[[0,1]]},{\"source\":\"weather.temp\",\"in\":[[0,1]]},"
+     "{\"source\":\"weather.temp\",\"in\":[[0,1]]},{\"source\":\"weather.temp\",\"in\":[[0,1]]},"
+     "{\"source\":\"weather.temp\",\"in\":[[0,1]]}]","layers[0].show:","expected 1 to 4 rules"},
+  };
+  for(const BadShow& bad:badShows){
+    showDocument(d);JsonDocument value;assert(!deserializeJson(value,bad.show));
+    d["layers"][0]["show"]=value.as<JsonVariantConst>();serializeJson(d,json);
+    const bool refused=!parseTheme(json,theme,error);
+    const bool where=error.find(bad.where)==0;
+    const bool message=!bad.message||error==std::string(bad.where)+" "+bad.message;
+    if(!refused||!where||!message){std::cerr<<bad.show<<" -> "<<error<<"\n";assert(false);}
+  }
+  // A misspelled key is listed by name; the key list sits in flash too.
+  {
+    showDocument(d);JsonDocument value;assert(!deserializeJson(value,"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":true,\"sources\":1}]"));
+    d["layers"][0]["show"]=value.as<JsonVariantConst>();serializeJson(d,json);
+    assert(!parseTheme(json,theme,error)&&error=="layers[0].show[0].sources: unknown field");
+    // All three keys of a rule are still accepted (the key list is intact).
+    showDocument(d);JsonDocument v2;assert(!deserializeJson(v2,"[{\"source\":\"weather.temp\",\"in\":[[0,1]],\"missing\":true}]"));
+    d["layers"][0]["show"]=v2.as<JsonVariantConst>();serializeJson(d,json);
+    assert(parseTheme(json,theme,error));
+  }
+  // Image and animation layers take `show` too (their key lists are in flash).
+  for(const char* type:{"image","animation"}){
+    showDocument(d);JsonObject layer=d["layers"][0];layer.clear();
+    layer["id"]="pic";layer["type"]=type;layer["x"]=0;layer["y"]=0;layer["source"]="pic.sti";
+    if(std::string(type)=="animation"){layer["width"]=10;layer["height"]=10;layer["frames"]=2;layer["fps"]=2;layer["loop"]=true;}
+    JsonObject rule=layer["show"].add<JsonObject>();
+    rule["source"]="weather.temp";rule["in"].add<JsonArray>().add(1);
+    rule["in"][0].add(2);
+    serializeJson(d,json);
+    if(!parseTheme(json,theme,error)||theme.show.size()!=1){std::cerr<<type<<" -> "<<error<<"\n";assert(false);}
+    layer["bogus"]=1;serializeJson(d,json);
+    assert(!parseTheme(json,theme,error)&&error=="layers[0].bogus: unknown field");
+  }
   std::cout<<"theme validation tests passed\n";
 }

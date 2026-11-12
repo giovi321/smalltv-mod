@@ -39,6 +39,7 @@ except ImportError:  # validate/build of shape-only themes still work
 # --------------------------------------------------------------------------
 MAX_PACKAGE, MAX_ENTRIES, MAX_MANIFEST = 3 * 1024 * 1024, 256, 16384
 MAX_LAYERS, MAX_BINDINGS, MAX_STOPS, MAX_TRANSLATION_BYTES = 32, 8, 8, 1024
+MAX_SHOW_RULES = 36  # the firmware's default (THEME_MAX_SHOW_RULES); a build may raise it
 ANCHORS = ['top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right',
            'bottom-left', 'bottom-center', 'bottom-right']
 TOKENS = ['HH', 'hh', 'MM', 'SS', 'DD', 'MON', 'MONTH', 'WD', 'WEEKDAY', 'YYYY']
@@ -199,6 +200,8 @@ def spec2_reasons(theme):
         if not isinstance(l, dict):
             continue
         p = f'layers[{i}]'
+        if 'show' in l:
+            reasons.append(f'{p}: show rules')
         if l.get('type') == 'shape' and l.get('shape') in ROTATION:
             reasons.append(f'{p}: {l["shape"]} shape')
         if l.get('type') == 'text':
@@ -323,7 +326,11 @@ def validate(theme, assets=None):
         spec = 2
     if spec == 1:
         for r in spec2_reasons(theme):
-            fail(r.split(':')[0], r.split(': ', 1)[1] + ' needs "spec": 2 (or "spec": "auto")')
+            where, what = r.split(': ', 1)
+            if what == 'show rules':   # the firmware's own text: layers[N].show: needs "spec": 2
+                fail(f'{where}.show', 'needs "spec": 2')
+            else:
+                fail(where, what + ' needs "spec": 2 (or "spec": "auto")')
     if obj(theme.get('theme'), 'theme', ['id', 'name', 'author', 'version']):
         for k, mx in (('id', 48), ('name', 96), ('author', 96), ('version', 32)):
             string(theme['theme'], k, 'theme', mx)
@@ -389,7 +396,7 @@ def validate(theme, assets=None):
     if not isinstance(layers, list) or len(layers) > MAX_LAYERS:
         fail('layers', 'expected an array with at most 32 layers')
         return errors
-    ids, translation_bytes = set(), 0
+    ids, translation_bytes, show_rules = set(), 0, 0
     for i, o in enumerate(layers):
         p = f'layers[{i}]'
         if not isinstance(o, dict):
@@ -400,7 +407,7 @@ def validate(theme, assets=None):
         ids.add(o.get('id'))
         number(o, 'x', p, -240, 479)
         number(o, 'y', p, -240, 479)
-        allowed = ['id', 'type', 'x', 'y', 'scroll', 'bind']
+        allowed = ['id', 'type', 'x', 'y', 'scroll', 'bind', 'show']
         t = o.get('type')
         if t == 'text':
             allowed += ['anchor', 'value', 'size', 'color']
@@ -514,7 +521,52 @@ def validate(theme, assets=None):
                     fail(f'{sp}.gap', 'not allowed in bounce mode')
         if o.get('bind') is not None:
             validate_bindings(o, p, fields, spec, fail, obj, color)
+        if 'show' in o:
+            show_rules = validate_show(o, p, fields, spec, show_rules, fail, obj)
     return errors
+
+
+def validate_show(o, p, fields, spec, used, fail, obj):
+    """The `show` list of a layer (spec 2). Returns the theme's rule count so far."""
+    sp = f'{p}.show'
+    if spec < 2:   # already reported by spec2_reasons()
+        return used
+    rules = o['show']
+    if not isinstance(rules, list) or not 1 <= len(rules) <= 4:
+        fail(sp, 'expected 1 to 4 rules')
+        return used
+    if used + len(rules) > MAX_SHOW_RULES:
+        fail(sp, f'expected at most {MAX_SHOW_RULES} rules in a theme')
+        return used
+    sources = {f.rpartition('.')[0] for f in fields}
+    for i, rule in enumerate(rules):
+        rp = f'{sp}[{i}]'
+        if not isinstance(rule, dict):
+            fail(rp, 'expected an object')
+            continue
+        obj(rule, rp, ['source', 'in', 'missing'])
+        src = rule.get('source')
+        if not isinstance(src, str) or not (src in fields or src.rpartition('.')[2] == 'age' and src.rpartition('.')[0] in sources):
+            fail(f'{rp}.source', 'expected a declared data field')
+        if rule.get('missing') is not None and not isinstance(rule['missing'], bool):
+            fail(f'{rp}.missing', 'expected true or false')
+        ranges = rule.get('in')
+        if not isinstance(ranges, list) or not 1 <= len(ranges) <= 4:
+            fail(f'{rp}.in', 'expected 1 to 4 ranges')
+            continue
+        for j, ends in enumerate(ranges):
+            ep = f'{rp}.in[{j}]'
+            if not isinstance(ends, list) or len(ends) != 2:
+                fail(ep, 'expected [low, high]')
+            elif any(e is not None and type(e) not in (int, float) for e in ends):
+                fail(ep, 'expected numbers or null')
+            elif any(e is not None and not abs(e) <= 3.4e38 for e in ends):
+                fail(ep, 'expected numbers from -3.4e38 to 3.4e38, or null')
+            elif ends[0] is None and ends[1] is None:
+                fail(ep, 'at most one end may be null')
+            elif ends[0] is not None and ends[1] is not None and ends[0] > ends[1]:
+                fail(ep, 'low must not be above high')
+    return used + len(rules)
 
 
 def validate_bindings(o, p, fields, spec, fail, obj, color):
@@ -1052,6 +1104,29 @@ def source_value(src, t, data):
     return parse_number(data.get(src))
 
 
+def float32(value):
+    """The value as the device holds a JSON number: a 32-bit float."""
+    try:
+        return struct.unpack('f', struct.pack('f', value))[0]
+    except OverflowError:
+        return math.copysign(math.inf, value)
+
+
+def shown(l, data):
+    """False while one of the layer's `show` rules does not hold."""
+    for rule in l.get('show') or []:
+        value = parse_number(data.get(rule['source']))
+        if value is None:
+            if not rule.get('missing', False):
+                return False
+            continue
+        value = float32(value)
+        if not any((-math.inf if lo is None else float32(lo)) <= value <= (math.inf if hi is None else float32(hi))
+                   for lo, hi in rule['in']):
+            return False
+    return True
+
+
 def resolve_layer(l, t, data):
     r = {'x': l['x'], 'y': l['y'], 'width': l.get('width', 0), 'height': l.get('height', 0),
          'x2': l.get('x2', 0), 'y2': l.get('y2', 0), 'radius': l.get('radius', 0),
@@ -1225,6 +1300,8 @@ class Renderer:
         bg = color565(self.theme['display']['background'])
         out = [bg] * (240 * 240)
         for idx, l in enumerate(self.theme['layers']):
+            if not shown(l, self.data):
+                continue
             r = resolve_layer(l, t, self.data)
             if l['type'] == 'shape' and l['shape'] == 'arc':
                 r['start16'] = l['start'] * 16
