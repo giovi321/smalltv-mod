@@ -280,8 +280,24 @@ class Reader {
   uint8_t buf_[64];
   uint8_t len_ = 0, pos_ = 0;
 };
+// Where the pixels of a row go: handed back as colours and alpha, blended over
+// `pixels` (a transparent pixel leaves it alone), or, with all three null,
+// nowhere (a check only).
+struct RowOut {
+  uint16_t* colors;
+  uint8_t* alpha;
+  uint16_t* pixels;
+  void put(int i, uint16_t color, uint8_t a) const {
+    if (pixels) {
+      if (a) pixels[i] = blend(pixels[i], color, a);
+    } else if (colors) {
+      colors[i] = color;
+      alpha[i] = a;
+    }
+  }
+};
 // Walks an STI2 row's runs up to column `stop` and keeps the pixels from `x`
-// on; with `colors` null it only checks them. A run's first byte holds its
+// on, into `out`; with nowhere to put them it only checks them. A run's first byte holds its
 // kind in the top two bits and its length minus one in the rest: 00
 // transparent (only in an image with alpha), 01 one pixel repeated, 10 that
 // many literal pixels; 11 is reserved. With a palette a pixel is an index
@@ -289,7 +305,7 @@ class Reader {
 // nibble first, an odd run's unused low nibble 0). A run that goes past the
 // row, or data that ends early, fails the row.
 bool walkRow(Reader& reader, uint8_t stride, uint8_t palette, int width, const uint16_t* paletteColor,
-             const uint8_t* paletteAlpha, int x, int stop, uint16_t* colors, uint8_t* alpha) {
+             const uint8_t* paletteAlpha, int x, int stop, const RowOut& out) {
   for (int px = 0; px < stop;) {
     uint8_t head;
     if (!reader.byte(head)) return false;
@@ -318,10 +334,7 @@ bool walkRow(Reader& reader, uint8_t stride, uint8_t palette, int width, const u
           }
         }
       }
-      if (colors && px + i >= x && px + i < stop) {
-        colors[px + i - x] = color;
-        alpha[px + i - x] = a;
-      }
+      if (px + i >= x && px + i < stop) out.put(px + i - x, color, a);
     }
     px += length;
   }
@@ -354,7 +367,7 @@ bool Package::checkRows(const Entry& e) const {
     }
     if (y > 0) {
       runs.skipTo(e.offset + rows + start);
-      if (!walkRow(runs, e.stride, e.palette, e.width, nullptr, nullptr, 0, e.width, nullptr, nullptr) ||
+      if (!walkRow(runs, e.stride, e.palette, e.width, nullptr, nullptr, 0, e.width, RowOut{nullptr, nullptr, nullptr}) ||
           runs.position() > e.offset + rows + at) return false;
     }
     start = at;
@@ -364,14 +377,24 @@ bool Package::checkRows(const Entry& e) const {
 // Reads exactly the `count` pixels of row `y` starting at column `x`. STI1
 // rows are raw pixels (RGB565, plus an alpha byte for a transparent asset);
 // STI2 rows are runs (see walkRow()). Runs before `x` are skipped.
-bool Package::row(AssetHandle handle, int y, int x, int count, uint16_t* colors, uint8_t* alpha) {
+// The pixels go to `colors`/`alpha`, or, with `pixels` set, are blended over
+// it. Inlined into row() and blendRow() (an extra call would put a frame of
+// its own on the stack of every image row, and its seventh argument another).
+inline __attribute__((always_inline)) bool Package::readRow(AssetHandle handle, int y, int x, int count,
+                                                            uint16_t* colors, uint8_t* alpha, uint16_t* pixels) {
+  const RowOut out{colors, alpha, pixels};
   if (handle >= entries_.size()) return false;
   const Entry* e = &entries_[handle];
   if (!e->stride || x < 0 || y < 0 || y >= e->height || count < 0 || count > 240 || x + count > e->width) return false;
   if (!e->compressed) {
     const uint32_t at = e->offset + 12 + (uint32_t(y) * e->width + x) * e->stride;
     Reader reader(source_, at, at + uint32_t(count) * e->stride);
-    for (int i = 0; i < count; ++i) if (!reader.pixel(e->stride, colors[i], alpha[i])) return false;
+    for (int i = 0; i < count; ++i) {
+      uint16_t color;
+      uint8_t a;
+      if (!reader.pixel(e->stride, color, a)) return false;
+      out.put(i, color, a);
+    }
     return true;
   }
   const uint32_t table = e->offset + 12 + uint32_t(e->palette) * e->stride;
@@ -384,7 +407,15 @@ bool Package::row(AssetHandle handle, int y, int x, int count, uint16_t* colors,
   uint8_t b[4];
   if (!source_.read(table + 4u * y, b, 4)) return false;
   Reader reader(source_, table + 4u * e->height + u32(b), e->offset + e->length);
-  return walkRow(reader, e->stride, e->palette, e->width, paletteColor, paletteAlpha, x, x + count, colors, alpha);
+  return walkRow(reader, e->stride, e->palette, e->width, paletteColor, paletteAlpha, x, x + count, out);
+}
+bool Package::row(AssetHandle handle, int y, int x, int count, uint16_t* colors, uint8_t* alpha) {
+  return readRow(handle, y, x, count, colors, alpha, nullptr);
+}
+// The same row, blended over `pixels` as it is read: the engine needs no row
+// buffers of its own, which were 720 bytes of the loop stack.
+bool Package::blendRow(AssetHandle handle, int y, int x, int count, uint16_t* pixels) {
+  return readRow(handle, y, x, count, nullptr, nullptr, pixels);
 }
 // An STF font (spec 2): the 12-byte header (see readIndex()), one 8-byte
 // record per code point from the first on, then the glyph bitmaps. A record
@@ -495,6 +526,7 @@ bool Package::glyphRow(AssetHandle handle, uint8_t code, int y, uint8_t* coverag
   width = 0;
   if (y < g.top || y >= g.top + g.rows) return true;
   const unsigned bytes = (g.width + 1) / 2;
+  if (g.width > MaxGlyphWidth) return false;   // the load check allows none; `coverage` has no room for it
   if (!source_.read(e.offset + 12 + 8u * e.height + g.bitmap + (y - g.top) * bytes, coverage, bytes)) return false;
   for (int i = g.width - 1; i >= 0; --i) coverage[i] = (i % 2 ? coverage[i / 2] & 15 : coverage[i / 2] >> 4) * 17;
   width = g.width;
