@@ -36,15 +36,15 @@ static void geo(float homeLat, float homeLon, float lat, float lon,
 }
 
 // UI size from the settings: 0 = small, 1 = medium (default), 2 = large.
-// The built-in font only scales in integer steps, so the text jumps from
-// size 1 (6x8 glyphs) to size 2 (12x16) between Small and Medium — there is
-// no in-between, and size 3 (18x24) is too tall for the headers. Medium is
-// therefore the large text with the regular squares, and Large keeps that
-// text and grows the squares further (RadarMode precedent). k scales the
-// city squares and the declutter spacing.
-static uint8_t rainTxt(const Settings& s) { return (s.rain.uiScale == 0) ? 1 : 2; }
+// The built-in font only scales in integer steps (6x8, 12x16, 18x24), so
+// the main texts map 1:1 onto uiScale: size 1/2/3. Headers and city names
+// cap at size 2 (see drawRain / drawCities): a 24 px header would cross the
+// scope ring in the corners, and the longest city name (Châteauroux) would
+// span 198 px at size 3. k scales the city squares - 2x at Large so the
+// level steps are unmistakable.
+static uint8_t rainTxt(const Settings& s) { return 1 + s.rain.uiScale; }
 static float   rainK(const Settings& s) {
-  return (s.rain.uiScale == 0) ? 0.65f : ((s.rain.uiScale == 2) ? 1.5f : 1.0f);
+  return (s.rain.uiScale == 0) ? 0.65f : ((s.rain.uiScale == 2) ? 2.0f : 1.0f);
 }
 static int scaleK(int base, float k) {      // min 2 px so markers stay visible
   int v = (int)lroundf(base * k);
@@ -91,8 +91,11 @@ static void drawCities(const Settings& s, Arduino_GFX* gfx) {
   float hLat = rainLat(s), hLon = rainLon(s);
   float range = (float)s.rain.rangeKm;
   const uint8_t txt = rainTxt(s);
+  const uint8_t nt  = txt > 2 ? 2 : txt;   // names cap at 16 px (see rainTxt)
   const float   k   = rainK(s);
-  const int     minD = scaleK(16, k);   // declutter, scales with the squares
+  // Declutter fixed for medium/large so the bigger squares don't drop
+  // cities; only small gets a tighter grid (its markers are tiny).
+  const int     minD = (s.rain.uiScale == 0) ? 10 : 16;
 
   struct Pt { int16_t x, y; };
   Pt used[24];
@@ -125,13 +128,13 @@ static void drawCities(const Settings& s, Arduino_GFX* gfx) {
     gfx->fillRect(x - sz / 2, y - sz / 2, sz, sz, C_RED);
     if (labeled < 6 && c.popK >= 20) {
       labeled++;
-      gfx->setTextSize(txt);
+      gfx->setTextSize(nt);
       gfx->setTextColor(C_GRAY);
-      int lw = (int)strlen(c.name) * GFX_FONT_W * txt;
+      int lw = (int)strlen(c.name) * GFX_FONT_W * nt;
       int lx = x + sz / 2 + 3;
       if (lx + lw > TFT_WIDTH - 2) lx = x - sz / 2 - 3 - lw;
       if (lx < 2) lx = 2;
-      int ly = y - 4 * txt;               // keep the taller label centred on the square
+      int ly = y - 4 * nt;               // keep the taller label centred on the square
       gfx->setCursor(lx, ly < 0 ? 0 : ly);
       gfx->print(c.name);
     }
@@ -148,9 +151,9 @@ static void drawTimeline(const Settings& s, Arduino_GFX* gfx, uint8_t animIdx) {
 
   const int X0 = 6, X1 = TFT_WIDTH - 6, Y = 236;
   const uint8_t txt = rainTxt(s);
-  // At size 2 the labels are 16 px tall: sit them higher so they stay clear
-  // of the cursor triangle under the line.
-  const int labY = (txt == 2) ? Y - 22 : Y - 14;
+  // Taller labels sit higher so they stay clear of the cursor triangle
+  // under the line (8/16/24 px glyphs -> labels 14/22/32 px above Y).
+  const int labY = (txt == 3) ? Y - 32 : (txt == 2 ? Y - 22 : Y - 14);
 
   // line + 30-minute ticks
   gfx->drawFastHLine(X0, Y, X1 - X0, C_DGRAY);
@@ -175,10 +178,10 @@ static void drawTimeline(const Settings& s, Arduino_GFX* gfx, uint8_t animIdx) {
     gfx->print(labs[i].label);
   }
 
-  // cursor on the current frame (a touch wider at size 2)
+  // cursor on the current frame, sized with the labels
   int xc = X0 + (int)((int64_t)(rainFrameTime(animIdx) - t0) * (X1 - X0) / (int64_t)(tN - t0));
-  int cw = (txt == 2) ? 5 : 4;
-  int cy = (txt == 2) ? Y - 6 : Y - 5;
+  int cw = 3 + txt;
+  int cy = (txt == 3) ? Y - 7 : (txt == 2 ? Y - 6 : Y - 5);
   gfx->fillTriangle(xc, Y + 1, xc - cw, cy, xc + cw, cy, C_GRAY);
 }
 
@@ -188,6 +191,9 @@ static void drawRain(const Settings& s, uint8_t animIdx) {
   if (!gfx) return;
   uint8_t n = rainCount();
   const uint8_t txt = rainTxt(s);
+  // Headers cap at size 2: at size 3 (18x24) "50 km" / "12:30" would cross
+  // the scope ring — the corner caps only fit ~3 glyphs at that size.
+  const uint8_t ht = txt > 2 ? 2 : txt;
 
   for (int i = 0; i < RAIN_COLOR_COUNT; i++) {
     // Byte-wise copy: 16-bit loads from irom0 raise LoadStoreError on the
@@ -212,7 +218,7 @@ static void drawRain(const Settings& s, uint8_t animIdx) {
   char hdr[16];
   if (s.rain.unitsMi) snprintf(hdr, sizeof hdr, "%d mi", (int)lroundf(s.rain.rangeKm * 0.621371f));
   else                 snprintf(hdr, sizeof hdr, "%d km", s.rain.rangeKm);
-  gfx->setTextSize(txt);
+  gfx->setTextSize(ht);
   gfx->setTextColor(C_GRAY);
   gfx->setCursor(3, 3);
   gfx->print(hdr);
@@ -231,9 +237,9 @@ static void drawRain(const Settings& s, uint8_t animIdx) {
       else if (d < 3600) snprintf(ft, sizeof ft, "-%ldm", (long)(d / 60));
       else snprintf(ft, sizeof ft, "-%ldh", (long)(d / 3600));
     }
-    gfx->setTextSize(txt);
+    gfx->setTextSize(ht);
     gfx->setTextColor(C_GRAY);
-    gfx->setCursor(TFT_WIDTH - gfxTextW(ft, txt) - 3, 3);
+    gfx->setCursor(TFT_WIDTH - gfxTextW(ft, ht) - 3, 3);
     gfx->print(ft);
   } else {
     gfxDrawCentered("Waiting for radar data", CY, 2, C_GRAY);
