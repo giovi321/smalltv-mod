@@ -9,7 +9,10 @@
 set -eu
 cd "$(dirname "$0")/../.."
 renderLimit=${1:-1000}
-fontLimit=${2:-400}
+# Host frames now: render 912 B (GCC 12; main 1,632), fontRow 288 B (GCC 12) and
+# 320 B (GCC 15). A coverage row of 240 instead of 120 makes fontRow 400 B
+# (GCC 12), so its limit sits between: 360.
+fontLimit=${2:-360}
 THEME_JSON_INCLUDE=.pio/libdeps/smalltv_esp32_8mb/ArduinoJson/src
 out=/tmp/smalltv-render-stack
 mkdir -p "$out"
