@@ -183,9 +183,9 @@ uint16_t resolveColorBinding(const ColorBinding& binding, double value) {
 // theme declares; anything else must resolve to a declared "<source>.<field>".
 static const char* const tokens[] = {"HH", "hh", "MM", "SS", "DD", "MON", "MONTH", "WD", "WEEKDAY", "YYYY"};
 // Added by spec 2 (#31 item 6): the hour without a leading zero, the month as
-// a number, and AM/PM. A spec 1 theme that uses one is refused like any other
-// unknown {...} span.
-static const char* const tokensSpec2[] = {"H", "MO", "AMPM"};
+// a number, and AM/PM; then the ISO 8601 week number. A spec 1 theme that uses
+// one is refused like any other unknown {...} span.
+static const char* const tokensSpec2[] = {"H", "MO", "AMPM", "WW"};
 // The `device.*` names a firmware may provide, shared by binding sources and
 // text tokens (docs/features/themes.md).
 static const char deviceNames[5][12] PROGMEM = {"focusToday", "focusGoal", "streak", "humidity", "temperature"};
@@ -1358,6 +1358,24 @@ const std::string& layerText(const Theme& theme, const Layer& l, uint8_t languag
     }
   return l.value;
 }
+// How many ISO weeks `year` has: 53 when it ends on a Thursday, or when the
+// year before ends on a Wednesday (a leap year that starts on a Thursday).
+static int isoWeeks(int year) {
+  // Weekday of 31 December, 0 = Sunday.
+  auto lastDay = [](int y) { return (y + y / 4 - y / 100 + y / 400) % 7; };
+  return lastDay(year) == 4 || lastDay(year - 1) == 3 ? 53 : 52;
+}
+// The ISO 8601 week number (1-53) of `t`, or -1 when its day fields are out
+// of range. Weeks start on Monday and week 1 holds the year's first Thursday,
+// so early January can belong to the previous year's last week and late
+// December to the next year's week 1.
+static int isoWeek(const tm& t) {
+  if (t.tm_yday < 0 || t.tm_yday > 365 || t.tm_wday < 0 || t.tm_wday > 6) return -1;
+  const int year = t.tm_year + 1900, monday = (t.tm_wday + 6) % 7;
+  const int week = (t.tm_yday - monday + 10) / 7;
+  if (week < 1) return isoWeeks(year - 1);
+  return week > isoWeeks(year) ? 1 : week;
+}
 // Substitutes every {token} in a validated text template: clock/date tokens
 // first (only when `t` is non-null and the field is in range), then a
 // matching fetched value, and "--" if neither resolves -- the same fallback
@@ -1401,6 +1419,7 @@ std::string expandText(const std::string& value, const tm* t, const std::vector<
       else if (key == "DD") n = t->tm_mday;
       else if (key == "YYYY") n = t->tm_year + 1900;
       else if (key == "MO" && t->tm_mon >= 0 && t->tm_mon < 12) n = t->tm_mon + 1;
+      else if (key == "WW") n = isoWeek(*t);
       if (n >= 0) {
         snprintf(b, sizeof(b), key == "YYYY" ? "%04d" : "%02d", n);
         v = b;
