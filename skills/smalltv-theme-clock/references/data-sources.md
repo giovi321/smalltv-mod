@@ -23,6 +23,9 @@ Use only when the clock shows live values. The TV polls each URL itself.
 - Values become strings: strings as-is but cut to 31 characters; numbers and booleans as
   their JSON text (`18`, `7.9`, `true`); missing/null/objects → `--`. Only printable ASCII
   renders properly (no `°`).
+- A field may set `"decimals"` (0–3, spec 2 only, next release after firmware v3.6.0): text shows its
+  number rounded to that many places, half away from zero (`13.5` → `14`, `7` with 1 → `7.0`,
+  never `-0`). Bindings still get the exact value. Words and exponent forms (`1e-6`) show as fetched.
 - Text uses them as `{weather.temp}`; bindings use the same name as `source`. A missing or
   non-numeric value keeps the layer's static value; a failed fetch keeps the last value.
 - Installing the theme makes the TV poll these URLs, LAN addresses included. Tell the user.

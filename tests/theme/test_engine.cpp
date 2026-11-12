@@ -218,6 +218,90 @@ int main() {
   assert(!engine.update(5,nullptr).empty() && engine.states()[0].text=="12");
 
   const char* bindingJson = R"({"spec":1,"theme":{"id":"binding","name":"Binding","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"sensor","url":"http://example.test/value.json","interval":60,"fields":[{"id":"value","path":"value"}]}],"layers":[{"id":"bar","type":"shape","shape":"rectangle","x":20,"y":120,"width":10,"height":18,"cornerRadius":8,"fill":"#00ff00","bind":{"width":{"source":"sensor.value","input":[0,50],"output":[0,100]},"fill":{"source":"sensor.value","stops":[{"at":0,"value":"#00ff00"},{"at":50,"value":"#ffff00"}]}}}]})";
+
+  // A field's `decimals` (spec 2) rounds its number where it is shown as text,
+  // half away from zero. It works on the digits as fetched, so 1.15 shows as
+  // 1.2 (as a double, 1.15 is 1.1499... and would round to 1.1). Anything that
+  // is not a plain decimal number, an exponent form included, is shown as
+  // fetched.
+  auto withDecimals = [](std::string json, const std::string& field) {
+    json.replace(json.find("\"spec\":1"), 8, "\"spec\":2");
+    json.replace(json.find(field), field.size(), field.substr(0, field.size() - 1) + ",\"decimals\":0}");
+    return json;
+  };
+  assert(parseTheme(withDecimals(dataJson, "\"path\":\"main.temp\"}"), theme, error));
+  assert(theme.spec == 2 && theme.data[0].fields[0].decimals == 0);
+  auto shown = [&](const char* value, int places) {
+    theme.data[0].fields[0].decimals = static_cast<int8_t>(places);
+    return expandText("{weather.temp}", nullptr, {{"weather.temp", value}}, theme.data);
+  };
+  assert(shown("13.5", 0) == "14");
+  assert(shown("12.5", 0) == "13");    // printf("%.0f") would give 12
+  assert(shown("13.4", 0) == "13");
+  assert(shown("21", 0) == "21");
+  assert(shown("9.5", 0) == "10");
+  assert(shown("-2.5", 0) == "-3");
+  assert(shown("-0.4", 0) == "0");     // never "-0"
+  assert(shown("1.15", 1) == "1.2");
+  assert(shown("99.96", 1) == "100.0");
+  assert(shown("999.5", 0) == "1000"); // the carry runs through every 9
+  assert(shown("7", 1) == "7.0");
+  assert(shown("-0.04", 1) == "0.0");
+  assert(shown("3.14159", 3) == "3.142");
+  assert(shown("007.5", 0) == "8");
+  assert(shown(".5", 0) == "1");
+  assert(shown(".04", 1) == "0.0");
+  assert(shown("+4.6", 0) == "5");
+  assert(shown(" 4.6 ", 0) == "5");
+  // Edges of the digit work: padding, leading zeros, a carry into a new digit,
+  // the sign, and a value far longer than any real reading.
+  assert(shown(".5", 1) == "0.5");
+  assert(shown(".95", 1) == "1.0");
+  assert(shown("0", 2) == "0.00");
+  assert(shown("000.4", 0) == "0");
+  assert(shown("0.0005", 3) == "0.001");
+  assert(shown("0.0004", 3) == "0.000");
+  assert(shown("-0.0005", 3) == "-0.001");
+  assert(shown("-0.0004", 3) == "0.000");
+  assert(shown("-99.5", 0) == "-100");
+  assert(shown("1000.9996", 3) == "1001.000");
+  assert(shown("5.", 2) == "5.00");
+  assert(shown("0010.250", 1) == "10.3");
+  assert(shown(std::string(30, '9').c_str(), 2) == std::string(30, '9') + ".00");
+  assert(shown((std::string(30, '9') + ".5").c_str(), 0) == "1" + std::string(30, '0'));
+  assert(shown((std::string(30, '0') + "1.234").c_str(), 2) == "1.23");
+  assert(shown("13.5", -1) == "13.5"); // not set: as fetched
+  for (const char* asFetched : {"n/a", "--", "12abc", "1e-6", "1.5e3", "", "-", "."}) assert(shown(asFetched, 0) == asFetched);
+  assert(expandText("{weather.temp}|{weather.other}", nullptr, {{"weather.temp", "4.6"}, {"weather.other", "4.6"}}, theme.data) == "5|4.6");
+  // The other overloads without a data block show the value as fetched.
+  assert(expandText("{weather.temp}", nullptr, {{"weather.temp", "4.6"}}) == "4.6");
+  // Two sources can have a field of the same name; each keeps its own rule.
+  {
+    std::vector<ThemeDataSource> two(2);
+    two[0].id = "inside"; two[1].id = "outside";
+    two[0].fields.resize(1); two[1].fields.resize(1);
+    two[0].fields[0].id = two[1].fields[0].id = "temp";
+    two[1].fields[0].decimals = 0;
+    assert(expandText("{inside.temp}|{outside.temp}", nullptr, {{"inside.temp", "4.6"}, {"outside.temp", "4.6"}}, two) == "4.6|5");
+  }
+  // The engine rounds what it shows...
+  assert(parseTheme(withDecimals(dataJson, "\"path\":\"main.temp\"}"), theme, error));
+  Engine roundedText; roundedText.setTheme(theme, 0); roundedText.setValues({{"weather.temp", "13.5"}});
+  roundedText.update(0, &t);
+  assert(roundedText.states()[0].text == "14");
+  // ...but a binding still gets the exact value: 12.6 maps to width 25.2,
+  // where the rounded 13 would map to 26.
+  assert(parseTheme(withDecimals(bindingJson, "\"path\":\"value\"}"), theme, error));
+  Engine roundedBinding; roundedBinding.setTheme(theme, 0); roundedBinding.setValues({{"sensor.value", "12.6"}});
+  roundedBinding.update(0, &t);
+  assert(roundedBinding.states()[0].resolved.width == 25);
+  // Spec 1 does not round, even for a theme built by hand with `decimals` set
+  // (the validator refuses the key, so a parsed one never has it).
+  assert(parseTheme(dataJson, theme, error) && theme.spec == 1);
+  theme.data[0].fields[0].decimals = 0;
+  Engine oneEngine; oneEngine.setTheme(theme, 0); oneEngine.setValues({{"weather.temp", "13.5"}});
+  oneEngine.update(0, &t);
+  assert(oneEngine.states()[0].text == "13.5");
   assert(parseTheme(bindingJson,theme,error));
   const uint16_t staticGreen=0x07e0,warningColor=0xffe0;
   Engine boundEngine;

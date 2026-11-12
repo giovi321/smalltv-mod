@@ -21,6 +21,7 @@ tools/smalltv_theme.py build for the same source folder.
 """
 import argparse
 import datetime as dt
+import decimal
 import json
 import math
 import re
@@ -195,6 +196,10 @@ def spec2_reasons(theme):
     """Every feature of the manifest that only a "spec": 2 theme may use."""
     reasons = []
     own_device = any(isinstance(s, dict) and s.get('id') == 'device' for s in theme.get('data') or [])
+    for i, s in enumerate(theme.get('data') if isinstance(theme.get('data'), list) else []):
+        for j, f in enumerate(s.get('fields') if isinstance(s, dict) and isinstance(s.get('fields'), list) else []):
+            if isinstance(f, dict) and 'decimals' in f:
+                reasons.append(f'data[{i}].fields[{j}].decimals: decimals')
     for i, l in enumerate(theme.get('layers') or []):
         if not isinstance(l, dict):
             continue
@@ -372,10 +377,11 @@ def validate(theme, assets=None):
             ids = set()
             for j, f in enumerate(fl):
                 fp = f'{p}.fields[{j}]'
-                if not obj(f, fp, ['id', 'path']):
+                if not obj(f, fp, ['id', 'path', 'decimals']):
                     continue
                 string(f, 'id', fp, 24)
                 string(f, 'path', fp, 96)
+                number(f, 'decimals', fp, 0, 3, optional=True)
                 if not ID_RE.match(str(f.get('id', ''))):
                     fail(f'{fp}.id', 'use letters, digits, - or _')
                 if f.get('id') in ids:
@@ -1009,8 +1015,22 @@ def time_value(name, t):
             'weekday': (t.weekday() + 1) % 7, 'moon': moon_age(t)}[name]
 
 
-def expand(value, t, data, lang):
-    """Clock tokens, then data fields, then device values; anything unknown is '--'."""
+def round_decimal(text, places):
+    """A plain decimal number rounded to `places` decimals, half away from zero, on its
+    digits (1.15 -> 1.2), never '-0'. Anything else, an exponent form included, is
+    returned as fetched. Like the firmware's roundDecimal()."""
+    s = text.strip(' \t\n\r\f\v')
+    if places is None or not re.fullmatch(r'[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)', s):
+        return text
+    with decimal.localcontext() as context:
+        context.prec = 400
+        out = format(decimal.Decimal(s).quantize(decimal.Decimal(1).scaleb(-places), rounding=decimal.ROUND_HALF_UP), 'f')
+    return out[1:] if out.startswith('-') and not out.strip('-0.') else out
+
+
+def expand(value, t, data, lang, decimals=None):
+    """Clock tokens, then data fields, then device values; anything unknown is '--'.
+    `decimals` maps "<source>.<field>" to the places its text is rounded to."""
     def repl(m):
         key, v = m.group(1), None
         if t is not None:
@@ -1020,7 +1040,9 @@ def expand(value, t, data, lang):
                  'H': str(t.hour), 'AMPM': 'AM' if t.hour < 12 else 'PM',
                  'MON': MONTHS_SHORT[lang][t.month - 1], 'MONTH': MONTHS[lang][t.month - 1],
                  'WD': DAYS_SHORT[lang][wd], 'WEEKDAY': DAYS[lang][wd]}.get(key)
-        return v if v is not None else data.get(key, '--')
+        if v is not None:
+            return v
+        return round_decimal(data[key], (decimals or {}).get(key)) if key in data else '--'
     return re.sub(r'\{([^}]*)\}', repl, value)
 
 
@@ -1215,6 +1237,9 @@ class Renderer:
         self.lang = LANGS.index(lang) if theme['spec'] >= 2 and lang in LANGS else 0
         self.lang_code = LANGS[self.lang]
         self.data = data or {}
+        # Only a spec 2 theme may set `decimals` (the validator refuses it in spec 1).
+        self.decimals = {f'{s["id"]}.{f["id"]}': f['decimals'] for s in theme.get('data') or [] for f in s['fields']
+                         if theme['spec'] >= 2 and f.get('decimals') is not None}
         self.scroll_since = {}
 
     def layer_text(self, l):
@@ -1228,7 +1253,7 @@ class Renderer:
             r = resolve_layer(l, t, self.data)
             if l['type'] == 'shape' and l['shape'] == 'arc':
                 r['start16'] = l['start'] * 16
-            text = expand(self.layer_text(l), t, self.data, self.lang) if l['type'] == 'text' else ''
+            text = expand(self.layer_text(l), t, self.data, self.lang, self.decimals) if l['type'] == 'text' else ''
             bx, by, bw, bh = layer_bounds(l, r, text, self.assets)
             x1, y1, x2, y2 = max(0, bx), max(0, by), min(240, bx + bw), min(240, by + bh)
             if x1 >= x2 or y1 >= y2:

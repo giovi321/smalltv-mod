@@ -96,6 +96,26 @@ int main() {
   deserializeJson(d,dataBase);d["data"][0]["url"]="https://";serializeJson(d,json);assert(!parseTheme(json,theme,error));
   deserializeJson(d,dataBase);d["data"][0]["fields"][0]["path"]="main..temp";serializeJson(d,json);assert(!parseTheme(json,theme,error));
   deserializeJson(d,dataBase);d["data"]=42;serializeJson(d,json);assert(!parseTheme(json,theme,error));
+  // `decimals` is optional and spec 2 only: 0 to 3 places, and -1 (not set) when absent.
+  dataDocument(d);d["spec"]=2;serializeJson(d,json);assert(parseTheme(json,theme,error));assert(theme.data[0].fields[0].decimals==-1);
+  for(int places:{0,1,2,3}){
+    dataDocument(d);d["spec"]=2;d["data"][0]["fields"][0]["decimals"]=places;serializeJson(d,json);
+    assert(parseTheme(json,theme,error));assert(theme.data[0].fields[0].decimals==places);
+  }
+  for(const char* bad:{"4","-1","1.5","\"1\"","true","[0]","{}"}){
+    dataDocument(d);d["spec"]=2;JsonDocument value;deserializeJson(value,bad);d["data"][0]["fields"][0]["decimals"]=value.as<JsonVariantConst>();
+    serializeJson(d,json);
+    assert(!parseTheme(json,theme,error));assert(error.find("data[0].fields[0].decimals:")==0);
+  }
+  // A spec 1 theme is refused, whatever the value, and the message says why.
+  for(int places:{0,3}){
+    dataDocument(d);d["data"][0]["fields"][0]["decimals"]=places;serializeJson(d,json);
+    assert(!parseTheme(json,theme,error));assert(error.find("data[0].fields[0].decimals:")==0);
+    assert(error.find("\"spec\": 2")!=std::string::npos);
+  }
+  // The other keys of a field stay closed.
+  dataDocument(d);d["spec"]=2;d["data"][0]["fields"][0]["round"]=1;serializeJson(d,json);
+  assert(!parseTheme(json,theme,error));assert(error.find("data[0].fields[0].round:")==0);
   json.clear();deserializeJson(d,base);d["display"]["width"]=320;serializeJson(d,json);
   assert(!parseTheme(json,theme,error));assert(error.find("display.width:")==0);
 
