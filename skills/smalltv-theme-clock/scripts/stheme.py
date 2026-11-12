@@ -326,7 +326,11 @@ def validate(theme, assets=None):
         spec = 2
     if spec == 1:
         for r in spec2_reasons(theme):
-            fail(r.split(':')[0], r.split(': ', 1)[1] + ' needs "spec": 2 (or "spec": "auto")')
+            where, what = r.split(': ', 1)
+            if what == 'show rules':   # the firmware's own text: layers[N].show: needs "spec": 2
+                fail(f'{where}.show', 'needs "spec": 2')
+            else:
+                fail(where, what + ' needs "spec": 2 (or "spec": "auto")')
     if obj(theme.get('theme'), 'theme', ['id', 'name', 'author', 'version']):
         for k, mx in (('id', 48), ('name', 96), ('author', 96), ('version', 32)):
             string(theme['theme'], k, 'theme', mx)
