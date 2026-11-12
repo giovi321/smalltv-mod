@@ -21,7 +21,7 @@ The RainViewer public API serves **past radar data only**: the timeline runs fro
 
 ## What to show
 
-- **Text & city size** scales every overlay text (the `N`, the range and frame-time headers, the timeline labels, the city names) and the city squares: **Small** keeps the regular glyphs and shrinks the markers, **Medium** is the default and doubles the text (16 px glyphs), **Large** keeps the large text and grows the squares further. The built-in font only scales in whole steps, so the text size has two levels and the squares make up the third. The RainViewer credit stays small so it never collides with the timeline.
+- **Text & city size** scales the overlay texts and the city squares: **Small** keeps the regular 8 px glyphs and shrinks the markers (3×3 / 2×2), **Medium** (default) doubles the texts (16 px) with 5×5 / 3×3 squares, **Large** jumps the `N` and the timeline labels to 24 px and doubles the squares (10×10 / 6×6). The headers and city names stay at 16 px on Large: the built-in font only scales in whole steps, and a 24 px header would cross the scope ring while the longest names would span nearly the whole panel. The RainViewer credit stays small so it never collides with the timeline.
 - **Nearby cities** toggles the reference dots: cities of France and Europe embedded in the firmware (from GeoNames `cities5000`, CC-BY 4.0), filtered by the range, the most populous ones labelled.
 
 ## How it works
