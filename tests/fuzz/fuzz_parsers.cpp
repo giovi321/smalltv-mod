@@ -751,7 +751,7 @@ int main(int argc, char** argv) {
         corpus[FontTarget].push_back(data);
     for (int i = 0; i < 6; ++i) corpus[FontTarget].push_back(fontPackage(seeds));
   }
-  // Manifests that reach parser branches the bundled themes do not (`show`).
+  // Manifests that reach parser branches the bundled themes do not (`show`, `decimals`, `bind.frame`).
   // Only `.json`, as above: a stray folder in there must not be read as a seed.
   for (const auto& p : listDir(root + "/tests/fuzz/corpus/manifest"))
     if (p.size() > 5 && p.compare(p.size() - 5, 5, ".json") == 0 && readFile(p, data)) corpus[ManifestTarget].push_back(data);

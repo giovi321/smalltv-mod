@@ -232,5 +232,51 @@ class PackTests(unittest.TestCase):
         built = pack.build(root)
         self.assertEqual(built, (ROOT/'examples/themes/live-status.stheme').read_bytes())
 
+    # An animation whose frame is picked by a value (bind.frame, spec 2): the
+    # packer takes it, packs every frame, and refuses what the firmware refuses.
+    def test_frame_bound_animation_packs_and_bad_ones_are_refused(self):
+        def theme(root, spec, bind):
+            manifest = {'spec': spec, 'theme': {'id': 'moon', 'name': 'Moon', 'author': 'Me', 'version': '1'},
+                        'display': {'width': 240, 'height': 240, 'background': '#000000'},
+                        'data': [{'id': 'w', 'url': 'http://example.test/a.json', 'interval': 600,
+                                  'fields': [{'id': 'moon', 'path': 'moon'}]}],
+                        'layers': [{'id': 'm', 'type': 'animation', 'x': 0, 'y': 0, 'width': 2, 'height': 2,
+                                    'source': 'phase', 'frames': 3, 'fps': 1, 'loop': True, 'bind': {'frame': bind}}]}
+            (root/'theme.json').write_text(json.dumps(manifest))
+        linear = {'source': 'w.moon', 'input': [0, 1], 'output': [0, 2]}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/'phase').mkdir()
+            for i in range(3):
+                Image.new('RGB', (2, 2), (i * 100, 0, 0)).save(root/'phase'/f'{i:03d}.png')
+            theme(root, 2, linear)
+            data = pack.build(root)
+            self.assertEqual(data, pack.build(root))
+            for i in range(3):
+                self.assertIn(f'phase/{i:03d}.png.sti'.encode(), data)
+            self.assertIn(b'"frame":{"source":"w.moon"', data)
+            theme(root, 2, {'source': 'w.moon', 'stops': [{'at': 0, 'frame': 0}, {'at': 0.5, 'frame': 2}]})
+            pack.build(root)
+            # A group of 3 frames: one group, so the output can only be 0 to 0.
+            theme(root, 2, {**linear, 'output': [0, 0], 'group': 3})
+            self.assertIn(b'"group":3', pack.build(root))
+            theme(root, 2, {'source': 'w.moon', 'stops': [{'at': 0, 'frame': 0}], 'group': 1})
+            pack.build(root)
+            for bad in ({**linear, 'output': [0, 0], 'group': 2},   # 3 frames are not a multiple of 2 (the output alone would fit)
+                        {**linear, 'group': 2},                     # not a multiple, and output 2 is past the last group
+                        {**linear, 'group': 3},                     # output 2 is past the last group
+                        {**linear, 'output': [0, 0], 'group': 0},
+                        {'source': 'w.moon', 'stops': [{'at': 0, 'frame': 1}], 'group': 3},
+                        {**linear, 'output': [0, 3]},
+                        {'source': 'w.moon', 'stops': [{'at': 0, 'frame': 3}]},
+                        {'source': 'w.moon', 'stops': [{'at': 1, 'frame': 0}, {'at': 1, 'frame': 1}]},
+                        {**linear, 'stops': [{'at': 0, 'frame': 0}]}):
+                theme(root, 2, bad)
+                with self.assertRaises(ValueError):
+                    pack.build(root)
+            theme(root, 1, linear)
+            with self.assertRaises(ValueError):
+                pack.build(root)
+
 if __name__ == '__main__':
     unittest.main()
