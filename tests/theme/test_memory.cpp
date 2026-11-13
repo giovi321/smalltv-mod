@@ -17,11 +17,12 @@
 #include <new>
 using namespace smalltv;
 
-static size_t live = 0, peak = 0, largest = 0;
+static size_t live = 0, peak = 0, largest = 0, calls = 0;   // calls: allocations made while counting
 static bool counting = false;
 static size_t charge(void* p) { return p ? (malloc_usable_size(p) + 4 + 7) / 8 * 8 : 0; }
 static void* track(void* p, size_t requested) {
   if (counting && p) {
+    ++calls;
     live += charge(p);
     if (live > peak) peak = live;
     if (requested > largest) largest = requested;
@@ -477,9 +478,122 @@ static void testShortTranslations() {
   std::string error;
   assert(!parseTheme(shortManifest(32, 5, "abcdef"), theme, error) && error.find("1024") != std::string::npos);
 }
+// A frame-bound animation (bind.frame) picks its frame without allocating:
+// a frame change takes no more allocations than a looping animation's frame
+// step, a change that picks the same frame takes none, and parsing the longest
+// stop table needs no block over the budget.
+struct FrameAssets : Assets {
+  AssetHandle resolve(const std::string&) override { return 0; }
+  bool row(AssetHandle, int, int, int count, uint16_t* c, uint8_t* a) override {
+    for (int i = 0; i < count; ++i) { c[i] = 0x07e0; a[i] = 255; }
+    return true;
+  }
+};
+static void testFrameBinding() {
+  std::string stops = "[";
+  for (int i = 0; i < 16; ++i) stops += std::string(i ? "," : "") + "{\"at\":" + std::to_string(i) + ",\"frame\":" + std::to_string(i % 8) + "}";
+  stops += "]";
+  const std::string head = "{\"spec\":2,\"theme\":{\"id\":\"t\",\"name\":\"T\",\"author\":\"A\",\"version\":\"1\"},"
+    "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},"
+    "\"data\":[{\"id\":\"w\",\"url\":\"http://example.test/a.json\",\"interval\":60,\"fields\":[{\"id\":\"moon\",\"path\":\"m\"}]}],\"layers\":[";
+  const std::string common = "\"type\":\"animation\",\"x\":10,\"y\":20,\"width\":30,\"height\":40,\"source\":\"img/a\",\"frames\":8,\"fps\":5,\"loop\":true";
+  const std::string bound = head + "{\"id\":\"a\"," + common + ",\"bind\":{\"frame\":{\"source\":\"w.moon\",\"stops\":" + stops + "}}}]}";
+  const std::string plain = head + "{\"id\":\"a\"," + common + "}]}";
+  Theme theme, baseline;
+  std::string error;
+  live = peak = largest = 0;
+  counting = true;
+  bool ok = parseTheme(bound, theme, error);
+  counting = false;
+  if (!ok) std::cerr << error << "\n";
+  assert(ok);
+  if (largest > LargestBlockBudget) fprintf(stderr, "frame binding parse: largest block %zu B\n", largest);
+  assert(largest <= LargestBlockBudget);
+  assert(parseTheme(plain, baseline, error));
+  Engine engine, loop;
+  engine.setTheme(std::move(theme), 0);
+  loop.setTheme(std::move(baseline), 0);
+  FrameAssets assets;
+  NoDisplay display;
+  assert(render(engine, engine.update(0, nullptr), assets, display));
+  assert(render(loop, loop.update(0, nullptr), assets, display));
+  std::vector<ThemeValue> one{{"w.moon", "3"}}, other{{"w.moon", "5"}};   // made before counting
+  engine.setValues(std::move(one));
+  assert(render(engine, engine.update(1, nullptr), assets, display));
+  calls = 0;
+  counting = true;
+  engine.setValues(std::move(other));
+  std::vector<Rect> dirty = engine.update(2, nullptr);
+  assert(dirty.size() == 1 && render(engine, dirty, assets, display));
+  counting = false;
+  const size_t changed = calls;
+  calls = 0;
+  counting = true;
+  std::vector<Rect> stepped = loop.update(250, nullptr);
+  assert(stepped.size() == 1 && render(loop, stepped, assets, display));
+  counting = false;
+  const size_t looped = calls;
+  if (changed > looped) fprintf(stderr, "frame change: %zu allocations, a looping step takes %zu\n", changed, looped);
+  assert(changed <= looped);
+  // The same frame again: nothing allocated (the values are set up before counting).
+  engine.setValues(std::vector<ThemeValue>{{"w.moon", "5"}});
+  engine.update(3, nullptr);
+  std::vector<ThemeValue> again{{"w.moon", "5.25"}};
+  calls = 0;
+  counting = true;
+  engine.setValues(std::move(again));
+  bool empty = engine.update(4, nullptr).empty();
+  counting = false;
+  assert(empty && calls == 0);
+}
+
+// A grouped frame binding: a playing step and a group change each take no more
+// allocations than a looping animation's step.
+static void testGroupBinding() {
+  const std::string head = "{\"spec\":2,\"theme\":{\"id\":\"t\",\"name\":\"T\",\"author\":\"A\",\"version\":\"1\"},"
+    "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},"
+    "\"data\":[{\"id\":\"w\",\"url\":\"http://example.test/a.json\",\"interval\":60,\"fields\":[{\"id\":\"day\",\"path\":\"d\"}]}],\"layers\":[";
+  const std::string common = "\"type\":\"animation\",\"x\":10,\"y\":20,\"width\":30,\"height\":40,\"source\":\"img/a\",\"frames\":6,\"fps\":5,\"loop\":true";
+  Theme theme, baseline;
+  std::string error;
+  assert(parseTheme(head + "{\"id\":\"a\"," + common + ",\"bind\":{\"frame\":{\"source\":\"w.day\",\"input\":[0,1],\"output\":[0,1],\"group\":3}}}]}", theme, error));
+  assert(parseTheme(head + "{\"id\":\"a\"," + common + "}]}", baseline, error));
+  Engine engine, loop;
+  engine.setTheme(std::move(theme), 0);
+  loop.setTheme(std::move(baseline), 0);
+  FrameAssets assets;
+  NoDisplay display;
+  assert(render(engine, engine.update(0, nullptr), assets, display));
+  assert(render(loop, loop.update(0, nullptr), assets, display));
+  std::vector<ThemeValue> day{{"w.day", "1"}};
+  calls = 0;
+  counting = true;
+  std::vector<Rect> stepped = loop.update(250, nullptr);
+  assert(stepped.size() == 1 && render(loop, stepped, assets, display));
+  counting = false;
+  const size_t looped = calls;
+  calls = 0;
+  counting = true;
+  stepped = engine.update(250, nullptr);                   // the group plays on
+  assert(stepped.size() == 1 && render(engine, stepped, assets, display));
+  counting = false;
+  if (calls > looped) fprintf(stderr, "group step: %zu allocations, a looping step takes %zu\n", calls, looped);
+  assert(calls <= looped);
+  calls = 0;
+  counting = true;
+  engine.setValues(std::move(day));
+  stepped = engine.update(300, nullptr);                   // the group changes
+  assert(stepped.size() == 1 && render(engine, stepped, assets, display));
+  counting = false;
+  if (calls > looped) fprintf(stderr, "group change: %zu allocations, a looping step takes %zu\n", calls, looped);
+  assert(calls <= looped);
+  assert(engine.states()[0].frame == 3);
+}
 
 int main(int argc, char** argv) {
   testBlockList();
+  testFrameBinding();
+  testGroupBinding();
   testManyEntries();
   testThemeIndex();
   testListReply();

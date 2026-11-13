@@ -36,7 +36,11 @@ These force spec 2 (firmware 3.4.0+, not editable in SmallTV Studio yet):
 - `arc`, `hand` and `ticks` shapes;
 - `time.*` and `device.*` binding sources;
 - the `{H}`, `{MO}`, `{AMPM}` and `{device.*}` text tokens;
-- per-language text values (`{"en": …, "de": …}`).
+- per-language text values (`{"en": …, "de": …}`);
+- a `frame` binding on an animation, with or without `group` (firmware after 3.6.0): the
+  value picks the frame, or with `group` a group of frames that plays. See
+  [Frame by value](https://giovi321.github.io/smalltv-mod/features/themes/#frame-by-value).
+  `stheme.py preview` shows the picked frame, and a group playing, like the device.
 
 Everything else builds as spec 1. Spec 1 always shows English month and day names; set
 `"spec": 2` explicitly when the user wants them in the device language.

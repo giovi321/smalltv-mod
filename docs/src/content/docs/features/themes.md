@@ -656,12 +656,123 @@ Every finite fetched number therefore has a color, with no separate default
 branch. A missing or non-finite fetched value leaves the static manifest color
 in effect.
 
+### Frame by value
+
+Frame by value needs the next firmware release after v3.6.0. An animation layer
+can pick its frame from a value instead of playing in a
+loop. Bind its `frame`. This needs `"spec": 2`; a spec 1 theme is refused with
+`layers[0].bind.frame: needs "spec": 2`, which is also what keeps the theme off
+firmware that does not know the option. The `source` is a declared data field
+or a [built-in source](#built-in-sources), like any other binding.
+
+There are two forms. The first is the numeric mapping from above. Its `output`
+is a pair of frame numbers, so it must lie between 0 and `frames` - 1:
+
+```json
+{"bind": {"frame": {"source": "w.moon", "input": [0, 29], "output": [0, 7]}}}
+```
+
+The value is mapped and rounded exactly as in [Numeric mapping](#numeric-mapping),
+`clamp` included, and the frame number is always limited to 0 through `frames` - 1.
+The output ends can be reversed (`[7, 0]`).
+
+The second form is `stops`, for frames that do not follow the value in a straight
+line:
+
+```json
+{"bind": {"frame": {"source": "w.moon",
+  "stops": [{"at": 0, "frame": 0}, {"at": 4, "frame": 1}, {"at": 11, "frame": 2}, {"at": 18, "frame": 1}, {"at": 24, "frame": 0}]}}}
+```
+
+| Field | Type | Required | Rule |
+| --- | --- | --- | --- |
+| `source` | string | yes | A declared data field or, in spec 2, a built-in source |
+| `stops` | array | yes | 1–16 entries (a moon with eight pictures that starts and ends on a new moon needs nine) |
+| `stops[].at` | finite number | yes | Strictly increasing |
+| `stops[].frame` | integer | yes | 0 through `frames` - 1 |
+
+The frame is the `frame` of the last stop whose `at` is less than or equal to the
+value. A value below the first stop uses the first stop's frame. Use either
+`stops` or `input` and `output`, not both.
+
+While a frame is bound (without `group`, see [Frame groups that
+play](#frame-groups-that-play)), the layer does not play: `fps` and `loop` are
+still required in the manifest but are ignored. The layer shows frame 0 as long as
+there is no usable value (a field not fetched yet, a value that is not a number,
+or a `time.*` source before the clock is set). Put the picture you want for
+"unknown" in frame 0. The layer repaints, in its own rectangle only, when the
+chosen frame changes; a new value that picks the same frame repaints nothing. Other
+animation layers keep playing as usual.
+
+Example, the moon phase. Say a data source gives the phase as a number from 0
+(new moon) through 0.5 (full moon) to just below 1, like the `moon_phase` value
+of the Open-Meteo forecast. Eight pictures `moon/000.png` to `moon/007.png` show
+the phases from new moon, each centred on its phase, so the last range wraps back
+to the new moon:
+
+```json
+{"data": [{"id": "sky", "url": "http://example.test/moon.json",
+           "interval": 3600, "fields": [{"id": "moon", "path": "phase"}]}],
+ "layers": [{"id": "moon", "type": "animation", "x": 180, "y": 20, "width": 40, "height": 40,
+             "source": "moon", "frames": 8, "fps": 1, "loop": true,
+             "bind": {"frame": {"source": "sky.moon", "stops": [
+               {"at": 0, "frame": 0}, {"at": 0.0625, "frame": 1}, {"at": 0.1875, "frame": 2}, {"at": 0.3125, "frame": 3},
+               {"at": 0.4375, "frame": 4}, {"at": 0.5625, "frame": 5}, {"at": 0.6875, "frame": 6}, {"at": 0.8125, "frame": 7},
+               {"at": 0.9375, "frame": 0}]}}}]}
+```
+
+A day and night picture works the same way with two frames and a 0 or 1 value:
+`{"source": "w.day", "input": [0, 1], "output": [0, 1]}` shows frame 0 at night
+and frame 1 by day.
+
+#### Frame groups that play
+
+Often you want the picture to change with a value and still move. A cat that
+breathes has several frames, and it has one set of frames for the day and
+another for the night. Add `group` to the binding. It is the number of frames
+in one group. The value then picks a **group**, and the group plays on its own,
+at the layer's `fps` and `loop`, as an ordinary animation does:
+
+```json
+{"id": "cat", "type": "animation", "x": 20, "y": 150, "width": 60, "height": 60,
+ "source": "cat", "frames": 6, "fps": 3, "loop": true,
+ "bind": {"frame": {"source": "w.day", "input": [0, 1], "output": [0, 1], "group": 3}}}
+```
+
+Here `cat/000.png` to `cat/002.png` are the night cat and `cat/003.png` to
+`cat/005.png` the day cat. With `w.day` at 0 the layer plays frames 0, 1, 2 and
+round again. With `w.day` at 1 it plays 3, 4, 5 and round again.
+
+| Field | Type | Required | Rule |
+| --- | --- | --- | --- |
+| `group` | integer | no | 1 through `frames`; `frames` must be a multiple of it |
+
+- The groups are numbered from 0, in order: group `g` is the frames
+  `g * group` through `g * group + group - 1`.
+- `output` (or each stop's `frame`) is now a **group number**, 0 through
+  `frames / group` - 1 (in the example, 0 to 1). The mistakes come back as messages
+  naming the field, for example `layers[0].bind.frame.group: frames must be a
+  multiple of group`.
+- When the picked group changes, the new group starts from its **first frame**,
+  with a fresh frame clock. It does not carry on from where the old one was. A
+  switch like day to night is a change of scene, and the two groups need not
+  have the same pictures at the same places. A new value that picks the same
+  group changes nothing: the animation plays on.
+- With no usable value the layer plays group 0.
+- `loop: false` plays the group once and stops on its last frame. A change of
+  group plays the next one from the start.
+- The layer repaints, in its own rectangle, on its frame clock like any
+  animation, and when the group changes.
+- `group` needs `"spec": 2` like the rest of the binding. Without `group` the
+  binding works exactly as described above, and the layer does not play.
+
 ### Property matrix
 
 Each property may be bound once; a layer may bind at most eight properties. A
 color property may be bound only when that property already exists statically
 on the layer — binding `stroke` does not implicitly enable a missing stroke,
-and `scroll.width`/`scroll.speed` require a static `scroll` object. Image and
+and `scroll.width`/`scroll.speed` require a static `scroll` object. `frame` is
+only for animations and needs `"spec": 2`. Image and
 animation dimensions are not bindable, because runtime asset scaling is
 unsupported and their declared size must match packaged assets.
 
@@ -675,7 +786,7 @@ unsupported and their declared size must match packaged assets.
 | hand (spec 2) | `x`, `y`, `angle`, `strokeWidth` | `stroke` |
 | ticks (spec 2) | `x`, `y`, `radius`, `strokeWidth` | `stroke` |
 | image | `x`, `y` | none |
-| animation | `x`, `y` | none |
+| animation | `x`, `y`, `frame` ([spec 2](#frame-by-value)) | none |
 
 An inapplicable property, a duplicate binding target, an unknown binding key,
 or a source that is not a declared data field rejects the package, for example

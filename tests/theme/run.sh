@@ -8,6 +8,8 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCL
 /tmp/smalltv-theme-builtin-tests
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_text_tokens.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-text-tokens-tests
 /tmp/smalltv-theme-text-tokens-tests
+c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_frame.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-frame-tests
+/tmp/smalltv-theme-frame-tests
 c++ -std=c++11 -Wall -Wextra -Werror -g -pthread -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_data.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-data-tests
 /tmp/smalltv-theme-data-tests
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_package.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-package-tests

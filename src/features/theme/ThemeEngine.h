@@ -56,7 +56,8 @@ struct Scroll {
 // type is enforced by `applicable()` in the .cpp, not by this enum.
 enum class BoundProperty : uint8_t {
   X, Y, Width, Height, Radius, CornerRadius, X2, Y2, Size, StrokeWidth,
-  ScrollWidth, ScrollSpeed, Color, Fill, Stroke, Angle, Sweep
+  ScrollWidth, ScrollSpeed, Color, Fill, Stroke, Angle, Sweep,
+  Frame   // an animation's frame number (spec 2); not a Resolved property, see Engine::resolveLayer()
 };
 
 // Linear map from a fetched number to an integer property. See
@@ -90,11 +91,13 @@ BuiltIn builtInSource(const std::string& source);
 double timeValue(BuiltIn which, const tm& time);
 // One `bind` entry: a single property driven by a single declared data field,
 // through either a numeric mapping or a color-stop table (never both).
+// For BoundProperty::Frame, `stepped` says the frame comes from `colors.stops`
+// (each stop's `value` is a frame number) instead of from `numeric`.
 struct Binding {
   BoundProperty property = BoundProperty::X;
   BuiltIn builtin = BuiltIn::None;
   std::string source;
-  bool color = false;
+  bool color = false, stepped = false;
   NumericBinding numeric;
   ColorBinding colors;
 };
@@ -134,6 +137,8 @@ struct Layer {
   uint16_t firstTranslation = 0;
   uint8_t translationCount = 0;
   uint8_t font = 0;   // 1 + index into Theme::fonts; 0 is the built-in font
+  bool frameBound = false;  // an animation whose frame is picked by a value (bind.frame)
+  uint8_t group = 0;        // bind.frame "group": frames per group, 0 = not grouped (the layer does not play)
   uint16_t frames = 1, fps = 1;
   Scroll scroll;
   std::vector<Binding> bindings;

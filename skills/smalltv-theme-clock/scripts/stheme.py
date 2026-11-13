@@ -210,7 +210,9 @@ def spec2_reasons(theme):
                         reasons.append(f'{p}.value: {{{tok}}}')
         for k, b in (l.get('bind') or {}).items() if isinstance(l.get('bind'), dict) else []:
             src = b.get('source') if isinstance(b, dict) else None
-            if isinstance(src, str) and (src.startswith('time.') or src.startswith('device.')):
+            if k == 'frame':
+                reasons.append(f'{p}.bind.frame: frame by value')
+            elif isinstance(src, str) and (src.startswith('time.') or src.startswith('device.')):
                 reasons.append(f'{p}.bind.{k}: {src}')
     return reasons
 
@@ -228,6 +230,7 @@ NUMERIC_RANGE = {
     'size': (8, 96), 'strokeWidth': (1, 32), 'scroll.width': (1, 240), 'scroll.speed': (1, 240),
     'sweep': (-360, 360), 'angle': (-360, 360)}
 COLOR_TARGETS = ('color', 'fill', 'stroke')
+MAX_FRAME_STOPS = 16   # colour stops allow 8; a moon of 8 pictures that wraps needs 9
 
 
 def applicable(l, target):
@@ -240,6 +243,8 @@ def applicable(l, target):
         return t == 'shape' and l.get('stroke') is not None
     if target in ('x', 'y'):
         return True
+    if target == 'frame':
+        return t == 'animation'
     if target in ('scroll.width', 'scroll.speed'):
         return t == 'text' and l.get('scroll') is not None
     if t == 'text':
@@ -527,13 +532,21 @@ def validate_bindings(o, p, fields, spec, fail, obj, color):
     for target, b in o['bind'].items():
         tp = f'{bp}.{target}'
         is_color = target in COLOR_TARGETS
-        if not is_color and target not in NUMERIC_RANGE:
+        is_frame = target == 'frame'
+        if not is_color and not is_frame and target not in NUMERIC_RANGE:
             fail(tp, 'unknown binding target')
             continue
         if not applicable(o, target):
             fail(tp, 'binding is not applicable to this layer')
             continue
-        if not obj(b, tp, ['source', 'stops'] if is_color else ['source', 'input', 'output', 'clamp']):
+        stepped = is_frame and isinstance(b, dict) and 'stops' in b
+        if is_frame and spec < 2:
+            fail(tp, 'needs "spec": 2')
+            continue
+        keys = ['source', 'stops'] if is_color else ['source', 'input', 'output', 'clamp']
+        if is_frame:
+            keys = ['source', 'stops', 'group'] if stepped else keys + ['group']
+        if not obj(b, tp, keys):
             continue
         src = b.get('source')
         builtin = isinstance(src, str) and (src.startswith('time.') or src.startswith('device.'))
@@ -544,6 +557,9 @@ def validate_bindings(o, p, fields, spec, fail, obj, color):
                 fail(f'{tp}.source', 'unknown time.* or device.* name')
         elif not isinstance(src, str) or src not in fields:
             fail(f'{tp}.source', 'expected a declared data field')
+        if is_frame:
+            validate_frame(o, b, tp, stepped, fail, obj)
+            continue
         if is_color:
             stops = b.get('stops')
             if not isinstance(stops, list) or not 1 <= len(stops) <= MAX_STOPS:
@@ -560,15 +576,53 @@ def validate_bindings(o, p, fields, spec, fail, obj, color):
                 color(stop, 'value', sp)
             continue
         lo, hi = NUMERIC_RANGE[target]
-        inp, out = b.get('input'), b.get('output')
-        if not isinstance(inp, list) or len(inp) != 2 or not all(is_num(n) for n in inp):
-            fail(f'{tp}.input', 'expected exactly two finite numbers')
-        elif inp[0] == inp[1]:
-            fail(f'{tp}.input', 'endpoints must differ')
-        if not isinstance(out, list) or len(out) != 2 or not all(is_int(n) and lo <= n <= hi for n in out):
-            fail(f'{tp}.output', f'expected exactly two integers from {lo} to {hi}')
-        if b.get('clamp') is not None and not isinstance(b['clamp'], bool):
-            fail(f'{tp}.clamp', 'expected true or false')
+        validate_mapping(b, tp, lo, hi, fail)
+
+
+def validate_mapping(b, tp, lo, hi, fail):
+    """The numeric mapping of a binding: input, output (integers lo..hi) and clamp."""
+    inp, out = b.get('input'), b.get('output')
+    if not isinstance(inp, list) or len(inp) != 2 or not all(is_num(n) for n in inp):
+        fail(f'{tp}.input', 'expected exactly two finite numbers')
+    elif inp[0] == inp[1]:
+        fail(f'{tp}.input', 'endpoints must differ')
+    if not isinstance(out, list) or len(out) != 2 or not all(is_int(n) and lo <= n <= hi for n in out):
+        fail(f'{tp}.output', f'expected exactly two integers from {lo} to {hi}')
+    if b.get('clamp') is not None and not isinstance(b['clamp'], bool):
+        fail(f'{tp}.clamp', 'expected true or false')
+
+
+def validate_frame(o, b, tp, stepped, fail, obj):
+    """`bind.frame` of an animation: a mapping or stops that give frame numbers, or,
+    with `group`, group numbers (frames // group of them)."""
+    frames = o['frames'] if is_int(o.get('frames')) and 1 <= o['frames'] <= 240 else 1
+    last = frames - 1
+    if 'group' in b:
+        group = b['group']
+        if not is_int(group) or not 1 <= group <= frames:
+            fail(f'{tp}.group', f'expected an integer from 1 to {frames}')
+            return
+        if frames % group:
+            fail(f'{tp}.group', 'frames must be a multiple of group')
+            return
+        last = frames // group - 1
+    if not stepped:
+        validate_mapping(b, tp, 0, last, fail)
+        return
+    stops = b.get('stops')
+    if not isinstance(stops, list) or not 1 <= len(stops) <= MAX_FRAME_STOPS:
+        fail(f'{tp}.stops', f'expected 1 to {MAX_FRAME_STOPS} stops')
+        return
+    for i, stop in enumerate(stops):
+        sp = f'{tp}.stops[{i}]'
+        if not obj(stop, sp, ['at', 'frame']):
+            continue
+        if not is_num(stop.get('at')):
+            fail(f'{sp}.at', 'expected a finite number')
+        elif i and isinstance(stops[i - 1], dict) and is_num(stops[i - 1].get('at')) and stop['at'] <= stops[i - 1]['at']:
+            fail(f'{sp}.at', 'stops must be strictly increasing')
+        if not is_int(stop.get('frame')) or not 0 <= stop['frame'] <= last:
+            fail(f'{sp}.frame', f'expected an integer from 0 to {last}')
 
 
 # --------------------------------------------------------------------------
@@ -1046,6 +1100,19 @@ def resolve_color(b, value):
     return result
 
 
+def resolve_frame(b, value, frames):
+    """The frame (or, with `group`, the group) a `bind.frame` picks for a value."""
+    last = frames // b['group'] - 1 if 'group' in b else frames - 1   # a group number ends on the last group
+    if 'stops' in b:
+        result = b['stops'][0]['frame']
+        for stop in b['stops']:
+            if stop['at'] > value:
+                break
+            result = stop['frame']
+        return result
+    return resolve_numeric(b, value, 0, last)
+
+
 def source_value(src, t, data):
     if src.startswith('time.') and src[5:] in TIME_NAMES and src not in data:
         return None if t is None else float(time_value(src[5:], t))
@@ -1058,12 +1125,15 @@ def resolve_layer(l, t, data):
          'cornerRadius': l.get('cornerRadius', 0), 'size': l.get('size', 16), 'strokeWidth': l.get('strokeWidth', 1),
          'scroll.width': (l.get('scroll') or {}).get('width', 0), 'scroll.speed': (l.get('scroll') or {}).get('speed', 0),
          'sweep': l.get('sweep', 0), 'angle': l.get('angle', 0),
-         'color': l.get('color'), 'fill': l.get('fill'), 'stroke': l.get('stroke')}
+         'color': l.get('color'), 'fill': l.get('fill'), 'stroke': l.get('stroke'),
+         'frame': 0}   # the frame (a group number with `group`) of a frame-bound animation
     for target, b in (l.get('bind') or {}).items():
         v = source_value(b['source'], t, data)
         if v is None:
             continue
-        if target in COLOR_TARGETS:
+        if target == 'frame':
+            r['frame'] = resolve_frame(b, v, l['frames'])
+        elif target in COLOR_TARGETS:
             r[target] = resolve_color(b, v)
         else:
             lo, hi = NUMERIC_RANGE[target]
@@ -1216,6 +1286,26 @@ class Renderer:
         self.lang_code = LANGS[self.lang]
         self.data = data or {}
         self.scroll_since = {}
+        self.group_since = {}
+
+    def animation_frame(self, idx, l, r, elapsed):
+        """The frame an animation shows. A frame-bound one shows the frame its value
+        picks and does not play; with `group` the value picks a group, which plays
+        at the layer's fps and loop, restarting from its first frame (and a fresh
+        frame clock) when a different group is picked, as the device does."""
+        bind = (l.get('bind') or {}).get('frame')
+        if bind is not None and not bind.get('group'):
+            return r['frame']
+        count, first, since = l['frames'], 0, 0
+        if bind is not None:
+            count, first = bind['group'], r['frame'] * bind['group']
+            seen = self.group_since.get(idx)
+            if seen is None or seen[0] != r['frame']:
+                seen = (r['frame'], 0 if seen is None else elapsed)
+                self.group_since[idx] = seen
+            since = seen[1]
+        n = int((elapsed - since) * l['fps'] // 1000)
+        return first + (n % count if l['loop'] else min(count - 1, n))
 
     def layer_text(self, l):
         v = l['value']
@@ -1237,8 +1327,7 @@ class Renderer:
             if t_ in ('image', 'animation'):
                 frame = 0
                 if t_ == 'animation':
-                    n = int(elapsed * l['fps'] // 1000)
-                    frame = n % l['frames'] if l['loop'] else min(l['frames'] - 1, n)
+                    frame = self.animation_frame(idx, l, r, elapsed)
                 a = self.assets.get(asset_path(l, frame))
                 if not a:
                     continue
