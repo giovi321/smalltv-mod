@@ -791,6 +791,9 @@ static bool applicable(const Layer& layer, BoundProperty property, bool color) {
 static const char timeNames[9][12] PROGMEM = {"second", "minute", "hour", "hour12", "secondOfDay", "day", "month", "weekday", "moon"};
 static const char needSpec2[] PROGMEM = "time.* and device.* sources need \"spec\": 2";
 static const char unknownBuiltIn[] PROGMEM = "unknown time.* or device.* name";
+static const char unknownTimeName[] PROGMEM = "unknown time.* name";
+static const char everyTimeOnly[] PROGMEM = "only for a time.* source";
+static const char showSourceKind[] PROGMEM = "expected a declared data field or a time.* source";
 static const char reservedId[] PROGMEM = "time and device are the names of built-in sources";
 static const char fontNeedsSpec2[] PROGMEM = "needs \"spec\": 2";
 static const char sizeWithFont[] PROGMEM = "not allowed with a font, which sets the size";
@@ -910,8 +913,7 @@ static const char showSizeMsg[] PROGMEM = "expected numbers from -3.4e38 to 3.4e
 static const char showTooManyMsg[] PROGMEM = "expected at most " SMALLTV_STRINGIFY(THEME_MAX_SHOW_RULES) " rules in a theme";
 static const char showOneNullMsg[] PROGMEM = "at most one end may be null";
 static const char showOrderMsg[] PROGMEM = "low must not be above high";
-static const char showUndeclaredMsg[] PROGMEM = "expected a declared data field";
-static const char showKeys[] PROGMEM = "|source|in|missing|";
+static const char showKeys[] PROGMEM = "|source|every|in|missing|";
 // True when `key` is "<source id>.<field id>" of a show rule's source and
 // field (ShowAgeField: "<source id>.age"), compared in place so that no key
 // string is built for each rule of each frame.
@@ -923,9 +925,9 @@ static bool isShowKey(const std::string& key, const ThemeDataSource& source, uin
   return (name ? key.compare(dot + 1, length, *name) : key.compare(dot + 1, length, "age")) == 0;
 }
 // Parses the last parsed layer's `show` list into t.show (see ShowRule): 1 to
-// 4 rules, each a declared data field and 1 to 4 inclusive [low, high]
-// ranges, where null is an open end; spec 2 only, and at most MaxShowRules
-// rules in all.
+// 4 rules, each a declared data field (or a time.* source, with an optional
+// "every") and 1 to 4 inclusive [low, high] ranges, where null is an open end;
+// spec 2 only, and at most MaxShowRules rules in all.
 __attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t, const std::string& path, std::string& error) {
   Fields layer(object, path, error);
   if (t.spec < 2) return layer.fail("show", fromFlash(fontNeedsSpec2));
@@ -941,8 +943,16 @@ __attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t
     rule.layer = static_cast<uint8_t>(t.layers.size() - 1);
     std::string source;
     if (!fields.keys(showKeys) || !fields.text("source", source, 64) || !fields.boolean("missing", rule.missing, false)) return false;
-    // Declared data fields only: the built-in time.*/device.* sources of spec 2 are not offered to `show`.
-    if (!validFieldToken(source, t, &rule.source, &rule.field)) return fields.fail("source", fromFlash(showUndeclaredMsg));
+    if (source.compare(0, 5, "time.") == 0) {
+      // A time.* source (spec 2, checked above), with the optional modulus. device.* is not offered to `show`.
+      rule.builtin = builtInSource(source);
+      if (rule.builtin == BuiltIn::None) return fields.fail("source", fromFlash(unknownTimeName));
+      if (fields.has("every") && !fields.number("every", 2, 3600, rule.every)) return false;
+      t.layers[t.layers.size() - 1].timeBound = true;   // update() checks the layer again as the clock moves
+    } else {
+      if (fields.has("every")) return fields.fail("every", fromFlash(everyTimeOnly));
+      if (!validFieldToken(source, t, &rule.source, &rule.field)) return fields.fail("source", fromFlash(showSourceKind));
+    }
     JsonArrayConst ranges = item["in"].as<JsonArrayConst>();
     if (ranges.isNull() || ranges.size() == 0 || ranges.size() > 4) return fields.fail("in", fromFlash(showRangesMsg));
     rule.count = static_cast<uint8_t>(ranges.size());   // 1 to 4, checked above
@@ -1622,15 +1632,25 @@ void Engine::resolveLayer(size_t index) {
   // `show`: every rule of this layer must hold (see ShowRule).
   for (const auto& rule : theme_.show) {
     if (rule.layer != index || !resolved.visible) continue;
-    const std::string* source = nullptr;
-    for (const auto& item : values_) if (isShowKey(item.key, theme_.data[rule.source], rule.field)) {
-      source = &item.value;
-      break;
-    }
     double number = 0;
-    if (!source || !parseFiniteNumber(*source, number)) {
-      resolved.visible = rule.missing;
-      continue;
+    if (rule.builtin != BuiltIn::None) {
+      // time.*: until the clock is set there is no value.
+      if (!hadTime_) {
+        resolved.visible = rule.missing;
+        continue;
+      }
+      number = timeValue(rule.builtin, lastTime_);
+      if (rule.every) number = int32_t(number) % rule.every;   // whole numbers, no libm
+    } else {
+      const std::string* source = nullptr;
+      for (const auto& item : values_) if (isShowKey(item.key, theme_.data[rule.source], rule.field)) {
+        source = &item.value;
+        break;
+      }
+      if (!source || !parseFiniteNumber(*source, number)) {
+        resolved.visible = rule.missing;
+        continue;
+      }
     }
     // Compared as a float, the precision the bounds are kept in: a bound of
     // 9.49 holds for the value 9.49 whatever it rounds to.

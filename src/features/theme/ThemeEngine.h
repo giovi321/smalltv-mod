@@ -123,8 +123,12 @@ struct ShowRule {
   float high[4] = {};   // -INFINITY or INFINITY is an open end
   uint8_t layer = 0;
   uint8_t count = 0;    // 1 to 4 ranges
-  uint8_t source = 0;   // index into Theme::data
+  uint8_t source = 0;   // index into Theme::data (a data rule)
   uint8_t field = 0;    // index into that source's fields, or ShowAgeField
+  // A time.* rule keeps its source in `builtin` instead (source and field are
+  // then unused). These three fill the padding: the rule stays 40 bytes.
+  uint16_t every = 0;   // 2 to 3600: the value is taken modulo this first; 0 = as it is
+  BuiltIn builtin = BuiltIn::None;   // the time.* source; None for a data field
   bool missing = false;
 };
 // The `field` of a rule that reads `<source>.age` (spec 2).

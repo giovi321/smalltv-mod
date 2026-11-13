@@ -544,12 +544,21 @@ def validate_show(o, p, fields, spec, used, fail, obj):
         if not isinstance(rule, dict):
             fail(rp, 'expected an object')
             continue
-        obj(rule, rp, ['source', 'in', 'missing'])
+        obj(rule, rp, ['source', 'every', 'in', 'missing'])
         src = rule.get('source')
-        if not isinstance(src, str) or not (src in fields or src.rpartition('.')[2] == 'age' and src.rpartition('.')[0] in sources):
-            fail(f'{rp}.source', 'expected a declared data field')
         if rule.get('missing') is not None and not isinstance(rule['missing'], bool):
             fail(f'{rp}.missing', 'expected true or false')
+        if isinstance(src, str) and src.startswith('time.'):
+            # A time.* source, with the optional modulus. device.* is not offered to `show`.
+            if src[5:] not in TIME_NAMES:
+                fail(f'{rp}.source', 'unknown time.* name')
+            elif 'every' in rule and not (isinstance(rule['every'], int) and 2 <= rule['every'] <= 3600):
+                fail(f'{rp}.every', 'expected an integer from 2 to 3600')
+        else:
+            if 'every' in rule:
+                fail(f'{rp}.every', 'only for a time.* source')
+            if not isinstance(src, str) or not (src in fields or src.rpartition('.')[2] == 'age' and src.rpartition('.')[0] in sources):
+                fail(f'{rp}.source', 'expected a declared data field or a time.* source')
         ranges = rule.get('in')
         if not isinstance(ranges, list) or not 1 <= len(ranges) <= 4:
             fail(f'{rp}.in', 'expected 1 to 4 ranges')
@@ -1112,10 +1121,16 @@ def float32(value):
         return math.copysign(math.inf, value)
 
 
-def shown(l, data):
-    """False while one of the layer's `show` rules does not hold."""
+def shown(l, data, t=None):
+    """False while one of the layer's `show` rules does not hold. `t` is the clock (None: not set)."""
     for rule in l.get('show') or []:
-        value = parse_number(data.get(rule['source']))
+        if rule['source'].startswith('time.'):
+            # The clock, not the data; `every` takes the value modulo first (whole numbers).
+            value = None if t is None else time_value(rule['source'][5:], t)
+            if value is not None and rule.get('every'):
+                value %= rule['every']
+        else:
+            value = parse_number(data.get(rule['source']))
         if value is None:
             if not rule.get('missing', False):
                 return False
@@ -1300,7 +1315,7 @@ class Renderer:
         bg = color565(self.theme['display']['background'])
         out = [bg] * (240 * 240)
         for idx, l in enumerate(self.theme['layers']):
-            if not shown(l, self.data):
+            if not shown(l, self.data, t):
                 continue
             r = resolve_layer(l, t, self.data)
             if l['type'] == 'shape' and l['shape'] == 'arc':
