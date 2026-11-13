@@ -30,3 +30,9 @@ class RainMode : public DisplayMode {
 };
 
 extern RainMode g_rainMode;
+
+// Render cost of the last full draw, surfaced in /api/status (rain.drawMs,
+// blitMs, citiesMs) to drive the transition-optimisation work.
+uint32_t rainDrawMs();
+uint32_t rainBlitMs();
+uint32_t rainCitiesMs();

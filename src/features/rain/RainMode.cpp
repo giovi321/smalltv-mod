@@ -40,11 +40,12 @@ static void geo(float homeLat, float homeLon, float lat, float lon,
 // the main texts map 1:1 onto uiScale: size 1/2/3. Headers and city names
 // cap at size 2 (see drawRain / drawCities): a 24 px header would cross the
 // scope ring in the corners, and the longest city name (Châteauroux) would
-// span 198 px at size 3. k scales the city squares - 2x at Large so the
-// level steps are unmistakable.
+// span 198 px at size 3. k scales the city squares: medium draws them 3x
+// the old 5/3 px markers (15/9 px), large one step bigger again (20/12 px)
+// so the level steps are unmistakable.
 static uint8_t rainTxt(const Settings& s) { return 1 + s.rain.uiScale; }
 static float   rainK(const Settings& s) {
-  return (s.rain.uiScale == 0) ? 0.65f : ((s.rain.uiScale == 2) ? 2.0f : 1.0f);
+  return (s.rain.uiScale == 0) ? 0.65f : ((s.rain.uiScale == 2) ? 4.0f : 3.0f);
 }
 static int scaleK(int base, float k) {      // min 2 px so markers stay visible
   int v = (int)lroundf(base * k);
@@ -66,50 +67,87 @@ static void drawScope(const Settings& s, Arduino_GFX* gfx) {
 }
 
 // ---- one frame: LittleFS indices -> RGB565 rows -----------------------------
-static uint8_t  g_idx[TFT_WIDTH];
-static uint16_t g_row[TFT_WIDTH];
+static uint8_t  g_idx[TFT_WIDTH * 2];   // two rows per LittleFS read
+static uint16_t g_row[TFT_WIDTH * 2];
 
 static void blitFrame(uint8_t idx) {
   char path[24];
   snprintf(path, sizeof path, RAIN_DIR "/f%02u.raw", (unsigned)idx);
   File f = LittleFS.open(path, "r");
   if (!f) return;
-  Arduino_GFX* gfx = gfxDev();
   uint8_t*  idx8 = g_idx;
   uint16_t* row = g_row;
-  for (int y = 0; y < TFT_HEIGHT; y++) {
-    if (f.read(idx8, TFT_WIDTH) != TFT_WIDTH) break;
-    for (int x = 0; x < TFT_WIDTH; x++) row[x] = g_pal[idx8[x]];
-    gfx->draw16bitRGBBitmap(0, y, row, TFT_WIDTH, 1);
+  gfxBlitBegin();
+  for (int y = 0; y < TFT_HEIGHT; y += 2) {
+    int rows = (int)(f.read(idx8, TFT_WIDTH * 2) / TFT_WIDTH);
+    for (int x = 0; x < rows * TFT_WIDTH; x++) row[x] = g_pal[idx8[x]];
+    gfxBlitRow(row, rows * TFT_WIDTH);
+    if (rows < 2) break;
   }
+  gfxBlitEnd();
   f.close();
 }
 
 // ---- nearby cities as reference dots (France + Europe, embedded list) ------
+// City geometry (projection) depends only on the config, not on the frame:
+// computed once per config change, then each render just draws the cached
+// list. The 731-city geo loop cost ~82 ms per frame before this cache.
+struct RainCityPos {
+  int16_t x, y;
+  uint16_t popK;
+  uint8_t  nameLen;
+  const char* name;       // PROGMEM pointer into kRainCities
+};
+#define RAIN_CITY_CACHE_MAX 64
+static RainCityPos g_cityCache[RAIN_CITY_CACHE_MAX];
+static uint8_t     g_cityCacheN = 0;
+static float       g_cacheLat = NAN, g_cacheLon = NAN;
+static int         g_cacheRange = -1;
+static int8_t      g_cacheScale = -1;
+
+static void buildCityCache(const Settings& s) {
+  const float hLat = rainLat(s), hLon = rainLon(s);
+  const float range = (float)s.rain.rangeKm;
+  g_cityCacheN = 0;
+  for (uint16_t i = 0; i < kRainCityCount && g_cityCacheN < RAIN_CITY_CACHE_MAX; i++) {
+    RainCity c;
+    memcpy_P(&c, &kRainCities[i], sizeof c);
+    float d, b;
+    geo(hLat, hLon, c.lat100 / 100.0f, c.lon100 / 100.0f, d, b);
+    if (d > range) continue;
+    RainCityPos& p = g_cityCache[g_cityCacheN++];
+    int px, py;
+    polar(d / range * RR, b, px, py);
+    p.x = (int16_t)px; p.y = (int16_t)py;
+    p.popK = c.popK;
+    p.name = kRainCities[i].name;
+    p.nameLen = (uint8_t)strlen_P(p.name);
+  }
+  g_cacheLat = hLat; g_cacheLon = hLon;
+  g_cacheRange = (int)lroundf(range);
+  g_cacheScale = (int8_t)s.rain.uiScale;
+}
+
 static void drawCities(const Settings& s, Arduino_GFX* gfx) {
   if (!s.rain.showCities) return;
-  float hLat = rainLat(s), hLon = rainLon(s);
-  float range = (float)s.rain.rangeKm;
+  if (g_cityCacheN == 0 || g_cacheLat != rainLat(s) || g_cacheLon != rainLon(s) ||
+      g_cacheRange != (int)lroundf((float)s.rain.rangeKm) || g_cacheScale != (int8_t)s.rain.uiScale)
+    buildCityCache(s);
   const uint8_t txt = rainTxt(s);
   const uint8_t nt  = txt > 2 ? 2 : txt;   // names cap at 16 px (see rainTxt)
   const float   k   = rainK(s);
-  // Declutter fixed for medium/large so the bigger squares don't drop
-  // cities; only small gets a tighter grid (its markers are tiny).
-  const int     minD = (s.rain.uiScale == 0) ? 10 : 16;
+  // Declutter grid per level so the squares never overlap: small keeps a
+  // tighter grid (its markers are tiny), large needs more room than medium.
+  const int     minD = (s.rain.uiScale == 0) ? 10 : (s.rain.uiScale == 1 ? 16 : 22);
 
   struct Pt { int16_t x, y; };
   Pt used[24];
   uint8_t nUsed = 0;
   uint8_t labeled = 0;
 
-  for (uint16_t i = 0; i < kRainCityCount; i++) {
-    RainCity c;
-    memcpy_P(&c, &kRainCities[i], sizeof c);
-    float d, b;
-    geo(hLat, hLon, c.lat100 / 100.0f, c.lon100 / 100.0f, d, b);
-    if (d > range) continue;
-    int x, y;
-    polar(d / range * RR, b, x, y);
+  for (uint8_t i = 0; i < g_cityCacheN; i++) {
+    const RainCityPos& c = g_cityCache[i];
+    int x = c.x, y = c.y;
 
     // declutter : minimum distance between two dots
     bool clash = false;
@@ -124,19 +162,23 @@ static void drawCities(const Settings& s, Arduino_GFX* gfx) {
       nUsed++;
     }
 
-    uint8_t sz = (uint8_t)scaleK((c.popK > 1000) ? 5 : 3, k);   // petit carré rouge (pin de carte)
-    gfx->fillRect(x - sz / 2, y - sz / 2, sz, sz, C_RED);
+    uint8_t sz = (uint8_t)scaleK((c.popK > 1000) ? 5 : 3, k);   // losange rouge évidé (pin de carte), carré pivoté de 45°
+    int16_t h = sz / 2;
+    gfx->drawLine(x - h, y, x, y - h, C_RED);
+    gfx->drawLine(x, y - h, x + h, y, C_RED);
+    gfx->drawLine(x + h, y, x, y + h, C_RED);
+    gfx->drawLine(x, y + h, x - h, y, C_RED);
     if (labeled < 6 && c.popK >= 20) {
       labeled++;
       gfx->setTextSize(nt);
-      gfx->setTextColor(C_GRAY);
-      int lw = (int)strlen(c.name) * GFX_FONT_W * nt;
+      gfx->setTextColor(C_DGRAY);   // dim grey: names stay quiet on the field
+      int lw = (int)c.nameLen * GFX_FONT_W * nt;
       int lx = x + sz / 2 + 3;
       if (lx + lw > TFT_WIDTH - 2) lx = x - sz / 2 - 3 - lw;
       if (lx < 2) lx = 2;
       int ly = y - 4 * nt;               // keep the taller label centred on the square
       gfx->setCursor(lx, ly < 0 ? 0 : ly);
-      gfx->print(c.name);
+      for (uint8_t ci = 0; ci < c.nameLen; ci++) gfx->write(pgm_read_byte(c.name + ci));
     }
   }
 }
@@ -149,20 +191,14 @@ static void drawTimeline(const Settings& s, Arduino_GFX* gfx, uint8_t animIdx) {
   uint32_t tN = rainFrameTime(n - 1);
   if (tN <= t0) return;
 
-  const int X0 = 6, X1 = TFT_WIDTH - 6, Y = 236;
+  // Outlined pill across the screen, above the RainViewer attribution
+  // (y >= 231), with a dot riding the current frame time on it.
+  const int X0 = 6, X1 = TFT_WIDTH - 6, RR = 4, DR = 3, Y = 226;
   const uint8_t txt = rainTxt(s);
-  // Taller labels sit higher so they stay clear of the cursor triangle
-  // under the line (8/16/24 px glyphs -> labels 14/22/32 px above Y).
-  const int labY = (txt == 3) ? Y - 32 : (txt == 2 ? Y - 22 : Y - 14);
+  gfx->drawRoundRect(X0, Y - RR, X1 - X0, 2 * RR, RR, C_DGRAY);
 
-  // line + 30-minute ticks
-  gfx->drawFastHLine(X0, Y, X1 - X0, C_DGRAY);
-  for (uint32_t t = t0 + 1800 - (t0 % 1800); t < tN; t += 1800) {
-    int x = X0 + (int)((int64_t)(t - t0) * (X1 - X0) / (int64_t)(tN - t0));
-    gfx->drawFastVLine(x, Y - 3, 3, C_DGRAY);
-  }
-
-  // labels -2h / -1h / now
+  // labels -2h / -1h / now, just above the pill (glyphs are 8/16/24 px)
+  const int labY = Y - RR - 8 * txt - 1;
   struct { const char* label; uint32_t t; } labs[3] = {
     {"-2h", tN - 7200}, {"-1h", tN - 3600}, {"now", tN}
   };
@@ -178,15 +214,22 @@ static void drawTimeline(const Settings& s, Arduino_GFX* gfx, uint8_t animIdx) {
     gfx->print(labs[i].label);
   }
 
-  // cursor on the current frame, sized with the labels
+  // dot on the current frame, vertically centred on the pill
   int xc = X0 + (int)((int64_t)(rainFrameTime(animIdx) - t0) * (X1 - X0) / (int64_t)(tN - t0));
-  int cw = 3 + txt;
-  int cy = (txt == 3) ? Y - 7 : (txt == 2 ? Y - 6 : Y - 5);
-  gfx->fillTriangle(xc, Y + 1, xc - cw, cy, xc + cw, cy, C_GRAY);
+  if (xc < X0 + DR) xc = X0 + DR;   // keep the dot fully on the pill
+  if (xc > X1 - DR) xc = X1 - DR;
+  gfx->fillCircle(xc, Y, DR, C_GRAY);
 }
 
 // ---- the view ---------------------------------------------------------------
+// Render cost counters of the last draw, exposed via /api/status.
+static uint32_t g_drawMs = 0, g_blitMs = 0, g_citiesMs = 0;
+uint32_t rainDrawMs()   { return g_drawMs; }
+uint32_t rainBlitMs()   { return g_blitMs; }
+uint32_t rainCitiesMs() { return g_citiesMs; }
+
 static void drawRain(const Settings& s, uint8_t animIdx) {
+  uint32_t tDraw = millis();
   Arduino_GFX* gfx = gfxDev();
   if (!gfx) return;
   uint8_t n = rainCount();
@@ -203,13 +246,18 @@ static void drawRain(const Settings& s, uint8_t animIdx) {
     g_pal[i] = gfxTint((uint16_t)(((col[0] >> 3) << 11) | ((col[1] >> 2) << 5) | (col[2] >> 3)));
   }
 
-  // Fond noir, puis la frame (nuages + pluie, composite prémultiplié), puis
-  // les cercles/croix PAR-DESSUS le champ. Ordre vécu : drawBase après
-  // blitFrame effaçait la frame au fillScreen (flash nuages puis scope vide).
-  drawBase(gfx);
+  // Pas de fond noir quand une frame existe : elle recouvre tout l'écran et
+  // le fillScreen d'avant-blit faisait un flash noir à chaque animation. Le
+  // noir ne sert que pour l'état « Waiting for radar data ». Ordre vécu :
+  // drawBase après blitFrame effaçait la frame au fillScreen (bug 10).
+  uint32_t tBlit = millis();
+  if (n == 0) drawBase(gfx);
   if (n > 0) blitFrame(animIdx);
+  g_blitMs = millis() - tBlit;
   drawScope(s, gfx);
+  uint32_t tCities = millis();
   drawCities(s, gfx);
+  g_citiesMs = millis() - tCities;
 
   // Home marker on top.
   gfx->fillCircle(CX, CY, 3, C_GREEN);
@@ -249,12 +297,13 @@ static void drawRain(const Settings& s, uint8_t animIdx) {
 
   // Attribution + error dot (bottom corners, outside the ring). The
   // attribution stays at size 1 on purpose: at size 2 it would span 132 px
-  // and collide with the "now" label of the timeline.
+  // and crowd the timeline pill.
   gfx->setTextSize(1);
   gfx->setTextColor(C_DGRAY);
   gfx->setCursor(TFT_WIDTH - gfxTextW("RainViewer", 1) - 2, TFT_HEIGHT - 9);
   gfx->print("RainViewer");
   if (rainError()) gfx->fillCircle(6, TFT_HEIGHT - 7, 4, C_RED);
+  g_drawMs = millis() - tDraw;
 }
 
 // ---- DisplayMode ------------------------------------------------------------

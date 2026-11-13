@@ -65,6 +65,20 @@ static Arduino_GFX*     gfx = nullptr;
 
 Arduino_GFX* gfxDev() { return gfx; }
 
+// Streamed full-window blit: see the comment in Gfx.h.
+void gfxBlitBegin() {
+  if (!gfx) return;
+  Arduino_TFT* t = static_cast<Arduino_TFT*>(gfx);
+  t->startWrite();
+  t->writeAddrWindow(0, 0, TFT_WIDTH, TFT_HEIGHT);
+}
+void gfxBlitRow(uint16_t* row, uint32_t len) {
+  static_cast<Arduino_TFT*>(gfx)->writePixels(row, len);
+}
+void gfxBlitEnd() {
+  static_cast<Arduino_TFT*>(gfx)->endWrite();
+}
+
 // ---------------------------------------------------------------------------
 void gfxBegin(const Settings& s) {
 #ifdef TFT_PWR_PIN

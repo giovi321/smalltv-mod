@@ -16,6 +16,7 @@
 #endif
 #if WITH_RAIN
 #include "RainClient.h"
+#include "RainMode.h"
 #endif
 #if WITH_NOTIFY
 #include "NotifyMode.h"
@@ -287,6 +288,9 @@ static void handleStatus() {
   if (rainLastTryMs()) { rn.hasTried = true; rn.triedAgo = (millis() - rainLastTryMs()) / 1000; }
   if (rainLastOkMs())  { rn.hasOk = true;    rn.okAgo    = (millis() - rainLastOkMs()) / 1000; }
   rn.url = rainLastUrl().c_str();
+  rn.drawMs = rainDrawMs();
+  rn.blitMs = rainBlitMs();
+  rn.citiesMs = rainCitiesMs();
   smalltv::writeStatusRain(out, rn);
 #endif
   smalltv::writeStatusEnd(out);

@@ -86,6 +86,7 @@ struct StatusRain {
   bool hasTried = false, hasOk = false;
   uint32_t triedAgo = 0, okAgo = 0;
   const char* url = "";         // left out when empty
+  uint32_t drawMs = 0, blitMs = 0, citiesMs = 0;   // render cost, left out when 0
 };
 
 namespace statusout {
@@ -206,6 +207,9 @@ template <class Out> void writeStatusRain(Out& out, const StatusRain& r) {
   if (r.hasTried) member(out, PSTR(",\"triedAgo\":"), r.triedAgo);
   if (r.hasOk) member(out, PSTR(",\"okAgo\":"), r.okAgo);
   if (r.url[0]) member(out, PSTR(",\"url\":"), r.url);
+  if (r.drawMs)   member(out, PSTR(",\"drawMs\":"), r.drawMs);
+  if (r.blitMs)   member(out, PSTR(",\"blitMs\":"), r.blitMs);
+  if (r.citiesMs) member(out, PSTR(",\"citiesMs\":"), r.citiesMs);
   jsonout::raw(out, PSTR("}"));
 }
 
