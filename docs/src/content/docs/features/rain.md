@@ -14,7 +14,7 @@ To centre the radar somewhere else, untick **Use the device location** and enter
 ## Range and cadence
 
 - **Range (km)** is the outer ring radius, 10 to 100 km. The firmware picks the largest usable image crop for the configured range at your latitude; at higher latitudes the same range simply uses a larger source crop, so nothing is lost.
-- **Refresh (s)** is how often the whole frame set is fetched. The default is 900 (15 minutes). RainViewer's public limit is generous, but keep it at a few minutes or more.
+- **Refresh (s)** is how often the whole frame set is fetched. The default is 900 (15 minutes), the minimum 600: a full fetch takes ~5–6 minutes on the device, and the next poll is always scheduled from the end of a fetch — the device never fetches back-to-back.
 - **Animation (s/frame)** is how long each frame stays on screen in the loop. The default is 8 seconds.
 
 The RainViewer public API serves **past radar data only**: the timeline runs from two hours ago to the latest frame, labelled `-2h`, `-1h` and `now` (the current frame's local time is shown top-right once the clock is synced). The firmware also understands the *nowcast* frame list, so if the provider ever serves forecast frames again they will appear on the timeline automatically.

@@ -73,9 +73,11 @@ void gfxBlitBegin() {
   t->writeAddrWindow(0, 0, TFT_WIDTH, TFT_HEIGHT);
 }
 void gfxBlitRow(uint16_t* row, uint32_t len) {
+  if (!gfx) return;
   static_cast<Arduino_TFT*>(gfx)->writePixels(row, len);
 }
 void gfxBlitEnd() {
+  if (!gfx) return;
   static_cast<Arduino_TFT*>(gfx)->endWrite();
 }
 

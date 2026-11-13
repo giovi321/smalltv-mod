@@ -85,6 +85,7 @@ const char* rainStageName() {
     case RAIN_PARSE_FAIL:   return "parse failed";
     case RAIN_NO_FRAMES:    return "no frames in feed";
     case RAIN_PNG_FAIL:     return "png decode failed";
+    case RAIN_NO_MEM:       return "out of memory";
     case RAIN_FS_FAIL:      return "filesystem error";
     case RAIN_OK:           return "ok";
     default:                return "idle";
@@ -138,7 +139,13 @@ void rainInit(const Settings& s) {
   if (!LittleFS.exists(RAIN_DIR)) LittleFS.mkdir(RAIN_DIR);
 }
 
-void rainForceRefresh() { g_nextPollMs = millis(); }
+// Un fetch est déjà en cours ? Ses frames sont fraîches : ne pas armer un
+// 2e poll qui démarrerait dès la fin de celui-ci (double fetch complet vécu
+// quand /api/refresh tombait pendant un fetch).
+void rainForceRefresh() {
+  if (g_step != STEP_IDLE) return;
+  g_nextPollMs = millis();
+}
 
 // Crop size for the configured range at this latitude: the 240px output
 // must span about twice the range ring.
@@ -300,7 +307,11 @@ static bool fetchFrame(const Settings& s, const String& host, uint8_t i, uint8_t
   bool ok = rainDecodeToFs(src, dst, RAIN_TILE_SIZE, g_cropK, win);
   src.close();
   dst.close();
-  if (!ok) { g_stage = RAIN_PNG_FAIL; return false; }
+  if (!ok) {
+    LittleFS.remove(RAIN_DIR "/tmp.raw");   // ne pas laisser un .raw tronqué derrière soi
+    g_stage = RAIN_PNG_FAIL;
+    return false;
+  }
   if (!LittleFS.rename(RAIN_DIR "/tmp.raw", path)) {
     LittleFS.remove(RAIN_DIR "/tmp.raw");
     g_stage = RAIN_FS_FAIL;
@@ -311,43 +322,63 @@ static bool fetchFrame(const Settings& s, const String& host, uint8_t i, uint8_t
 
 // ---- commit the new set to g_frames + meta.json, purge leftovers ----------
 static bool commitFrames() {
-  File m = LittleFS.open(RAIN_DIR "/meta.json", "w");
-  if (!m) { g_stage = RAIN_FS_FAIL; return false; }
-  JsonDocument doc;
-  doc["generated"] = g_generated;
-  uint8_t nc = 0;
-  for (uint8_t i = 0; i < g_pendingCount; i++)
-    if (g_pending[i].nowcast) nc++;
-  doc["nowcast"] = nc;
-  JsonArray times = doc["times"].to<JsonArray>();
-  for (uint8_t i = 0; i < g_pendingCount; i++) times.add(g_pending[i].time);
-  serializeJson(doc, m);
-  m.close();
+  // meta.json écrit atomiquement (tmp + rename) : une coupure secteur
+  // pendant l'écriture ne peut plus laisser un meta.json tronqué (loadMeta
+  // échouait alors au boot et l'écran restait sur « Waiting for radar data »
+  // alors que les 13 frames étaient sur le disque).
+  bool ok = false;
+  File m = LittleFS.open(RAIN_DIR "/meta.tmp", "w");
+  if (m) {
+    JsonDocument doc;
+    doc["generated"] = g_generated;
+    uint8_t nc = 0;
+    for (uint8_t i = 0; i < g_pendingCount; i++)
+      if (g_pending[i].nowcast) nc++;
+    doc["nowcast"] = nc;
+    JsonArray times = doc["times"].to<JsonArray>();
+    for (uint8_t i = 0; i < g_pendingCount; i++) times.add(g_pending[i].time);
+    ok = serializeJson(doc, m) > 0;
+    m.close();
+    ok = ok && LittleFS.rename(RAIN_DIR "/meta.tmp", RAIN_DIR "/meta.json");
+    if (!ok) LittleFS.remove(RAIN_DIR "/meta.tmp");
+  }
 
+  // Les frames sont déjà renommées en place (une par étape du fetch) : dans
+  // tous les cas, l'état en mémoire doit décrire les frames du disque, sinon
+  // la timeline et l'heure d'en-tête dérivent d'un poll par rapport aux
+  // pixels affichés (vécu quand meta.json ne s'ouvrait pas). Si meta n'a pas
+  // pu être écrit, le prochain poll réessaiera — l'erreur reste signalée.
   g_count = g_pendingCount;
   for (uint8_t i = 0; i < g_count; i++) {
     g_frames[i].time = g_pending[i].time;
     g_frames[i].nowcast = g_pending[i].nowcast;
   }
-  // Purge frame files beyond the new count.
+  // Purge frame files beyond the new count (aussi en cas d'échec de meta :
+  // un FS plein redevient utilisable pour le poll suivant).
   for (uint8_t i = g_count; i < MAX_RAIN_FRAMES; i++) {
     char path[24];
     framePath(path, sizeof path, i);
     if (LittleFS.exists(path)) LittleFS.remove(path);
   }
+  if (!ok) { g_stage = RAIN_FS_FAIL; return false; }
   g_lastOkMs = millis();
   g_error = false;
   g_stage = RAIN_OK;
   return true;
 }
 
-// Fin du fetch en cours (succès ou échec) : rend la fenêtre LZ et remet
-// l'état de la machine à étapes à zéro. Les frames sur disque restent en
-// place — en cas d'échec, l'animation continue de boucler l'ancien jeu.
-static void fetchAbort() {
+// Fin du fetch en cours (succès ou échec) : rend la fenêtre LZ, remet
+// l'état de la machine à étapes à zéro et arme le prochain poll à partir
+// d'ici. Sans ce ré-armement, un pollSec plus court que le fetch (~5-6 min
+// sur l'Ultra) enchaînait les fetchs dos à dos : heap sous pression en
+// permanence (profil de l'abort OOM, bug 12) et serveur HTTP quasi mort.
+// Les frames sur disque restent en place — en cas d'échec, l'animation
+// continue de boucler l'ancien jeu.
+static void fetchAbort(const Settings& s) {
   if (g_win) { free(g_win); g_win = nullptr; }
   g_step = STEP_IDLE;
   g_frameIdx = 0;
+  g_nextPollMs = millis() + (uint32_t)s.rain.pollSec * 1000UL;
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +388,9 @@ void rainService(const Settings& s) {
 
   if (g_step == STEP_IDLE) {
     if ((int32_t)(millis() - g_nextPollMs) < 0) return;
+    // Valeur provisoire, ré-armée à la FIN du fetch par fetchAbort() : le
+    // prochain poll part pollSec après la fin du fetch, pas du début. Elle
+    // ne reste en place que si le malloc de la fenêtre échoue (retry).
     g_nextPollMs = millis() + (uint32_t)s.rain.pollSec * 1000UL;
     g_lastTryMs = millis();
     g_cropK = cropFor(rainLat(s), s.rain.rangeKm);
@@ -368,7 +402,7 @@ void rainService(const Settings& s) {
     // cycles malloc/free de 8 Ko qui fragmentaient le heap (vécu : maxblk
     // < 8192 après ~3 h d'uptime → fetch en échec permanent).
     g_win = (uint8_t*)malloc(RAIN_WINDOW_PIXELS);
-    if (!g_win) { g_error = true; g_stage = RAIN_PNG_FAIL; return; }
+    if (!g_win) { g_error = true; g_stage = RAIN_NO_MEM; return; }
     memset(g_win, 0, RAIN_WINDOW_PIXELS);
     g_step = STEP_LIST;
     return;   // la liste partira au prochain appel : l'écran anime d'abord
@@ -376,7 +410,7 @@ void rainService(const Settings& s) {
 
   // Une étape par appel — la boucle principale anime l'affichage entre deux.
   if (g_step == STEP_LIST) {
-    if (!fetchFrameList(s)) { g_error = true; fetchAbort(); return; }   // keep the old frames
+    if (!fetchFrameList(s)) { g_error = true; fetchAbort(s); return; }   // keep the old frames
     g_step = STEP_FRAME;
     g_frameIdx = 0;
     return;
@@ -384,13 +418,13 @@ void rainService(const Settings& s) {
   if (g_step == STEP_FRAME) {
     // Fail fast on the first bad frame: the stale set stays on disk and the
     // animation keeps looping it; the next poll (15 min) retries everything.
-    if (!fetchFrame(s, g_host, g_frameIdx, g_win)) { g_error = true; fetchAbort(); return; }
+    if (!fetchFrame(s, g_host, g_frameIdx, g_win)) { g_error = true; fetchAbort(s); return; }
     g_frameIdx++;
     if (g_frameIdx >= g_pendingCount) g_step = STEP_COMMIT;
     return;
   }
   if (g_step == STEP_COMMIT) {
     if (!commitFrames()) g_error = true;
-    fetchAbort();
+    fetchAbort(s);
   }
 }

@@ -522,7 +522,7 @@ void RainSettings::fromJson(JsonObjectConst o) {
   else if ((!o["lat"].isNull() || !o["lon"].isNull()) && (lat != 0.0f || lon != 0.0f))
     useDevice = false;
   if (o["rangeKm"].is<int>())    rangeKm = constrain((int)o["rangeKm"], 10, 100);
-  if (o["pollSec"].is<int>())    pollSec = constrain((int)o["pollSec"], 60, 3600);
+  if (o["pollSec"].is<int>())    pollSec = constrain((int)o["pollSec"], 600, 3600);   // un fetch complet prend ~5-6 min
   if (o["animSec"].is<int>())    animSec = constrain((int)o["animSec"], 3, 30);
   if (o["unitsMi"].is<bool>())   unitsMi = o["unitsMi"];
   if (o["showCities"].is<bool>()) showCities = o["showCities"];

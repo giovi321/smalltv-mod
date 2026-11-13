@@ -6,7 +6,7 @@
 
 void rainInit(const Settings& s);       // reset + poll ASAP
 void rainService(const Settings& s);    // call often; self-times the polling
-void rainForceRefresh();                // poll on the next service() call
+void rainForceRefresh();                // poll on the next service() call (ignored while a fetch is running)
 
 uint8_t         rainCount();            // frames currently on disk (oldest first)
 uint32_t        rainFrameTime(uint8_t i);
@@ -25,6 +25,7 @@ enum RainStage : uint8_t {
   RAIN_PARSE_FAIL,    // 200, but the JSON did not deserialize
   RAIN_NO_FRAMES,     // parsed fine, but no frames were listed
   RAIN_PNG_FAIL,      // a frame PNG failed to download or decode
+  RAIN_NO_MEM,        // the 8 KB LZ window malloc failed (heap too fragmented)
   RAIN_FS_FAIL,       // LittleFS refused a file operation
   RAIN_OK,            // frames stored
 };
