@@ -317,7 +317,39 @@ static void testWatchdog() {
   assert(!p.load(t,error)&&error=="fonts/f4.stf: more than 4 fonts in the package, the most a theme can use");
   assert(source.reads<fourReads);
 }
+// The renderer's coverage row holds MaxGlyphWidth bytes (no glyph is wider:
+// the load check keeps ink within an advance of at most 120). A record that
+// changed after the load, in storage, must still not write past it.
+static void testWideGlyphIsRefused() {
+  assert(MaxGlyphWidth==120);
+  Memory source;source.data=package(manifest(2,textLayer),"fonts/test.stf",font());
+  Package p(source);Theme t;std::string error;
+  assert(p.load(t,error));
+  AssetHandle h=p.resolve("fonts/test.stf");assert(h!=InvalidAsset);
+  const size_t at=source.data.find("STF1")+12;   // the record of 'A', its width at +5
+  assert(source.data[at+5]==3);
+  source.data[at+5]=char(200);
+  source.data.append(300,'x');   // readable bytes after the font, so only the width check can refuse
+  uint8_t coverage[240+8];
+  memset(coverage,0x5a,sizeof coverage);
+  int left=-1,width=-1;
+  assert(!p.glyphRow(h,'A',2,coverage,left,width));
+  for(size_t i=0;i<sizeof coverage;++i) assert(coverage[i]==0x5a);   // nothing was written
+  // The widest glyph the check allows still works: ink of 120 in an advance of 120.
+  std::string wide="STF1";wide+=char(8);wide+=char(6);wide+='A';wide+=char(1);wide+='A';wide.append(3,'\0');
+  record(wide,0,120,0,0,120,1);
+  wide.append(60,char(0xf0));   // 120 pixels: coverage 15, 0, 15, 0, ...
+  Memory wideSource;wideSource.data=package(manifest(2,textLayer),"fonts/test.stf",wide);
+  Package q(wideSource);Theme t2;
+  assert(q.load(t2,error));
+  uint8_t exact[MaxGlyphWidth+8];
+  memset(exact,0x5a,sizeof exact);
+  assert(q.glyphRow(q.resolve("fonts/test.stf"),'A',0,exact,left,width)&&left==0&&width==120);
+  for(int i=0;i<120;++i) assert(exact[i]==(i%2?0:255));
+  for(size_t i=MaxGlyphWidth;i<sizeof exact;++i) assert(exact[i]==0x5a);
+}
 int main() {
+  testWideGlyphIsRefused();
   testLoad();
   testRejected();
   testGlyphCache();
