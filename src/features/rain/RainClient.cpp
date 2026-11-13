@@ -147,6 +147,15 @@ void rainForceRefresh() {
   g_nextPollMs = millis();
 }
 
+// Rendu la fenêtre LZ quand un fetch la tient : les grosses requêtes web
+// (GET /api/config ~4 Ko de JSON, sauvegardes, export) la réclament — sans
+// cela, le JSON de la config ne trouvait pas de bloc contigu en plein fetch
+// (maxblk ~1504 mesuré entre deux étapes). rainService la réalloue à l'étape
+// suivante ; si le heap refuse, dégradation habituelle (point rouge, retry).
+void rainFreeForRequest() {
+  if (g_win) { free(g_win); g_win = nullptr; }
+}
+
 // Crop size for the configured range at this latitude: the 240px output
 // must span about twice the range ring.
 static uint8_t cropFor(float lat, uint16_t rangeKm) {
@@ -416,6 +425,14 @@ void rainService(const Settings& s) {
     return;
   }
   if (g_step == STEP_FRAME) {
+    // freeForRequest() a pu rendre la fenêtre pour une requête web : la
+    // réallouer ici (une seule fois) et continuer le fetch. En cas d'échec,
+    // la dégradation habituelle : point rouge, retry au poll suivant.
+    if (!g_win) {
+      g_win = (uint8_t*)malloc(RAIN_WINDOW_PIXELS);
+      if (!g_win) { g_error = true; g_stage = RAIN_NO_MEM; fetchAbort(s); return; }
+      memset(g_win, 0, RAIN_WINDOW_PIXELS);
+    }
     // Fail fast on the first bad frame: the stale set stays on disk and the
     // animation keeps looping it; the next poll (15 min) retries everything.
     if (!fetchFrame(s, g_host, g_frameIdx, g_win)) { g_error = true; fetchAbort(s); return; }

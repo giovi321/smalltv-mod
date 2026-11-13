@@ -7,6 +7,7 @@
 void rainInit(const Settings& s);       // reset + poll ASAP
 void rainService(const Settings& s);    // call often; self-times the polling
 void rainForceRefresh();                // poll on the next service() call (ignored while a fetch is running)
+void rainFreeForRequest();              // release the LZ window before big web requests
 
 uint8_t         rainCount();            // frames currently on disk (oldest first)
 uint32_t        rainFrameTime(uint8_t i);

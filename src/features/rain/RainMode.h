@@ -8,6 +8,7 @@
 #pragma once
 #include "Mode.h"
 #include "config.h"
+#include "RainClient.h"
 
 class RainMode : public DisplayMode {
  public:
@@ -18,6 +19,10 @@ class RainMode : public DisplayMode {
   void service(const Settings& s) override;
   void invalidate(const Settings& s) override;
   void wake(const Settings& s) override { needRender_ = true; }  // repaint only
+  // Les grosses requêtes web (GET /api/config ~4 Ko, save, export) exigent le
+  // heap : la fenêtre LZ du fetch (8 Ko) est rendue, le service la réalloue à
+  // l'étape suivante. Sans cela, la page web pouvait échouer en plein fetch.
+  void freeForRequest() override { rainFreeForRequest(); }
 
  private:
   void render(const Settings& s);

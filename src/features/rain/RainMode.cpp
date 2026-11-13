@@ -101,6 +101,8 @@ struct RainCityPos {
 #define RAIN_CITY_CACHE_MAX 64
 static RainCityPos g_cityCache[RAIN_CITY_CACHE_MAX];
 static uint8_t     g_cityCacheN = 0;
+static bool        g_cacheBuilt = false;   // distinct de N : une portée sans
+                                           // aucune ville doit rester valide
 static float       g_cacheLat = NAN, g_cacheLon = NAN;
 static int         g_cacheRange = -1;
 static int8_t      g_cacheScale = -1;
@@ -126,11 +128,13 @@ static void buildCityCache(const Settings& s) {
   g_cacheLat = hLat; g_cacheLon = hLon;
   g_cacheRange = (int)lroundf(range);
   g_cacheScale = (int8_t)s.rain.uiScale;
+  g_cacheBuilt = true;    // même avec N == 0, la projection est faite : ne
+                          // pas la refaire à chaque rendu (82 ms × 731 villes)
 }
 
 static void drawCities(const Settings& s, Arduino_GFX* gfx) {
   if (!s.rain.showCities) return;
-  if (g_cityCacheN == 0 || g_cacheLat != rainLat(s) || g_cacheLon != rainLon(s) ||
+  if (!g_cacheBuilt || g_cacheLat != rainLat(s) || g_cacheLon != rainLon(s) ||
       g_cacheRange != (int)lroundf((float)s.rain.rangeKm) || g_cacheScale != (int8_t)s.rain.uiScale)
     buildCityCache(s);
   const uint8_t txt = rainTxt(s);
