@@ -170,6 +170,7 @@ def arc():
 SECOND = {'source': 'time.second', 'input': [0, 60], 'output': [0, 360]}
 SOURCE = {'id': 'w', 'url': 'http://a/b', 'interval': 10, 'fields': [{'id': 'x', 'path': 'x'}]}
 SHOW = {'source': 'w.x', 'in': [[0, 10]]}
+TIME_SHOW = {'source': 'time.second', 'in': [[0, 4]]}
 
 
 def show_layers(rules):
@@ -224,6 +225,15 @@ MANIFESTS = {
     'show age': manifest(data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, source='w.age')])]),
     'show age spec1': manifest(spec=1, data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, source='w.age')])]),
     'show time source': manifest(data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, source='time.second')])]),
+    'show time every': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, every=10)])]),
+    'show time every 1': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, every=1)])]),
+    'show time every 2.5': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, every=2.5)])]),
+    'show time every true': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, every=True)])]),
+    'show time every null': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, every=None)])]),
+    'show time unknown': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, source='time.millis')])]),
+    'show time spec1': manifest(spec=1, layers=[dict(TEXT, show=[TIME_SHOW])]),
+    'show device source': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, source='device.humidity')])]),
+    'show every on data': manifest(data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, every=10)])]),
     'show open end': manifest(data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, **{'in': [[None, 5]], 'missing': True})])]),
     'show both null': manifest(data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, **{'in': [[None, None]]})])]),
     'show low above high': manifest(data=[SOURCE], layers=[dict(TEXT, show=[dict(SHOW, **{'in': [[5, 1]]})])]),
@@ -240,7 +250,7 @@ MANIFESTS = {
 @needs_native
 class ManifestParityTests(unittest.TestCase):
     def test_validators_agree(self):
-        self.assertEqual(len(MANIFESTS), 50)
+        self.assertEqual(len(MANIFESTS), 59)
         with tempfile.TemporaryDirectory() as d:
             path = Path(d)/'theme.json'
             for name, theme in MANIFESTS.items():
@@ -266,8 +276,10 @@ class ShowTests(unittest.TestCase):
         self.assertEqual(stheme.validate(self.theme([dict(SHOW, source='w.age', missing=True)])), [])
         self.assertEqual(stheme.validate(self.theme([SHOW], spec=1)), ['layers[0].show: needs "spec": 2'])
         bad = {
-            'time.second': 'layers[0].show[0].source: expected a declared data field',
-            'w.other': 'layers[0].show[0].source: expected a declared data field',
+            'device.humidity': 'layers[0].show[0].source: expected a declared data field or a time.* source',
+            'w.other': 'layers[0].show[0].source: expected a declared data field or a time.* source',
+            'time.millis': 'layers[0].show[0].source: unknown time.* name',
+            'time.Second': 'layers[0].show[0].source: unknown time.* name',
         }
         for source, message in bad.items():
             self.assertEqual(stheme.validate(self.theme([dict(SHOW, source=source)])), [message])
@@ -286,6 +298,59 @@ class ShowTests(unittest.TestCase):
                          ['layers[9].show: expected at most 36 rules in a theme'])
         self.assertEqual(stheme.validate(manifest(data=[SOURCE], layers=show_layers(38))),
                          ['layers[9].show: expected at most 36 rules in a theme'])
+
+    def test_time_sources_and_every_like_the_firmware(self):
+        every = lambda value: self.theme([dict(TIME_SHOW, every=value)])
+        nothing = self.theme([TIME_SHOW])
+        self.assertEqual(stheme.validate(nothing), [])
+        for name in stheme.TIME_NAMES:
+            self.assertEqual(stheme.validate(self.theme([dict(TIME_SHOW, source=f'time.{name}')])), [], name)
+        for ok in (2, 3, 3599, 3600):
+            self.assertEqual(stheme.validate(every(ok)), [], ok)
+        for bad in (0, 1, 3601, -10, 2.5, 10.0, '10', None, True):
+            self.assertEqual(stheme.validate(every(bad)),
+                             ['layers[0].show[0].every: expected an integer from 2 to 3600'], bad)
+        self.assertEqual(stheme.validate(self.theme([dict(SHOW, every=10)])),
+                         ['layers[0].show[0].every: only for a time.* source'])
+        # A time rule needs no declared data, and counts toward the rule cap like any rule.
+        self.assertEqual(stheme.validate(manifest(layers=[dict(TEXT, show=[TIME_SHOW])])), [])
+        self.assertEqual(stheme.validate(manifest(spec=1, layers=[dict(TEXT, show=[TIME_SHOW])])),
+                         ['layers[0].show: needs "spec": 2'])
+        self.assertEqual(stheme.needed_spec(manifest(layers=[dict(TEXT, show=[TIME_SHOW])])), 2)
+
+    def test_time_rules_follow_the_clock(self):
+        turn = lambda low, high, **kw: dict(TEXT, show=[dict(TIME_SHOW, every=10, **{'in': [[low, high]]}, **kw)])
+        at = lambda second, minute=0: dt.datetime(2026, 9, 18, 15, minute, second)
+        first, second = turn(0, 4), turn(5, 9)
+        for s in range(0, 120):
+            t = at(s % 60, s // 60)
+            self.assertEqual(stheme.shown(first, {}, t), s % 10 < 5, s)
+            self.assertEqual(stheme.shown(second, {}, t), s % 10 >= 5, s)
+        # No `every`: the plain value, and the hour wraps with a modulus too.
+        late = dict(TEXT, show=[{'source': 'time.hour', 'in': [[22, 23], [0, 5]]}])
+        self.assertTrue(stheme.shown(late, {}, dt.datetime(2026, 9, 18, 23, 0, 0)))
+        self.assertFalse(stheme.shown(late, {}, dt.datetime(2026, 9, 18, 12, 0, 0)))
+        half = dict(TEXT, show=[{'source': 'time.hour', 'every': 12, 'in': [[0, 5]]}])
+        self.assertTrue(stheme.shown(half, {}, dt.datetime(2026, 9, 18, 12, 30, 0)))
+        self.assertFalse(stheme.shown(half, {}, dt.datetime(2026, 9, 18, 18, 0, 0)))
+        # No clock: the rule holds only with "missing".
+        self.assertFalse(stheme.shown(first, {}, None))
+        self.assertTrue(stheme.shown(turn(0, 4, missing=True), {}, None))
+        # A data field named like a time source does not override the clock.
+        self.assertFalse(stheme.shown(first, {'time.second': '0'}, None))
+        # A data rule next to a time rule: both must hold.
+        both = dict(TEXT, show=[SHOW, dict(TIME_SHOW, every=10)])
+        self.assertTrue(stheme.shown(both, {'w.x': '5'}, at(3)))
+        self.assertFalse(stheme.shown(both, {'w.x': '50'}, at(3)))
+        self.assertFalse(stheme.shown(both, {'w.x': '5'}, at(7)))
+
+    def test_preview_draws_the_layer_of_the_second(self):
+        box = dict(id='box', type='shape', shape='rectangle', x=10, y=10, width=5, height=5, fill='#ff0000',
+                   show=[dict(TIME_SHOW, every=10)])
+        theme = manifest(layers=[box])
+        bg, red = stheme.color565('#000000'), stheme.color565('#ff0000')
+        pixel = lambda s: stheme.Renderer(theme, {}, 'en', {}).frame(dt.datetime(2026, 9, 18, 15, 4, s), 0)[12 * 240 + 12]
+        self.assertEqual([pixel(s) for s in (10, 12, 14, 15, 17, 19)], [red] * 3 + [bg] * 3)
 
     def test_spec_1_text_of_other_features_is_unchanged(self):
         # Only the show message follows the firmware's text; the rest keep the skill's own hint.

@@ -220,6 +220,44 @@ class ThemeCliTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0, token)
                 self.assertNotIn('Traceback', result.stderr)
 
+    def test_show_rules_on_time_sources(self):
+        def manifest(spec, rule):
+            return {'spec': spec, 'theme': {'id': 'showtime', 'name': 'Show Time', 'author': 'Test', 'version': '1'},
+                    'display': {'width': 240, 'height': 240, 'background': '#0000ff'},
+                    'layers': [{'id': 'box', 'type': 'shape', 'shape': 'rectangle', 'x': 10, 'y': 10, 'width': 20,
+                                'height': 20, 'fill': '#ff0000', 'show': [rule]}]}
+        def turn(low, high, **extra):
+            return {'source': 'time.second', 'every': 10, 'in': [[low, high]], **extra}
+        with tempfile.TemporaryDirectory() as d:
+            source = Path(d)
+            # The same rules as the firmware: accepted with and without "every" (the limits are the engine's).
+            for rule in (turn(0, 4), {'source': 'time.hour', 'in': [[22, 23], [0, 5]]}, {**turn(0, 4), 'every': 2},
+                         {**turn(0, 4), 'every': 3600}):
+                (source/'theme.json').write_text(json.dumps(manifest(2, rule)))
+                result = self.run_cli('validate', source)
+                self.assertEqual(result.returncode, 0, (rule, result.stderr))
+            for rule, text in (({**turn(0, 4), 'every': 0}, 'show[0].every'), ({**turn(0, 4), 'every': 1}, 'show[0].every'),
+                               ({**turn(0, 4), 'every': 3601}, 'show[0].every'), ({**turn(0, 4), 'every': 2.5}, 'show[0].every'),
+                               ({**turn(0, 4), 'every': '10'}, 'show[0].every'),
+                               ({'source': 'device.temperature', 'in': [[0, 4]]}, 'declared data field or a time.* source')):
+                (source/'theme.json').write_text(json.dumps(manifest(2, rule)))
+                result = self.run_cli('validate', source)
+                self.assertNotEqual(result.returncode, 0, rule)
+                self.assertIn(text, result.stderr + result.stdout)
+                self.assertNotIn('Traceback', result.stderr)
+            # Spec 1 has no time sources.
+            (source/'theme.json').write_text(json.dumps(manifest(1, turn(0, 4))))
+            result = self.run_cli('validate', source)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('spec', result.stderr + result.stdout)
+            # The preview moves the clock, and the box follows it: seconds 12-14 shown, 15-17 hidden.
+            (source/'theme.json').write_text(json.dumps(manifest(2, turn(0, 4))))
+            result = self.run_cli('preview', source, source/'turns.html', '--seconds', 6, '--fps', 1, '--time', '2026-09-18T15:04:12')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = self.preview_data(source/'turns.html')
+            self.assertEqual([self.frame(data, i).getpixel((15, 15)) for i in range(6)],
+                             [(255, 0, 0)] * 3 + [(0, 0, 255)] * 3)
+
     def test_preview_injects_the_data_age_of_a_spec_2_source(self):
         manifest = {
             'spec': 2,
