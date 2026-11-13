@@ -63,6 +63,43 @@ template <size_t Piece> class PieceWriter {
   bool sent_ = true;
   char buffer_[Piece];
 };
+// The end of a reply written through a PieceWriter: when a piece was refused,
+// gives the connection up (once) and says so by returning false.
+template <size_t Piece> bool endReply(PieceWriter<Piece>& out, Sink& to) {
+  if (out.sent()) return true;
+  to.abandon();
+  return false;
+}
+// A Sink that writes to a client as a chunked HTTP body, with the chunk
+// framing ("<hex size>\r\n<piece>\r\n") written here. The web server's own
+// sendContent() frames the same way but does not say when a write came up
+// short, so a client that stopped reading could not be noticed. `Client` has
+// `size_t write(const uint8_t*, size_t)` (the bytes taken) and `abandon()`.
+// The last chunk ("0\r\n\r\n") is not written here: the web server sends it
+// (sendContent("", 0)), and it still sends it by itself after the handler if
+// the reply is chunked and nobody did.
+template <class Client> class ChunkedSink : public Sink {
+ public:
+  explicit ChunkedSink(Client& client) : client_(client) {}
+  bool write(const char* data, size_t count) override {
+    if (!count) return true;   // an empty chunk would end the reply
+    char head[2 * sizeof(size_t) + 2];
+    size_t at = sizeof(head);
+    head[--at] = '\n';
+    head[--at] = '\r';
+    for (size_t rest = count; rest; rest >>= 4) {
+      const unsigned digit = rest & 15;
+      head[--at] = char(digit < 10 ? '0' + digit : 'a' + digit - 10);
+    }
+    return put(head + at, sizeof(head) - at) && put(data, count) && put("\r\n", 2);
+  }
+  void abandon() override { client_.abandon(); }
+ private:
+  bool put(const char* data, size_t count) {
+    return client_.write(reinterpret_cast<const uint8_t*>(data), count) == count;
+  }
+  Client& client_;
+};
 namespace jsonout {
 // Fixed text, given as PSTR().
 template <class Out> void raw(Out& out, const char* text) { out.writeFlash(text); }
