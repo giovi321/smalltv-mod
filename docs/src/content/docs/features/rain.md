@@ -5,6 +5,10 @@ description: The last 2 hours of rain around your location as a RainToday-style 
 
 Switch **Display → Mode** to **Rain** and set it up in the **Rain** tab. The screen becomes a radar scope centred on where you are: range rings and a crosshair, the rain field in a blue-to-purple ramp (drizzle in light blue, heavy rain in violet), nearby cities as reference dots, a green dot for your position, and a timeline at the bottom spanning the last 2 hours. The frames loop as an animation between refreshes, and the whole set refreshes every 15 minutes (10-minute radar steps).
 
+![The rain radar scope: grey-brown cloud layer, range rings and crosshair, Châteauroux and Bourges as hollow red diamonds, the timeline pill with the -2h/-1h/now labels](/smalltv-mod/assets/rain-preview.png)
+
+*A render of the screen (shown at 2×) with a real RainViewer frame — a cloudy evening over the Indre, in central France. The grey-brown field is the cloud layer in RainViewer's own colours; rain itself appears in the blue-to-purple ramp.*
+
 ## Set your location
 
 By default the radar is centred on the **device location**, the one you set in the Display tab's **Clock & night mode** card (see [Sunrise and sunset brightness](/smalltv-mod/features/sun/)). In the Rain tab this is the **Use the device location** box, and it is on. While it is on, the radar's own Latitude and Longitude fields are greyed out. If the device location is still 0/0 (not set), the screen asks you to set a location.
