@@ -24,9 +24,13 @@ class Sink {
  public:
   virtual ~Sink() = default;
   virtual bool write(const char* data, size_t count) = 0;
+  // Called once, after write() refused a piece: give the connection up now.
+  virtual void abandon() {}
 };
 // Collects what serializeJson() writes in a buffer of `Piece` bytes and
 // hands it to a Sink each time the buffer is full, and once more at the end.
+// After the Sink refuses a piece, the rest is dropped: a client that stopped
+// reading then costs one send timeout, not one for every piece left.
 template <size_t Piece> class PieceWriter {
  public:
   explicit PieceWriter(Sink& to) : to_(to) {}
@@ -38,9 +42,11 @@ template <size_t Piece> class PieceWriter {
   // Text kept in flash (PSTR).
   void writeFlash(const char* text) { put(text, strlen_P(text), memcpy_P); }
   void flush() {
-    if (used_) to_.write(buffer_, used_);
+    if (used_ && sent_) sent_ = to_.write(buffer_, used_);
     used_ = 0;
   }
+  // False once the Sink has refused a piece.
+  bool sent() const { return sent_; }
  private:
   void put(const void* data, size_t count, void* (*copy)(void*, const void*, size_t)) {
     const char* from = static_cast<const char*>(data);
@@ -54,6 +60,7 @@ template <size_t Piece> class PieceWriter {
   }
   Sink& to_;
   size_t used_ = 0;
+  bool sent_ = true;
   char buffer_[Piece];
 };
 namespace jsonout {

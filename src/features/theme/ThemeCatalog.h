@@ -212,9 +212,10 @@ class ListedTheme {
 namespace listing = jsonout;   // raw(), text() and number(), shared with the status reply
 // The reply of GET /api/themes, written straight to `to` in pieces of
 // `Piece` bytes (the last one shorter), never whole in one block of heap:
-// the same bytes as 3.2.0's document, fields in the same order.
+// the same bytes as 3.2.0's document, fields in the same order. False if
+// `to` refused a piece; nothing after that piece was sent.
 template <size_t Piece>
-void writeThemeList(const char* selected, const char* error, uint32_t freeBytes, const BlockList<ListedTheme>& themes, Sink& to) {
+bool writeThemeList(const char* selected, const char* error, uint32_t freeBytes, const BlockList<ListedTheme>& themes, Sink& to) {
   PieceWriter<Piece> out(to);
   listing::raw(out, PSTR("{\"selected\":"));
   listing::text(out, selected);
@@ -242,6 +243,8 @@ void writeThemeList(const char* selected, const char* error, uint32_t freeBytes,
   }
   listing::raw(out, PSTR("]}"));
   out.flush();
+  if (!out.sent()) to.abandon();
+  return out.sent();
 }
 // Install and delete rewrite the index through a copy: every usable entry
 // except the one for `id`, then `added` if given. False if a write fails.
