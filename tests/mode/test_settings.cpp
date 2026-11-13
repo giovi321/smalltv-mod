@@ -103,7 +103,7 @@ static void testRainSlice() {
   CHECK(s.rain.rangeKm == 100, "range clamped to 100");
 
   apply(s, "{\"rain\":{\"pollSec\":1}}");
-  CHECK(s.rain.pollSec == 60, "poll clamped to 60");
+  CHECK(s.rain.pollSec == 600, "poll clamped to 600 (a full fetch takes ~5-6 min)");
 
   // lat/lon survive a save that does not carry them.
   CHECK(fabsf(s.rain.lat - 47.1519f) < 0.0001f, "lat kept");
