@@ -14,7 +14,7 @@ const feat=between('var MODEOPT=','function modeChanged()');
 const collectCode=between('function collect(){','function saveAll(){');
 const tickerVars=between('var T_TEXT=','// IANA -> POSIX');
 
-const OPTIONS=['stocks','usage','radar','ha','theme','carousel'];
+const OPTIONS=['stocks','usage','radar','rain','ha','theme','carousel'];
 
 // A <select>: setting a value with no matching option leaves nothing selected.
 function makeSelect(){
@@ -50,7 +50,7 @@ for(const m of OPTIONS){
 
 // Lean build: the stored mode is a feature the build lacks. The page cannot
 // show it, so it sends no mode at all.
-for(const [feat,m] of [['radar','radar'],['usage','usage'],['ha','ha'],['ticker','stocks'],['theme','theme']]){
+for(const [feat,m] of [['radar','radar'],['rain','rain'],['usage','usage'],['ha','ha'],['ticker','stocks'],['theme','theme']]){
  const {ctx,els}=makePage();
  ctx.hideFeat(feat);
  els.mode.value=m;                       // what loadConfig does with the stored mode
