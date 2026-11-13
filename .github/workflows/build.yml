@@ -248,6 +248,15 @@ jobs:
       - name: Check image headroom
         run: python3 tools/ci_checks.py size --min-free 8192
 
+      # The loader exists to fit the stock OTA slot of the SmallTV-ultra, whose
+      # exact size is unknown: 577 KB was refused there, ~308 KB went through.
+      # Its status screen must not grow it past 340,000 B (it was 315,920 B).
+      - name: Check loader size
+        run: |
+          size=$(stat -c %s dist/smalltv-mod-loader.bin)
+          echo "smalltv-mod-loader.bin: $size B"
+          [ "$size" -le 340000 ] || { echo "loader over 340000 B"; exit 1; }
+
       # always(), so a run that dies after linking still hands over whatever was
       # produced. A size question cannot be answered from a red run with no
       # artifacts, and the step that reports sizes is the one that fails here.
