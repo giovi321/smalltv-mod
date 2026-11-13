@@ -685,7 +685,7 @@ static bool numericProperty(const std::string& name, BoundProperty& property) {
     {"y2", BoundProperty::Y2}, {"size", BoundProperty::Size},
     {"strokeWidth", BoundProperty::StrokeWidth}, {"scroll.width", BoundProperty::ScrollWidth},
     {"scroll.speed", BoundProperty::ScrollSpeed}, {"angle", BoundProperty::Angle},
-    {"sweep", BoundProperty::Sweep}
+    {"sweep", BoundProperty::Sweep}, {"frame", BoundProperty::Frame}
   };
   for (const auto& item : names) if (name == item.name) {
     property = item.property;
@@ -760,6 +760,7 @@ static bool applicable(const Layer& layer, BoundProperty property, bool color) {
     return property == BoundProperty::Stroke && layer.type == LayerType::Shape && layer.hasStroke;
   }
   if (property == BoundProperty::X || property == BoundProperty::Y) return true;
+  if (property == BoundProperty::Frame) return layer.type == LayerType::Animation;
   if (property == BoundProperty::ScrollWidth || property == BoundProperty::ScrollSpeed)
     return layer.type == LayerType::Text && layer.scroll.enabled;
   if (layer.type == LayerType::Text) return property == BoundProperty::Size && !layer.font;
@@ -870,6 +871,51 @@ static bool twoIntegers(JsonVariantConst value, const Fields& fields, const char
     return fields.fail(key, "expected exactly two integers from " + std::to_string(lo) + " to " + std::to_string(hi));
   return true;
 }
+// `bind.frame` on an animation (spec 2): the value picks the frame instead of
+// the clock. Either the numeric mapping (`input`, `output`, `clamp`; the
+// output ends are frame numbers) or `stops` (the last stop whose `at` is <= the
+// value gives its `frame`; below the first stop, the first stop's frame). A
+// moon cycle of 8 pictures needs 9 stops, so the limit is 16, not the color
+// stops' 8. The stops reuse ColorStop: `value` holds the frame number.
+// An optional `group` (frames per group; `frames` must be a multiple of it)
+// makes the value pick a group instead of a frame, and the group then plays at
+// the layer's fps and loop. The output ends and the stops' frames are then
+// group numbers. The group size lives in Layer::group (no per-layer RAM: it
+// takes a padding byte); the current group is state.frame / group.
+static const char frameStopCount[] PROGMEM = "expected 1 to 16 stops";
+static bool parseFrameBinding(JsonObjectConst declaration, const Fields& fields, const std::string& path, std::string& error,
+                              const Theme& theme, Layer& layer, Binding& binding) {
+  binding.stepped = fields.has("stops");
+  if (!fields.keys(binding.stepped ? "|source|stops|group|" : "|source|input|output|clamp|group|") || !fields.text("source", binding.source, 64)) return false;
+  if (!declaredSource(theme, binding, fields)) return false;
+  // With `group` the value picks a group of that many frames and the group
+  // plays; the output ends and the stops' frames are group numbers.
+  int last = layer.frames - 1;
+  if (fields.has("group")) {
+    if (!fields.number("group", 1, layer.frames, layer.group)) return false;
+    if (layer.frames % layer.group) return fields.fail("group", "frames must be a multiple of group");
+    last = layer.frames / layer.group - 1;
+  }
+  if (!binding.stepped) {
+    if (!twoReals(declaration["input"], fields, "input", binding.numeric.input0, binding.numeric.input1)) return false;
+    if (binding.numeric.input0 == binding.numeric.input1) return fields.fail("input", "endpoints must differ");
+    if (!twoIntegers(declaration["output"], fields, "output", 0, last, binding.numeric.output0, binding.numeric.output1)) return false;
+    return !fields.has("clamp") || fields.boolean("clamp", binding.numeric.clamp);
+  }
+  JsonArrayConst stops = declaration["stops"].as<JsonArrayConst>();
+  if (stops.isNull() || stops.size() == 0 || stops.size() > 16) return fields.fail("stops", fromFlash(frameStopCount));
+  double previous = 0;
+  for (size_t i = 0; i < stops.size(); ++i) {
+    JsonObjectConst item = stops[i].as<JsonObjectConst>();
+    Fields stop(item, path + ".stops[" + std::to_string(i) + "]", error);
+    ColorStop step;
+    if (!stop.keys("|at|frame|") || !stop.real("at", step.at) || !stop.number("frame", 0, last, step.value)) return false;
+    if (i && step.at <= previous) return stop.fail("at", "stops must be strictly increasing");
+    previous = step.at;
+    binding.colors.stops.push_back(step);
+  }
+  return true;
+}
 // Parses a text layer's `scroll` object. `mode` and `speed` are required;
 // `pause` and `gap` keep their Scroll struct defaults when omitted. `gap` is
 // rejected outright in bounce mode, where it has no effect (bounce only ever
@@ -910,7 +956,11 @@ static bool parseBindings(JsonObjectConst object, const Theme& theme, const std:
     JsonObjectConst declaration = pair.value().as<JsonObjectConst>();
     Fields fields(declaration, path + ".bind." + name, error);
     if (declaration.isNull()) return fields.fail("", "expected an object");
-    if (binding.color) {
+    if (binding.property == BoundProperty::Frame) {
+      if (theme.spec < 2) return bindings.fail("frame", fromFlash(fontNeedsSpec2));
+      if (!parseFrameBinding(declaration, fields, path + ".bind.frame", error, theme, layer, binding)) return false;
+      layer.frameBound = true;
+    } else if (binding.color) {
       if (!fields.keys("|source|stops|") || !fields.text("source", binding.source, 64)) return false;
       if (!declaredSource(theme, binding, fields)) return false;
       JsonArrayConst stops = declaration["stops"].as<JsonArrayConst>();
@@ -1461,6 +1511,9 @@ void Engine::resolveLayer(size_t index) {
   resolved.color = layer.color;
   resolved.fill = layer.fill;
   resolved.stroke = layer.stroke;
+  // A frame-bound animation shows frame 0 (group 0) until its value is there.
+  // Without `group` it does not play (update() skips the clock for it).
+  uint16_t frame = 0;
   for (const auto& binding : layer.bindings) {
     double value = 0;
     if (binding.builtin == BuiltIn::None || binding.builtin == BuiltIn::Device) {
@@ -1475,6 +1528,13 @@ void Engine::resolveLayer(size_t index) {
       // time.*: until the clock is set there is no value, so the static one stays.
       if (!hadTime_) continue;
       value = timeValue(binding.builtin, lastTime_);
+    }
+    if (binding.property == BoundProperty::Frame) {
+      frame = binding.stepped ? resolveColorBinding(binding.colors, value)
+                              : resolveNumericBinding(binding.numeric, value, 0,
+                                                      // With `group` the number counts groups, so the last one ends it.
+                                                      layer.group ? layer.frames / layer.group - 1 : layer.frames - 1);
+      continue;
     }
     if (binding.color) {
       const uint16_t color = resolveColorBinding(binding.colors, value);
@@ -1511,6 +1571,17 @@ void Engine::resolveLayer(size_t index) {
     resolved.cornerRadius = std::min<int>(resolved.cornerRadius,
       std::max(0, std::min(resolved.width, resolved.height) / 2));
   states_[index].resolved = resolved;
+  if (layer.frameBound) {
+    LayerState& state = states_[index];
+    if (!layer.group) {
+      state.frame = frame;
+    } else if (state.frame / layer.group != frame) {
+      // A different group: start it from its first frame. update() restarts
+      // the frame clock (it knows the time).
+      state.frame = frame * layer.group;
+      state.finished = false;
+    }
+  }
 }
 // True once `now` is strictly past `deadline`; wrap-safe across millis() rollover.
 static bool scrollDeadlinePassed(uint32_t now, uint32_t deadline) {
@@ -1853,6 +1924,7 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     const auto& l = theme_.layers[i];
     bool changed = full_;
     const ResolvedLayer previous = s.resolved;
+    const uint16_t previousFrame = s.frame;
     // Re-resolve bindings only when fetched values actually changed; a
     // geometry or color change (but not a scrollSpeed-only change, see
     // sameGeometry's own comment) marks this layer dirty.
@@ -1861,7 +1933,13 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     // binding does nothing on 59 of 60 seconds).
     if (valuesChanged_ || (timeChanged && l.timeBound)) {
       resolveLayer(i);
-      changed = changed || !sameGeometry(previous, s.resolved) || !sameColors(previous, s.resolved);
+      changed = changed || !sameGeometry(previous, s.resolved) || !sameColors(previous, s.resolved) ||
+        s.frame != previousFrame;
+      // A new group starts playing now, with no half frame left over.
+      if (l.group && s.frame != previousFrame) {
+        s.lastMs = now;
+        s.phase = 0;
+      }
     }
     bool textChanged = false;
     if (l.type == LayerType::Text && (timeChanged || valuesChanged_ || languageChanged_)) {
@@ -1874,7 +1952,7 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
         changed = true;
         textChanged = true;
       }
-    } else if (l.type == LayerType::Animation && !s.finished) {
+    } else if (l.type == LayerType::Animation && !s.finished && (!l.frameBound || l.group)) {
       // Same milli-frame accumulator technique as scroll's ticks: elapsed_ms *
       // fps accumulates exact whole frames, with the remainder kept in
       // `phase` so a late update() jumps straight to the due frame instead of
@@ -1883,8 +1961,12 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
       uint64_t step = ticks / 1000;
       s.phase = ticks % 1000;
       s.lastMs = now;
-      uint16_t next = l.loop ? (s.frame + step) % l.frames : std::min<uint64_t>(s.frame + step, l.frames - 1);
-      if (!l.loop && next == l.frames - 1) s.finished = true;
+      // A grouped layer plays only inside its group (group 0 = all the frames).
+      const uint16_t count = l.group ? l.group : l.frames;
+      const uint16_t first = l.group ? s.frame / l.group * l.group : 0;
+      const uint16_t at = s.frame - first;
+      uint16_t next = first + (l.loop ? (at + step) % count : std::min<uint64_t>(at + step, count - 1u));
+      if (!l.loop && next == first + count - 1) s.finished = true;
       if (next != s.frame) {
         s.frame = next;
         changed = true;
