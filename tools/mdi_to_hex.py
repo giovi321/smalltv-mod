@@ -5,6 +5,7 @@ Usage:
     python tools/mdi_to_hex.py window-open
     python tools/mdi_to_hex.py thermometer --size 48 --color "#FFCC00" --preview
     python tools/mdi_to_hex.py path/to/local-icon.svg --size 32
+    python tools/mdi_to_hex.py "https://example.com/path/to/remote-icon.svg" --size 24
 
 Given an icon name, the SVG is fetched from the MaterialDesign-SVG repo
 (https://raw.githubusercontent.com/Templarian/MaterialDesign-SVG/master/svg/<name>.svg).
@@ -39,15 +40,51 @@ SS = 16  # supersampling factor for rasterisation
 
 
 def load_svg(source: str) -> str:
-    """Return the SVG text for an MDI icon name or a local .svg file."""
+    """Return the SVG text from an MDI icon name, local file or a remote HTTP(S) URL."""
+
     if os.path.isfile(source):
         with open(source, "r", encoding="utf-8") as fh:
             return fh.read()
+
+    if source.startswith(("https://", "http://")):
+        try:
+            req = urllib.request.Request(
+                source,
+                headers={"User-Agent": "SmallTV-MDI-Converter/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = resp.read(2 * 1024 * 1024 + 1)
+
+                if len(data) > 2 * 1024 * 1024:
+                    sys.exit("error: SVG exceeds 2 MB limit")
+
+                text = data.decode("utf-8")
+
+                try:
+                    root = ET.fromstring(text)
+                except ET.ParseError:
+                    sys.exit("error: URL did not return valid SVG content")
+
+                if not root.tag.endswith("svg"):
+                    sys.exit("error: URL did not return an SVG document")
+
+                return text
+
+        except urllib.error.HTTPError as exc:
+            sys.exit(f"error: fetching SVG failed: HTTP {exc.code}")
+        except urllib.error.URLError as exc:
+            sys.exit(f"error: fetching SVG failed: {exc.reason}")
+        except UnicodeDecodeError:
+            sys.exit("error: SVG is not valid UTF-8")
+
     if source.lower().endswith(".svg"):
         sys.exit(f"error: file not found: {source}")
+
     if not all(ch.isalnum() or ch == "-" for ch in source):
-        sys.exit(f"error: not a valid MDI icon name or file: {source!r}")
+        sys.exit(f"error: not a valid MDI icon name, file, or URL: {source!r}")
+
     url = MDI_URL.format(source)
+
     try:
         with urllib.request.urlopen(url, timeout=20) as resp:
             return resp.read().decode("utf-8")
@@ -125,10 +162,10 @@ def ascii_preview(bits: list[list[bool]]) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Convert an MDI icon (or local SVG) to a SmallTV bitmap hex string."
+        description="Convert an MDI icon, local SVG or remote SVG URL to a SmallTV bitmap hex string."
     )
-    ap.add_argument("icon", help="MDI icon name (e.g. window-open) or path to an .svg file")
-    ap.add_argument("--size", type=int, choices=(24, 32, 48), default=24,
+    ap.add_argument("icon", help="MDI icon name, local SVG file, or HTTP(S) SVG URL")
+    ap.add_argument("--size", type=int, choices=(16, 24, 32, 48), default=24,
                     help="bitmap width/height in px (default 24; 48 only fits ESP32 payloads)")
     ap.add_argument("--color", default="#FFFFFF", help="colour for the JSON fragment (default #FFFFFF)")
     ap.add_argument("--preview", action="store_true", help="print an ASCII-art preview of the bitmap")
