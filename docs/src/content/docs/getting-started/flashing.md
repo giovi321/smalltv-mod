@@ -63,7 +63,7 @@ The fix is a two-step install through a tiny loader, no soldering. The loader is
 1. Get `smalltv-mod-loader.bin` from the [Releases page](https://github.com/giovi321/smalltv-mod/releases).
 2. Browse to `http://<device-ip>/update` and upload `smalltv-mod-loader.bin`. It fits the stock slot. The device reboots into the loader.
 3. The loader opens an open WiFi access point named `SmallTV-Loader`, and its screen shows the network name and the address. Join it and browse to `http://192.168.4.1`; the upload page opens there.
-4. Upload `smalltv-mod-firmware.bin` there. It fits because the loader uses this firmware's flash layout, which gives the sketch about 1,020 KB against an image of roughly 694 KB. The screen shows the upload progress, then the device reboots into the full smalltv-mod. Keep it powered until smalltv-mod's own screen appears.
+4. Upload `smalltv-mod-firmware.bin` there. It fits because the loader uses this firmware's flash layout, which leaves the upload about 2.8 MB against an image of about 840 KB. The screen shows the upload progress, then the device reboots into the full smalltv-mod. Keep it powered until smalltv-mod's own screen appears.
 5. It comes up in the usual `SmallTV-Setup` captive portal for WiFi. From here it is a normal ESP8266 smalltv-mod device.
 
 After this first install, normal OTA works from the System tab, because this firmware's layout has room for two sketch copies. You only need the loader once.
@@ -79,7 +79,7 @@ Confirmed working on a unit by a community tester ([issue #76](https://github.co
 Two things in the stock firmware decide the install:
 
 - The update page refuses a file whose name does not start with `SDP`. The check runs only in the browser, so renaming the file is enough
-- The stock flash layout keeps a 3 MB filesystem, which leaves an upload about 550 KB. `smalltv-mod-firmware.bin` (about 830 KB) and `smalltv-mod-firmware-lean.bin` (about 675 KB) do not fit; `smalltv-mod-loader.bin` (about 314 KB) does
+- The stock flash layout keeps a 3 MB filesystem, which leaves an upload about 550 KB. `smalltv-mod-firmware.bin` (about 840 KB) and `smalltv-mod-firmware-lean.bin` (about 680 KB) do not fit; `smalltv-mod-loader.bin` (about 314 KB) does
 
 So the install is the SmallTV-ultra's two steps with a renamed loader:
 
