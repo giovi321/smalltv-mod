@@ -1,5 +1,6 @@
 #include "StockClient.h"
 #include "Platform.h"
+#include "WaitingStream.h"
 #include <ArduinoJson.h>
 #include <math.h>
 
@@ -496,11 +497,12 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
   }
 
   bool ok;
+  WaitingStream body(http.getStream(), s.httpTimeout);   // see WaitingStream.h
   switch (kind) {
-    case PARSE_YAHOO:      ok = parseYahoo(s, d, http.getStream());     break;
-    case PARSE_CASH_QUOTE: ok = parseCashQuote(s, d, http.getStream()); break;
-    case PARSE_CASH_CHART: ok = parseCashChart(s, d, http.getStream()); break;
-    default:               ok = parseWebhook(s, d, http.getStream());   break;  // webhook + github: same JSON
+    case PARSE_YAHOO:      ok = parseYahoo(s, d, body);     break;
+    case PARSE_CASH_QUOTE: ok = parseCashQuote(s, d, body); break;
+    case PARSE_CASH_CHART: ok = parseCashChart(s, d, body); break;
+    default:               ok = parseWebhook(s, d, body);   break;  // webhook + github: same JSON
   }
   http.end();
   return ok;
