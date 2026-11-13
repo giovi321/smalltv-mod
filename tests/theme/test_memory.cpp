@@ -877,8 +877,9 @@ static void testDataReply() {
   };
   // Open-Meteo's shape with made-up numbers and coordinates 0/0: the current
   // reply (6 fields) and the daily one (2 fields), as a weather theme's two
-  // sources get them. (A path does not go into a list here, so the daily
-  // reply is shaped with plain values.)
+  // sources get them. (These are spec 1 sources: a path does not go into a
+  // list, so the daily reply is shaped with plain values. The list shape, with
+  // index paths, is in testDataReplyLists.)
   const std::string current =
       R"({"latitude":0.0,"longitude":0.0,"generationtime_ms":0.04,"utc_offset_seconds":0,"timezone":"GMT","timezone_abbreviation":"GMT","elevation":0.0,)"
       R"("current_units":{"time":"iso8601","interval":"seconds","temperature_2m":"C","relative_humidity_2m":"%","apparent_temperature":"C","is_day":"","weather_code":"wmo code","wind_speed_10m":"km/h"},)"
@@ -927,6 +928,59 @@ static void testDataReply() {
   assert(DataParseBudget <= 2 * std::max(a.peak, b.peak));
 }
 
+// The same fetch with a spec 2 source that reads list elements. A path that
+// goes into a list keeps the whole list while parsing (the filter cannot pick
+// one element), so the real two-day forecast, whose lists hold two numbers
+// each, must still fit the gate's constants; and a list too long for the
+// budget must be refused, not parsed until the heap is gone.
+static void testDataReplyLists() {
+  auto source = [](std::initializer_list<const char*> paths) {
+    ThemeDataSource s;
+    s.id = "d";
+    s.listIndexes = true;
+    for (const char* path : paths) {
+      ThemeDataField f;   // not brace-initialised: it has a default member initializer
+      f.id = "f" + std::to_string(s.fields.size());
+      f.path = path;
+      s.fields.push_back(f);
+    }
+    return s;
+  };
+  // Open-Meteo's daily reply with `forecast_days=2`, made-up numbers and
+  // coordinates 0/0: what a weather theme's "high and low" source gets.
+  const std::string daily =
+      R"({"latitude":0.0,"longitude":0.0,"generationtime_ms":0.05,"utc_offset_seconds":0,"timezone":"GMT","timezone_abbreviation":"GMT","elevation":0.0,)"
+      R"("daily_units":{"time":"iso8601","temperature_2m_max":"C","temperature_2m_min":"C"},)"
+      R"("daily":{"time":["2030-01-01","2030-01-02"],"temperature_2m_max":[18.4,17.0],"temperature_2m_min":[9.1,8.2]}})";
+  const ThemeDataSource highLow = source({"daily.temperature_2m_max.0", "daily.temperature_2m_min.1"});
+  const ThemeDataSource allSix = source({"daily.temperature_2m_max.0", "daily.temperature_2m_max.1", "daily.temperature_2m_min.0",
+                                         "daily.temperature_2m_min.1", "daily.time.0", "daily.time.1"});
+  const FetchMeasure a = measureParse(daily, highLow), b = measureParse(daily, allSix);
+  printf("fetch lists: daily (%zu B), 2 index fields peak %zu B, largest %zu B; 6 index fields peak %zu B, largest %zu B\n",
+         daily.size(), a.peak, a.largest, b.peak, b.largest);
+  fflush(stdout);
+  assert(a.ok && b.ok);
+  // Inside the gate: the peak within FetchParseHeap, the largest request within FetchLargestBlock (8 B of allocator overhead).
+  assert(a.peak <= FetchParseHeap && b.peak <= FetchParseHeap);
+  assert(a.largest + 8 <= FetchLargestBlock && b.largest + 8 <= FetchLargestBlock);
+  assert(a.peak <= DataParseBudget && b.peak <= DataParseBudget);
+  // The worst replies for the budget, now through an index path: a long list
+  // of numbers and a long list of strings, as long as a reply may be.
+  const ThemeDataSource first = source({"a.0"});
+  std::string numbers = "{\"a\":[", words = "{\"a\":[";
+  while (numbers.size() + 4 < MaxDataBody) numbers += "1,";
+  numbers += "1]}";
+  while (words.size() + 12 < MaxDataBody) words += "\"abcdefg\",";
+  words += "\"abcdefg\"]}";
+  const FetchMeasure c = measureParse(numbers, first), d = measureParse(words, first);
+  printf("fetch lists: numbers %s peak %zu B, largest %zu B; strings %s peak %zu B, largest %zu B\n",
+         c.ok ? "read" : "refused", c.peak, c.largest, d.ok ? "read" : "refused", d.peak, d.largest);
+  fflush(stdout);
+  assert(!c.ok && !d.ok);   // refused by the budget
+  assert(c.peak <= FetchParseHeap && d.peak <= FetchParseHeap);
+  assert(c.largest + 8 <= FetchLargestBlock && d.largest + 8 <= FetchLargestBlock);
+}
+
 int main(int argc, char** argv) {
   // A show rule holds its ranges itself (4 floats a side) and names its source
   // by index: 40 bytes, no string and no vector of its own.
@@ -935,6 +989,7 @@ int main(int argc, char** argv) {
   testShowRules();
   testWorstValidSource();
   testDataReply();
+  testDataReplyLists();
   testBlockList();
   testStopTables();
   testFrameBinding();

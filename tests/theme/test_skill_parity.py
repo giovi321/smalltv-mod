@@ -266,6 +266,11 @@ MANIFESTS = {
     'data id time': manifest(data=[dict(SOURCE, id='time')]),
     'https no insecure': manifest(data=[dict(SOURCE, url='https://a/b')]),
     'interval 5': manifest(data=[dict(SOURCE, interval=5)]),
+    # A number in a path picks a list element when the reply is read (spec 2);
+    # the manifest rules are the same at both specs, so both validators accept it.
+    'data path index': manifest(data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'daily.temperature_2m_max.0'}])]),
+    'data path index spec1': manifest(spec=1, data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'daily.temperature_2m_max.0'}])]),
+    'data path empty part': manifest(data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'daily..0'}])]),
     'bounce gap': layer(scroll={'width': 50, 'mode': 'bounce', 'speed': 10, 'gap': 3}),
     'size 97': layer(size=97),
     'color short': layer(color='#fff'),
@@ -323,7 +328,7 @@ MANIFESTS = {
 @needs_native
 class ManifestParityTests(unittest.TestCase):
     def test_validators_agree(self):
-        self.assertEqual(len(MANIFESTS), 82)
+        self.assertEqual(len(MANIFESTS), 85)
         with tempfile.TemporaryDirectory() as d:
             path = Path(d)/'theme.json'
             for name, theme in MANIFESTS.items():

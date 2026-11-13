@@ -253,13 +253,15 @@ enum Target { PackageTarget, ManifestTarget, MetaTarget, ImportTarget, FontTarge
 // reply over 2,048 bytes (MaxDataBody) and so does this.
 void fuzzData(const Bytes& input, uint64_t seed) {
   static const char* const paths[] = {"daily.temperature_2m_max", "daily.temperature_2m_min", "daily.time", "current.temperature_2m",
-                                      "a.b", "a.b.c", "a", "0", "a.0", "daily.0", "x..y", "current.weather_code"};
+                                      "a.b", "a.b.c", "a", "0", "a.0", "daily.0", "x..y", "current.weather_code",
+                                      "daily.temperature_2m_max.0", "daily.temperature_2m_min.1", "a.15", "a.16", "a.00", "a.-1", "a.0.1", "a.0.b.1"};
   ThemeDataSource source;
   source.id = "d";
-  for (size_t i = 0; i < 8; ++i) {   // a different 8 of the 12 each case
+  source.listIndexes = (seed & 1) != 0;   // half the cases read list indexes (spec 2), half do not (spec 1)
+  for (size_t i = 0; i < 8; ++i) {   // a different 8 of the 20 each case
     ThemeDataField field;            // not brace-initialised: it has a default member initializer
     field.id = "f" + std::to_string(i);
-    field.path = paths[(seed + i) % 12];
+    field.path = paths[(seed + i) % 20];
     source.fields.push_back(field);
   }
   // The reply goes through the reader the device uses (readDataValues): the

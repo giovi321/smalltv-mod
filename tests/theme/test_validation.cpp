@@ -110,6 +110,22 @@ int main() {
   deserializeJson(d,dataBase);d["layers"][0]["value"]="{unknown.temp}";serializeJson(d,json);assert(!parseTheme(json,theme,error));
   deserializeJson(d,dataBase);d["data"][0]["url"]="https://";serializeJson(d,json);assert(!parseTheme(json,theme,error));
   deserializeJson(d,dataBase);d["data"][0]["fields"][0]["path"]="main..temp";serializeJson(d,json);assert(!parseTheme(json,theme,error));
+  // A number in a path part is accepted by the manifest at either spec; it
+  // picks a list element only for a spec 2 theme, when the reply is read
+  // (ThemeDataSource::listIndexes). The manifest rules are the same as before.
+  for(int spec:{1,2}) {
+    deserializeJson(d,dataBase);d["spec"]=spec;d["data"][0]["url"]="http://example.test/weather.json";
+    d["data"][0]["fields"][0]["path"]="daily.temperature_2m_max.0";serializeJson(d,json);
+    assert(parseTheme(json,theme,error));
+    assert(theme.data[0].fields[0].path=="daily.temperature_2m_max.0");
+    assert(theme.data[0].listIndexes==(spec==2));
+    deserializeJson(d,dataBase);d["spec"]=spec;d["data"][0]["url"]="http://example.test/weather.json";
+    d["data"][0]["fields"][0]["path"]="daily.0..1";serializeJson(d,json);
+    assert(!parseTheme(json,theme,error));assert(error.find("non-empty")!=std::string::npos);
+    deserializeJson(d,dataBase);d["spec"]=spec;d["data"][0]["url"]="http://example.test/weather.json";
+    d["data"][0]["fields"][0]["path"]="daily. 0";serializeJson(d,json);
+    assert(!parseTheme(json,theme,error));assert(error.find("dotted JSON object path")!=std::string::npos);
+  }
   deserializeJson(d,dataBase);d["data"]=42;serializeJson(d,json);assert(!parseTheme(json,theme,error));
   // `decimals` is optional and spec 2 only: 0 to 3 places, and -1 (not set) when absent.
   dataDocument(d);d["spec"]=2;serializeJson(d,json);assert(parseTheme(json,theme,error));assert(theme.data[0].fields[0].decimals==-1);
