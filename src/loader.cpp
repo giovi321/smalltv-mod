@@ -159,13 +159,15 @@ static const char kPage[] PROGMEM =
   "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
   "<meta name='viewport' content='width=device-width,initial-scale=1'></head><body>"
   "<form method='POST' action='/update' enctype='multipart/form-data'>Firmware:<br>"
-  "<input type='file' accept='.bin,.bin.gz' name='firmware'> "
+  "<input type='file' accept='.bin' name='firmware'> "
   "<input type='submit' value='Update Firmware'></form></body></html>";
 static const char kSuccess[] PROGMEM =
   "<META http-equiv=\"refresh\" content=\"15;URL=/\">Update Success! Rebooting...";
 
-static bool    g_ok  = false;   // last upload was written and verified by Update.end()
-static uint8_t g_pct = 0;
+static bool        g_ok    = false;     // last upload was written and verified by Update.end()
+static bool        g_first = false;     // the next chunk is the file's first
+static const char* g_err   = nullptr;   // why the file was refused before any write (PSTR)
+static uint8_t     g_pct   = 0;
 
 static void sendPage() { server.send_P(200, PSTR("text/html"), kPage); }
 
@@ -174,17 +176,37 @@ static void corsHeaders() {
   server.sendHeader(F("Access-Control-Allow-Origin"), F("*"));
 }
 
+// The first chunk decides, before Update.begin() and any write to flash.
+// A gzip image (.bin.gz) is refused: Updater::end() does not verify one, and
+// eboot erases and rewrites the app while it inflates, so a truncated .gz
+// leaves a unit that resets in a loop.
+static const char* refuseImage(const uint8_t* b, size_t n) {
+  if (n && b[0] == 0x1F) return PSTR(".bin.gz not accepted: upload the .bin");
+  return nullptr;
+}
+
 static void handleUpload() {
   HTTPUpload& up = server.upload();
   if (up.status == UPLOAD_FILE_START) {
-    g_ok  = false;
-    g_pct = 0;
+    g_ok    = false;
+    g_first = true;
+    g_err   = nullptr;
+    g_pct   = 0;
     if (Update.isRunning()) Update.end();   // drop anything a previous attempt left open
     Serial.printf_P(PSTR("Update: %s\n"), up.filename.c_str());
     scrBusy();
-    uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-    Update.begin(maxSketchSpace, U_FLASH);   // a failure stays in Update.getError()
   } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (g_first) {
+      g_first = false;
+      g_err = refuseImage(up.buf, up.currentSize);
+      if (g_err) {
+        scrFail(g_err);
+      } else {
+        uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+        Update.begin(maxSketchSpace, U_FLASH);   // a failure stays in Update.getError()
+      }
+    }
+    if (g_err) return;   // refused: let the rest of the request drain, write nothing
     if (!Update.hasError()) Update.write(up.buf, up.currentSize);   // a short write sets the error
     if (up.contentLength && !Update.hasError()) {   // whole request, so the bar ends a few hundred bytes short of 100
       uint32_t pct = (uint32_t)up.totalSize * 100u / up.contentLength;
@@ -192,18 +214,21 @@ static void handleUpload() {
       if (pct != g_pct) { g_pct = pct; scrProgress(pct); }
     }
   } else if (up.status == UPLOAD_FILE_END) {
-    g_ok = Update.end(true);   // true: size = bytes received; on an error it only resets, so a retry works
+    // true: size = bytes received; on an error it only resets, so a retry works
+    if (!g_err && !g_first) g_ok = Update.end(true);
     Serial.printf_P(PSTR("Update %s: %u\n"), g_ok ? "ok" : "failed", up.totalSize);
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     Update.end();
-    scrFail(PSTR("upload aborted"));
+    scrFail(g_err ? g_err : PSTR("upload aborted"));
   }
 }
 
 static void handleUpdateDone() {
   corsHeaders();
   if (!g_ok) {
-    String err = Update.hasError() ? Update.getErrorString() : String(F("no firmware received"));
+    String err = g_err ? String(FPSTR(g_err))
+               : Update.hasError() ? Update.getErrorString() : String(F("no firmware received"));
+    g_err = nullptr;
     scrFail(err.c_str());
     server.send(200, F("text/html"), String(F("Update error: ")) + err);
     return;
