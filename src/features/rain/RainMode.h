@@ -27,6 +27,15 @@ class RainMode : public DisplayMode {
  private:
   void render(const Settings& s);
 
+  // Empreinte des réglages qui façonnent les frames (home + portée) : un
+  // invalidate() ne réinitialise le fetch que s'ils ont changé. Un save de
+  // config qui ne touche pas le radar (luminosité, tickers, carrousel, uiScale…)
+  // ne doit pas annuler un fetch en cours : il coûte ~5-6 min, re-télécharge
+  // tout, et l'appareil cesse de répondre en HTTP pendant ce temps (vécu).
+  float   fetchLat_ = 0.0f;
+  float   fetchLon_ = 0.0f;
+  int16_t fetchRange_ = -1;     // -1 = jamais initialisé (10..100 sinon)
+
   uint32_t renderedOk_ = 0xFFFFFFFF;
   bool     renderedError_ = false;
   bool     needRender_ = true;

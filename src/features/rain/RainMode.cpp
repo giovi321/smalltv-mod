@@ -313,6 +313,9 @@ static void drawRain(const Settings& s, uint8_t animIdx) {
 // ---- DisplayMode ------------------------------------------------------------
 void RainMode::begin(const Settings& s) {
   rainInit(s);
+  fetchLat_ = rainLat(s);
+  fetchLon_ = rainLon(s);
+  fetchRange_ = (int16_t)lroundf((float)s.rain.rangeKm);
   renderedOk_ = 0xFFFFFFFF;
   renderedError_ = false;
   needRender_ = true;
@@ -320,11 +323,26 @@ void RainMode::begin(const Settings& s) {
 }
 
 void RainMode::invalidate(const Settings& s) {
-  rainInit(s);
-  rainForceRefresh();
+  // Re-init + re-fetch immédiat seulement si ce qui façonne les frames a
+  // changé (home ou portée — le crop et le centrage). Tout autre save de
+  // config (mode, luminosité, tickers, uiScale…) laisse le fetch en cours
+  // tranquille : le rendu lit les Settings en direct et le cache des villes
+  // se re-clé de lui-même. Avant ce garde-fou, chaque POST /api/config et
+  // chaque appui sur le bouton « Home » annulaient un fetch en cours et en
+  // relançaient un immédiatement (~5-6 min de fetch recommencées de zéro,
+  // HTTP quasi muet pendant ce temps).
+  const float lat = rainLat(s), lon = rainLon(s);
+  const int16_t range = (int16_t)lroundf((float)s.rain.rangeKm);
+  if (lat != fetchLat_ || lon != fetchLon_ || range != fetchRange_) {
+    fetchLat_ = lat;
+    fetchLon_ = lon;
+    fetchRange_ = range;
+    rainInit(s);
+    rainForceRefresh();
+    animIdx_ = 0;
+  }
   renderedOk_ = 0xFFFFFFFF;
   needRender_ = true;
-  animIdx_ = 0;
 }
 
 void RainMode::render(const Settings& s) {
