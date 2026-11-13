@@ -140,6 +140,9 @@ jobs:
       - name: Test web password
         run: sh tests/auth/run.sh
 
+      - name: Test radar colors
+        run: sh tests/radar/run_colors.sh
+
       # The mode of a save: an empty or unknown mode keeps the stored one, and
       # the page sends no mode when its list lacks the stored one.
       - name: Test mode of a save

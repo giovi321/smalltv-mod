@@ -38,6 +38,10 @@ button.btn:disabled{opacity:.5}
 .muted{color:var(--mut);font-size:13px}
 table{width:100%;border-collapse:collapse}
 td{padding:6px 4px}
+.radar-colors{table-layout:fixed;margin-top:12px}
+.radar-colors td{vertical-align:top}
+.radar-colors label{margin-top:0}
+.radar-colors input[type=color]{width:100%;height:42px;padding:4px;cursor:pointer}
 .symrow input{margin:0}
 .kv{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bd)}
 .kv:last-child{border:0}.kv b{font-weight:600}
@@ -339,6 +343,25 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
   <div class="card"><h2>What to show</h2>
    <label>Marker &amp; label size</label>
    <select id="radarUiScale"><option value="0">Small</option><option value="1">Medium</option><option value="2">Large</option></select>
+   <table class="radar-colors"><tbody><tr>
+    <td><label for="radarMarkerColor">Aircraft markers</label>
+     <input id="radarMarkerColor" type="color" value="#ff0000">
+     <small class="hint">Airplane symbols and off-screen dots.</small></td>
+    <td><label for="radarLineColor">Radar lines</label>
+     <input id="radarLineColor" type="color" value="#424142">
+     <small class="hint">Range rings and crosshairs.</small></td>
+    <td><label for="radarAircraftColor">Aircraft info</label>
+     <input id="radarAircraftColor" type="color" value="#848284">
+     <small class="hint">Callsigns and altitudes.</small></td>
+    <td><label for="radarAirportColor">Airport labels</label>
+     <input id="radarAirportColor" type="color" value="#0082ff">
+     <small class="hint">Airport names; blue by default.</small></td>
+    <td><label for="radarLabelColor">General text</label>
+     <input id="radarLabelColor" type="color" value="#848284">
+     <small class="hint">Compass, distance, and aircraft count.</small></td>
+   </tr></tbody></table>
+   <button type="button" class="btn sec" style="margin-top:10px" onclick="radarResetColors()">Reset colors to defaults</button>
+   <small class="hint">Reset fills the color controls. Save settings to apply your choices.</small>
    <label style="margin-top:12px">Hide aircraft below (ft, 0 = show all)</label>
    <input id="radarMinAlt" type="number" min="0" max="60000" step="100">
    <small class="hint">Drops ground traffic (parked/taxiing) and low flights. Try <code>500</code> to hide anything on or near the ground.</small>
@@ -604,12 +627,25 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sc('showLabels',r.showLabels); sc('showVectors',r.showVectors); sc('showRimDots',r.showRimDots);
  sv('radarUiScale',r.uiScale!=null?r.uiScale:1);
  sv('radarMinAlt',r.minAltFt!=null?r.minAltFt:0);
+ sv('radarMarkerColor',r.markerColor||'#ff0000');
+ sv('radarLineColor',r.lineColor||'#424142');
+ sv('radarAircraftColor',r.aircraftColor||'#848284');
+ sv('radarAirportColor',r.airportColor||'#0082ff');
+ sv('radarLabelColor',r.labelColor||'#848284');
  renderAps(r.airports||[]);
  var au=c.auth||{};
  sv('authUser',au.user||'admin'); authShow(!!au.passSet);
  var ap=$('apPass'); if(ap){ap.value='';ap.placeholder=c.apPassSet?'(unchanged)':'(open)';}
  sc('apOpen',!c.apPassSet); apOpenChanged();
 })}
+
+function radarResetColors(){
+ sv('radarMarkerColor','#ff0000');
+ sv('radarLineColor','#424142');
+ sv('radarAircraftColor','#848284');
+ sv('radarAirportColor','#0082ff');
+ sv('radarLabelColor','#848284');
+}
 
 function esc(s){return (''+(s==null?'':s)).replace(/[<>&"]/g,function(c){return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]})}
 function symHintFor(v){var h=$('symHint');if(!h)return;
@@ -753,7 +789,12 @@ function collect(){
    pollSec:parseInt(gv('radarPollSec'))||0, source:gv('radarSource'),
    webhookUrl:gv('radarWebhookUrl'),
    showLabels:gc('showLabels'), showVectors:gc('showVectors'), showRimDots:gc('showRimDots'),
-   uiScale:parseInt(gv('radarUiScale'))||0, minAltFt:parseInt(gv('radarMinAlt'))||0};
+   uiScale:parseInt(gv('radarUiScale'))||0, minAltFt:parseInt(gv('radarMinAlt'))||0,
+   markerColor:gv('radarMarkerColor')||'#ff0000',
+   lineColor:gv('radarLineColor')||'#424142',
+   aircraftColor:gv('radarAircraftColor')||'#848284',
+   airportColor:gv('radarAirportColor')||'#0082ff',
+   labelColor:gv('radarLabelColor')||'#848284'};
   r.airports=[];
   document.querySelectorAll('#apTable tr').forEach(function(tr){
    var ic=tr.querySelector('.ai').value.trim();

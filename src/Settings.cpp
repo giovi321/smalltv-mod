@@ -3,6 +3,8 @@
 #include "Platform.h"   // platformChipId() for the unique default hostname
 #include "features/theme/Languages.h"
 #include <LittleFS.h>
+#include <ctype.h>
+#include <stdlib.h>
 
 static const char* CONFIG_PATH = "/config.json";
 // Bytes in CONFIG_PATH as last read or written: what the next save needs on
@@ -394,6 +396,21 @@ void HaSettings::fromJson(JsonObjectConst o) {
 // ===========================================================================
 // Radar slice
 // ===========================================================================
+static void writeColor(JsonObject o, const char* key, uint32_t color) {
+  char hex[8];
+  snprintf(hex, sizeof(hex), "#%06lx", (unsigned long)(color & 0xFFFFFF));
+  o[key] = hex;
+}
+
+static void readColor(JsonVariantConst value, uint32_t& color) {
+  if (!value.is<const char*>()) return;
+  const char* hex = value.as<const char*>();
+  bool valid = strlen(hex) == 7 && hex[0] == '#';
+  for (uint8_t i = 1; valid && i < 7; i++)
+    valid = isxdigit((unsigned char)hex[i]);
+  if (valid) color = (uint32_t)strtoul(hex + 1, nullptr, 16);
+}
+
 void RadarSettings::setDefaults() {
   lat = DEFAULT_RADAR_LAT;
   lon = DEFAULT_RADAR_LON;
@@ -408,6 +425,11 @@ void RadarSettings::setDefaults() {
   showRimDots = true;
   uiScale = 1;            // medium
   minAltFt = 0;           // show all
+  markerColor = 0xFF0000; // original red aircraft markers
+  lineColor = 0x424142;   // original C_DGRAY (RGB565 0x4208)
+  aircraftColor = 0x848284; // original C_GRAY (RGB565 0x8410)
+  airportColor = 0x0082FF; // the original blue airport-name color
+  labelColor = 0x848284;
   airportCount = 0;
   for (uint8_t i = 0; i < MAX_AIRPORTS; i++) {
     airports[i].icao[0] = 0;
@@ -430,6 +452,11 @@ void RadarSettings::toJson(JsonObject o) const {
   o["showRimDots"] = showRimDots;
   o["uiScale"]     = uiScale;
   o["minAltFt"]    = minAltFt;
+  writeColor(o, "markerColor", markerColor);
+  writeColor(o, "lineColor", lineColor);
+  writeColor(o, "aircraftColor", aircraftColor);
+  writeColor(o, "airportColor", airportColor);
+  writeColor(o, "labelColor", labelColor);
 
   JsonArray arr = o["airports"].to<JsonArray>();
   for (uint8_t i = 0; i < airportCount; i++) {
@@ -469,6 +496,11 @@ void RadarSettings::fromJson(JsonObjectConst o) {
   if (o["showRimDots"].is<bool>()) showRimDots = o["showRimDots"];
   if (o["uiScale"].is<int>())      uiScale = constrain((int)o["uiScale"], 0, 2);
   if (o["minAltFt"].is<int>())     minAltFt = constrain((int)o["minAltFt"], 0, 60000);
+  readColor(o["markerColor"], markerColor);
+  readColor(o["lineColor"], lineColor);
+  readColor(o["aircraftColor"], aircraftColor);
+  readColor(o["airportColor"], airportColor);
+  readColor(o["labelColor"], labelColor);
 
   if (o["airports"].is<JsonArrayConst>()) {
     JsonArrayConst arr = o["airports"].as<JsonArrayConst>();
