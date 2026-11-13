@@ -1,6 +1,9 @@
 #include "RadarClient.h"
 #include "Platform.h"
 #include <ArduinoJson.h>
+#include <StreamUtils.h>
+#include "RadarInputStream.h"
+#include "RadarJsonAllocator.h"
 #include <math.h>
 
 static Aircraft g_ac[MAX_AIRCRAFT];   // kept sorted nearest-first
@@ -29,6 +32,8 @@ static TlsSession g_tlsSession;
 // Last-poll diagnostics (see RadarStage in the header).
 static RadarStage g_stage = RADAR_IDLE;
 static int        g_lastHttp = 0;
+static const char* g_parseError = "";  // ArduinoJson static error string; no allocation
+static int        g_tlsError = 0;
 static uint16_t   g_seenAc = 0;
 static uint32_t   g_lastTryMs = 0;
 static String     g_lastUrl;
@@ -40,6 +45,8 @@ bool            radarError()      { return g_error; }
 
 RadarStage    radarStage()     { return g_stage; }
 int           radarLastHttp()  { return g_lastHttp; }
+const char*   radarParseError(){ return g_parseError; }
+int           radarTlsError()  { return g_tlsError; }
 uint16_t      radarTlsRx()     { return g_tlsRx; }
 uint16_t      radarSeenAc()    { return g_seenAc; }
 uint32_t      radarLastTryMs() { return g_lastTryMs; }
@@ -67,6 +74,8 @@ void radarInit(const Settings& s) {
   g_nextPollMs = millis();
   g_stage = RADAR_IDLE;
   g_lastHttp = 0;
+  g_parseError = "";
+  g_tlsError = 0;
   g_seenAc = 0;
   g_lastTryMs = 0;
   g_lastUrl = "";
@@ -151,10 +160,21 @@ static String buildWebhookUrl(const Settings& s) {
   return u;
 }
 
+// Conservative JSON limits; the ESP8266 reserve leaves room for receive
+// packets and bookkeeping. These are guards, not measured crash thresholds.
+#if defined(SMALLTV_FAMILY_ESP8266)
+static size_t radarFreeHeap() { return ESP.getFreeHeap(); }
+#endif
+
 // ---- parse the open-data / webhook "ac" array ------------------------------
 static bool parseAdsb(const Settings& s, Stream& stream) {
   // Filter to just the fields we plot; applied to every element of "ac".
-  JsonDocument filter;
+#if defined(SMALLTV_FAMILY_ESP8266)
+  RadarJsonAllocator allocator(20 * 1024, 4 * 1024, radarFreeHeap);
+#else
+  RadarJsonAllocator allocator(64 * 1024);
+#endif
+  JsonDocument filter(&allocator);
   JsonObject fe = filter["ac"][0].to<JsonObject>();
   fe["lat"] = true;
   fe["lon"] = true;
@@ -163,13 +183,19 @@ static bool parseAdsb(const Settings& s, Stream& stream) {
   fe["flight"] = true;
   fe["hex"] = true;
   fe["alt_baro"] = true;
+  // Local readsb / dump1090 receivers use "aircraft" instead of API "ac".
+  filter["aircraft"] = filter["ac"];
 
-  JsonDocument doc;
+  if (filter.overflowed()) {
+    g_parseError = "NoMemory"; g_stage = RADAR_PARSE_FAIL; return false;
+  }
+  JsonDocument doc(&allocator);
   DeserializationError err =
       deserializeJson(doc, stream, DeserializationOption::Filter(filter));
-  if (err) { g_stage = RADAR_PARSE_FAIL; return false; }
+  if (err) { g_parseError = err.c_str(); g_stage = RADAR_PARSE_FAIL; return false; }
 
   JsonArrayConst ac = doc["ac"].as<JsonArrayConst>();
+  if (ac.isNull()) ac = doc["aircraft"].as<JsonArrayConst>();
   if (ac.isNull()) { g_stage = RADAR_NO_AC; return false; }
 
   g_seenAc = 0;
@@ -209,6 +235,10 @@ static bool parseAdsb(const Settings& s, Stream& stream) {
 
 // ---- one HTTP(S) GET + parse ----------------------------------------------
 static bool fetchUrl(const Settings& s, const String& url) {
+  g_parseError = "";
+  g_tlsError = 0;
+  g_lastHttp = 0;
+  g_seenAc = 0;
   bool https = url.startsWith("https://");
 
   std::unique_ptr<NetClient> client;
@@ -225,15 +255,11 @@ static bool fetchUrl(const Settings& s, const String& url) {
   }
 
   HTTPClient http;
-  // HTTP/1.0: a 1.0 response cannot be chunked, and parseAdsb reads the raw
-  // stream. Cloudflare (fronting adsb.fi) answers 1.1 requests chunked, and the
-  // chunk-size framing then reaches ArduinoJson, which reads the first hex
-  // length as a bare number and reports a valid document with no "ac" in it —
-  // an empty scope with HTTP 200 and no error anywhere.
-  // adsb.lol is the exception: it refuses 1.0 with "426 Upgrade Required" and
-  // answers 1.1 with a Content-Length body, not chunked, at every range. So
-  // only adsb.lol gets a 1.1 request; adsb.fi and the webhook keep 1.0.
-  http.useHTTP10(url.indexOf(ADSB_LOL_HOST) < 0);
+  // adsb.lol rejects HTTP/1.0 with 426. Use HTTP/1.1 and decode chunked
+  // bodies below: getStream() exposes raw framing on both Arduino cores.
+  http.useHTTP10(false);
+  const char* headers[] = {"Transfer-Encoding"};
+  http.collectHeaders(headers, 1);
   http.setTimeout(s.httpTimeout);
   http.setReuse(false);
   if (!http.begin(*client, url)) { g_stage = RADAR_CONNECT_FAIL; return false; }
@@ -244,6 +270,9 @@ static bool fetchUrl(const Settings& s, const String& url) {
   int code = http.GET();
   g_lastHttp = code;
   if (code != HTTP_CODE_OK) {
+#if defined(SMALLTV_FAMILY_ESP8266)
+    if (https) g_tlsError = static_cast<SecureClient*>(client.get())->getLastSSLError(nullptr, 0);
+#endif
     http.end();
     // A negative code is an ESP8266HTTPClient internal error (connection
     // refused, read timeout, connection lost) rather than a server reply.
@@ -251,7 +280,18 @@ static bool fetchUrl(const Settings& s, const String& url) {
     return false;
   }
 
-  bool ok = parseAdsb(s, http.getStream());
+  RadarInputStream body(http.getStream(), s.httpTimeout);
+  bool ok;
+  if (http.header("Transfer-Encoding").equalsIgnoreCase("chunked")) {
+    ChunkDecodingStream decoded(body);
+    ok = parseAdsb(s, decoded);
+  } else {
+    ok = parseAdsb(s, body);
+  }
+  // Capture before end() tears down the TLS connection.
+#if defined(SMALLTV_FAMILY_ESP8266)
+  if (https) g_tlsError = static_cast<SecureClient*>(client.get())->getLastSSLError(nullptr, 0);
+#endif
   http.end();
   return ok;
 }

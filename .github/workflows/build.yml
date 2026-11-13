@@ -176,6 +176,10 @@ jobs:
             tests/test_storage.cpp -o /tmp/smalltv-storage-tests
           /tmp/smalltv-storage-tests
 
+      # Radar transport, bounded receiver/API parsing and cached diagnostics.
+      - name: Test radar feed handling
+        run: sh tests/radar/run_feeds.sh
+
       # The /api/status reply: same bytes as before, written in pieces.
       # 32-bit memory test, so it needs g++-multilib (installed above).
       - name: Test status reply

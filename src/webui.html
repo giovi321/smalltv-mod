@@ -898,10 +898,12 @@ function kv(k,v){return '<div class="kv"><span class="muted">'+k+'</span><b>'+v+
 function radarLine(r){
  if(!r)return '';
  var t=r.stage||'idle';
- if(r.count)t=r.count+' aircraft';
+ if(r.count)t=r.stage==='ok'?r.count+' aircraft':t+', cached '+r.count+' aircraft';
  else if(r.stage==='ok'||r.stage==='all filtered out')t=r.stage+' ('+(r.seenAc||0)+' in feed)';
  if(r.http)t+=', HTTP '+r.http;
  if(r.tlsRx)t+=', TLS rx '+r.tlsRx+' B';
+ if(r.parseError)t+=', JSON '+r.parseError;
+ if(r.tlsError)t+=', TLS error '+r.tlsError;
  if(r.triedAgo!=null)t+=', tried '+r.triedAgo+'s ago';
  if(r.okAgo!=null)t+=', last ok '+r.okAgo+'s ago';
  else if(r.stage!=='idle')t+=', never succeeded';

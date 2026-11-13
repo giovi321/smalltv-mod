@@ -72,6 +72,8 @@ struct StatusRadar {
   uint16_t seenAc = 0;
   int http = 0;                 // left out when 0
   uint16_t tlsRx = 0;           // left out when 0
+  const char* parseError = "";  // left out when empty
+  int tlsError = 0;             // left out when 0
   bool hasTried = false, hasOk = false;
   uint32_t triedAgo = 0, okAgo = 0;
   const char* url = "";         // left out when empty
@@ -177,6 +179,8 @@ template <class Out> void writeStatusRadar(Out& out, const StatusRadar& r) {
   member(out, PSTR(",\"seenAc\":"), r.seenAc);
   if (r.http) member(out, PSTR(",\"http\":"), r.http);
   if (r.tlsRx) member(out, PSTR(",\"tlsRx\":"), r.tlsRx);
+  if (r.parseError[0]) member(out, PSTR(",\"parseError\":"), r.parseError);
+  if (r.tlsError) member(out, PSTR(",\"tlsError\":"), r.tlsError);
   if (r.hasTried) member(out, PSTR(",\"triedAgo\":"), r.triedAgo);
   if (r.hasOk) member(out, PSTR(",\"okAgo\":"), r.okAgo);
   if (r.url[0]) member(out, PSTR(",\"url\":"), r.url);

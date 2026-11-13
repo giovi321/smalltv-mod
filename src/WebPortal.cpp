@@ -267,6 +267,8 @@ static void handleStatus() {
   r.seenAc = radarSeenAc();        // aircraft in the last parsed response
   r.http = radarLastHttp();        // <0 = HTTPClient internal error
   r.tlsRx = radarTlsRx();          // negotiated BearSSL rx buffer
+  r.parseError = radarParseError();
+  r.tlsError = radarTlsError();
   if (radarLastTryMs()) { r.hasTried = true; r.triedAgo = (millis() - radarLastTryMs()) / 1000; }
   if (radarLastOkMs())  { r.hasOk = true;    r.okAgo    = (millis() - radarLastOkMs()) / 1000; }
   r.url = radarLastUrl().c_str();

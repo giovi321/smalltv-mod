@@ -36,3 +36,6 @@ uint16_t    radarTlsRx();                // negotiated BearSSL rx buffer (0 = no
 uint16_t    radarSeenAc();               // aircraft in the last parsed response
 uint32_t    radarLastTryMs();            // millis() of the last attempt
 const String& radarLastUrl();            // URL of the last attempt (which feed, what range)
+
+const char* radarParseError();           // JSON error, empty when no parse failed
+int         radarTlsError();             // BearSSL error, 0 when none recorded
