@@ -179,9 +179,14 @@ static void corsHeaders() {
 // The first chunk decides, before Update.begin() and any write to flash.
 // A gzip image (.bin.gz) is refused: Updater::end() does not verify one, and
 // eboot erases and rewrites the app while it inflates, so a truncated .gz
-// leaves a unit that resets in a loop.
+// leaves a unit that resets in a loop. ESP32 and C2 images also start with
+// 0xE9, so the entry point (bytes 4..7, little-endian) must be where an
+// ESP8266 image starts, 0x40100000..0x4010FFFF.
 static const char* refuseImage(const uint8_t* b, size_t n) {
   if (n && b[0] == 0x1F) return PSTR(".bin.gz not accepted: upload the .bin");
+  if (n < 8 || b[0] != 0xE9) return PSTR("not an ESP8266 firmware image");
+  const uint32_t entry = b[4] | b[5] << 8 | (uint32_t)b[6] << 16 | (uint32_t)b[7] << 24;
+  if ((entry & 0xFFFF0000) != 0x40100000) return PSTR("not an ESP8266 firmware image");
   return nullptr;
 }
 
