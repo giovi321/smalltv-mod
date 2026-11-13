@@ -1,5 +1,6 @@
 #include "UsageClient.h"
 #include "Platform.h"
+#include "WaitingStream.h"
 #include <ArduinoJson.h>
 #include <math.h>
 
@@ -114,7 +115,8 @@ static bool fetchUsage(const Settings& s) {
   int code = http.GET();
   if (code != HTTP_CODE_OK) { http.end(); return false; }
 
-  bool ok = parseUsage(g_usage, http.getStream());
+  WaitingStream body(http.getStream(), s.httpTimeout);   // see WaitingStream.h
+  bool ok = parseUsage(g_usage, body);
   http.end();
   return ok;
 }

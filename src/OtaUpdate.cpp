@@ -1,5 +1,6 @@
 #include "OtaUpdate.h"
 #include "Platform.h"
+#include "WaitingStream.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include "config.h"
@@ -85,8 +86,9 @@ OtaLatest otaCheckLatest(const Settings& s) {
         fa["browser_download_url"] = true;
 
         JsonDocument doc;
+        WaitingStream body(http.getStream(), s.httpTimeout);   // see WaitingStream.h
         DeserializationError err =
-            deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
+            deserializeJson(doc, body, DeserializationOption::Filter(filter));
         if (err) {
           r.error = F("parse failed"); retryable = true;      // truncated/stalled stream
         } else {
