@@ -10,6 +10,8 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc -I"$JSON_INCLUDE" tests/status/tes
 # reply then carries "githubUpdate":false. Only that build has the code for it.
 c++ -std=c++11 -Wall -Wextra -Werror -g -DFW_NO_GITHUB_UPDATE -Isrc -I"$JSON_INCLUDE" tests/status/test_status.cpp -o /tmp/smalltv-status-tests-noupdate
 /tmp/smalltv-status-tests-noupdate
+c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc -I"$JSON_INCLUDE" tests/status/test_status_stall.cpp -o /tmp/smalltv-status-stall-tests
+/tmp/smalltv-status-stall-tests
 # 32-bit, so allocation sizes match the ESP8266; the wraps let the test count
 # ArduinoJson's malloc calls as well as operator new.
 c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -Isrc -I"$JSON_INCLUDE" -Wl,--wrap=malloc,--wrap=free,--wrap=realloc tests/status/test_status_memory.cpp -o /tmp/smalltv-status-memory-tests
