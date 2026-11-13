@@ -24,6 +24,7 @@
 #include <ESP8266WebServer.h>
 #include <SPI.h>
 #include <Updater.h>
+#include <coredecls.h>   // crc32()
 #include "board_esp8266.h"
 #include "loader_font.h"
 
@@ -178,8 +179,10 @@ static const char kSuccess[] PROGMEM =
 
 static bool        g_ok    = false;     // last upload was written and verified by Update.end()
 static bool        g_first = false;     // the next chunk is the file's first
-static const char* g_err   = nullptr;   // why the file was refused before any write (PSTR)
+static const char* g_err   = nullptr;   // why the file was refused (PSTR); nothing is scheduled then
 static uint8_t     g_pct   = 0;
+static uint32_t    g_room, g_got, g_size, g_want, g_crc;   // see checkChunk()
+static uint8_t     g_field[8];
 
 static void sendPage() { server.send_P(200, PSTR("text/html"), kPage); }
 
@@ -187,6 +190,9 @@ static void corsHeaders() {
   server.sendHeader(F("Access-Control-Allow-Headers"), F("*"));
   server.sendHeader(F("Access-Control-Allow-Origin"), F("*"));
 }
+
+static const char kNotEsp[] PROGMEM = "not an ESP8266 firmware image";
+static const char kBadCrc[] PROGMEM = "image size/CRC check failed";
 
 // The first chunk decides, before Update.begin() and any write to flash.
 // A gzip image (.bin.gz) is refused: Updater::end() does not verify one, and
@@ -196,10 +202,37 @@ static void corsHeaders() {
 // ESP8266 image starts, 0x40100000..0x4010FFFF.
 static const char* refuseImage(const uint8_t* b, size_t n) {
   if (n && b[0] == 0x1F) return PSTR(".bin.gz not accepted: upload the .bin");
-  if (n < 8 || b[0] != 0xE9) return PSTR("not an ESP8266 firmware image");
+  if (n < 8 || b[0] != 0xE9) return kNotEsp;
   const uint32_t entry = b[4] | b[5] << 8 | (uint32_t)b[6] << 16 | (uint32_t)b[7] << 24;
-  if ((entry & 0xFFFF0000) != 0x40100000) return PSTR("not an ESP8266 firmware image");
+  if ((entry & 0xFFFF0000) != 0x40100000) return kNotEsp;
   return nullptr;
+}
+
+// Every chunk, before it is written. elf2bin puts the app image at 0x1000,
+// also starting with 0xE9, and at 4112..4119 the image size and a CRC-32 of
+// the whole file with those 8 bytes taken as zero: the check
+// ESP.checkFlashCRC() runs at boot. Size and CRC are compared at the end,
+// before Update.end(true) schedules the copy, so a truncated or corrupt .bin
+// is refused instead of being copied over the loader.
+static const char* checkChunk(const uint8_t* p, size_t n) {
+  for (size_t i = 0; i < n; i++, g_got++) {
+    uint8_t v = p[i];
+    if (g_got == 4096 && v != 0xE9) return kNotEsp;
+    if (g_got >= 4112 && g_got < 4120) { g_field[g_got - 4112] = v; v = 0; }
+    g_crc = crc32(&v, 1, g_crc);
+    if (g_got == 4119) {
+      memcpy(&g_size, g_field, 4);
+      memcpy(&g_want, g_field + 4, 4);
+      if (g_size < 4120 || g_size > g_room) return kBadCrc;
+    }
+    if (g_size && g_got >= g_size) return kBadCrc;   // longer than its image
+  }
+  return nullptr;
+}
+
+static const char* checkEnd() {
+  if (g_got < 4120 || g_got < g_size) return PSTR("file is truncated");
+  return g_crc == g_want ? nullptr : kBadCrc;
 }
 
 static void handleUpload() {
@@ -209,6 +242,8 @@ static void handleUpload() {
     g_first = true;
     g_err   = nullptr;
     g_pct   = 0;
+    g_got   = g_size = g_want = 0;
+    g_crc   = 0xFFFFFFFF;
     if (Update.isRunning()) Update.end();   // drop anything a previous attempt left open
     Serial.printf_P(PSTR("Update: %s\n"), up.filename.c_str());
     scrBusy();
@@ -219,11 +254,16 @@ static void handleUpload() {
       if (g_err) {
         scrFail(g_err);
       } else {
-        uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-        Update.begin(maxSketchSpace, U_FLASH);   // a failure stays in Update.getError()
+        g_room = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+        Update.begin(g_room, U_FLASH);   // a failure stays in Update.getError()
       }
     }
     if (g_err) return;   // refused: let the rest of the request drain, write nothing
+    if ((g_err = checkChunk(up.buf, up.currentSize))) {
+      Update.end();   // without true it only resets: nothing is scheduled
+      scrFail(g_err);
+      return;
+    }
     if (!Update.hasError()) Update.write(up.buf, up.currentSize);   // a short write sets the error
     if (up.contentLength && !Update.hasError()) {   // whole request, so the bar ends a few hundred bytes short of 100
       uint32_t pct = (uint32_t)up.totalSize * 100u / up.contentLength;
@@ -232,7 +272,11 @@ static void handleUpload() {
     }
   } else if (up.status == UPLOAD_FILE_END) {
     // true: size = bytes received; on an error it only resets, so a retry works
-    if (!g_err && !g_first) g_ok = Update.end(true);
+    if (!g_err && !g_first) {
+      if (!Update.hasError()) g_err = checkEnd();
+      if (g_err) Update.end();
+      else g_ok = Update.end(true);
+    }
     Serial.printf_P(PSTR("Update %s: %u\n"), g_ok ? "ok" : "failed", up.totalSize);
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     Update.end();
