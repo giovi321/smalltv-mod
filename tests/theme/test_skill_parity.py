@@ -64,6 +64,34 @@ def make_analog(root):
         f.save(root/f'animations/dot/{i:03d}.png')
 
 
+def make_moon(root):
+    """Frame by value: a moon picked by stops, and two cats whose group (a set
+    of 3 frames) is picked by a data field and by the hour, each group playing."""
+    for name, frames in (('moon', 8), ('cat', 6)):
+        (root/'animations'/name).mkdir(parents=True)
+        for i in range(frames):
+            f = Image.new('RGBA', (16, 16), (0, 0, 0, 0))
+            ImageDraw.Draw(f).rectangle((i, 0, 15, 15-i), fill=(30*i+10, 255-30*i, 40+20*i, 255))
+            f.save(root/'animations'/name/f'{i:03d}.png')
+    cat = dict(type='animation', source='animations/cat', width=16, height=16, frames=6, fps=3, loop=True)
+    (root/'theme.json').write_text(json.dumps({
+        'spec': 2, 'theme': {'id': 'moon', 'name': 'Moon', 'author': 'a', 'version': '1'},
+        'display': {'width': 240, 'height': 240, 'background': '#000010'},
+        'data': [{'id': 'w', 'url': 'http://example.test/a.json', 'interval': 600,
+                  'fields': [{'id': 'moon', 'path': 'm'}, {'id': 'day', 'path': 'd'}]}],
+        'layers': [
+            dict(id='moon', type='animation', source='animations/moon', x=10, y=10, width=16, height=16, frames=8, fps=1, loop=True,
+                 bind={'frame': {'source': 'w.moon', 'stops': [{'at': 0, 'frame': 0}, {'at': 0.0625, 'frame': 1}, {'at': 0.3125, 'frame': 4},
+                                                              {'at': 0.9375, 'frame': 0}]}}),
+            dict(cat, id='data', x=40, y=10, bind={'frame': {'source': 'w.day', 'input': [0, 1], 'output': [0, 1], 'group': 3}}),
+            dict(cat, id='hour', x=70, y=10, loop=False, bind={'frame': {'source': 'time.hour', 'input': [10, 11], 'output': [0, 1], 'group': 3}}),
+            dict(cat, id='lin', x=100, y=10, bind={'frame': {'source': 'time.hour', 'input': [0, 23], 'output': [0, 1]}}),
+            # An open input (clamp false) must still end on the last group.
+            dict(cat, id='open', x=130, y=10, bind={'frame': {'source': 'w.day', 'input': [0, 1], 'output': [0, 1],
+                                                              'group': 3, 'clamp': False}}),
+        ]}))
+
+
 @needs_native
 class PackageParityTests(unittest.TestCase):
     @classmethod
@@ -72,8 +100,11 @@ class PackageParityTests(unittest.TestCase):
         cls.addClassCleanup(cls.tmp.cleanup)
         analog = Path(cls.tmp.name)/'analog'
         make_analog(analog)
+        moon = Path(cls.tmp.name)/'moon'
+        make_moon(moon)
         cls.sources = {name: EXAMPLES/name for name in ('pixel-room', 'terminal-ops', 'live-status')}
         cls.sources['analog'] = analog
+        cls.sources['moon'] = moon
         cls.packages = {}
         for name, source in cls.sources.items():
             theme, images = stheme.load_source(source)
@@ -131,6 +162,13 @@ class PackageParityTests(unittest.TestCase):
             ('analog', '2026-11-06T10:09:55', 10, 20, {'device.temperature': '21.5'}, None),
             ('analog', '2026-11-06T15:42:07', 15, 30, {'device.temperature': '-4'}, 'de'),   # PM hour hand
             ('analog', '2026-03-29T11:59:59', 1, 4, None, 'pt'),   # AM/PM hand hand-over
+            # Frame by value: groups playing, and a group change when the hour turns 11.
+            ('moon', '2026-11-06T10:59:58', 2, 12, {'w.moon': '0.2', 'w.day': '1'}, None),
+            ('moon', '2026-11-06T10:00:00', 3, 9, None, None),      # no values: frame 0 and group 0
+            ('moon', '2026-11-06T09:00:00', 3, 9, {'w.moon': '0.99', 'w.day': '0'}, None),
+            # An open input far past its end (group 5 would be frame 15), and far below its start.
+            ('moon', '2026-11-06T10:00:00', 3, 9, {'w.moon': '0.5', 'w.day': '5'}, None),
+            ('moon', '2026-11-06T10:00:00', 3, 9, {'w.moon': '0.5', 'w.day': '-5'}, None),
         ]
         for name, start, fps, count, values, lang in runs:
             with self.subTest(theme=name, start=start, fps=fps, lang=lang):
@@ -165,6 +203,14 @@ def arc():
 
 SECOND = {'source': 'time.second', 'input': [0, 60], 'output': [0, 360]}
 SOURCE = {'id': 'w', 'url': 'http://a/b', 'interval': 10, 'fields': [{'id': 'x', 'path': 'x'}]}
+# Frame by value: a 6-frame animation bound on `frame` (spec 2).
+ANIM = dict(id='a', type='animation', x=0, y=0, width=2, height=2, source='anim', frames=6, fps=2, loop=True)
+FRAME_BIND = {'source': 'w.x', 'input': [0, 1], 'output': [0, 5]}
+FRAME_STOPS = {'source': 'w.x', 'stops': [{'at': 0, 'frame': 0}, {'at': 1, 'frame': 5}]}
+
+
+def framed(bind, spec=2, **kw):
+    return manifest(spec=spec, data=[SOURCE], layers=[dict(ANIM, bind={'frame': bind}, **kw)])
 
 # Both validators must give the same verdict. Keep cases away from the edge of
 # the per-language translation budget: stheme.py counts the device's 28 bytes
@@ -208,13 +254,26 @@ MANIFESTS = {
     'dup id': manifest(layers=[TEXT, TEXT]),
     'stops not increasing': layer(bind={'color': {'source': 'time.second',
                                                   'stops': [{'at': 5, 'value': '#000000'}, {'at': 5, 'value': '#ffffff'}]}}),
+    'frame ok': framed(FRAME_BIND),
+    'frame stops ok': framed(FRAME_STOPS),
+    'frame clock ok': framed(dict(FRAME_BIND, source='time.hour', input=[0, 23])),
+    'frame group ok': framed(dict(FRAME_BIND, output=[0, 1], group=3)),
+    'frame spec1': framed(FRAME_BIND, spec=1),
+    'frame on text': manifest(data=[SOURCE], layers=[dict(TEXT, bind={'frame': FRAME_BIND})]),
+    'frame output 6': framed(dict(FRAME_BIND, output=[0, 6])),
+    'frame stops 17': framed({'source': 'w.x', 'stops': [{'at': i, 'frame': i % 6} for i in range(17)]}),
+    'frame stops equal': framed({'source': 'w.x', 'stops': [{'at': 1, 'frame': 0}, {'at': 1, 'frame': 1}]}),
+    'frame stops and input': framed(dict(FRAME_STOPS, input=[0, 1])),
+    'frame group 4': framed(dict(FRAME_BIND, output=[0, 0], group=4)),
+    'frame group 0': framed(dict(FRAME_BIND, output=[0, 0], group=0)),
+    'frame group output in frames': framed(dict(FRAME_BIND, group=3)),
 }
 
 
 @needs_native
 class ManifestParityTests(unittest.TestCase):
     def test_validators_agree(self):
-        self.assertEqual(len(MANIFESTS), 34)
+        self.assertEqual(len(MANIFESTS), 47)
         with tempfile.TemporaryDirectory() as d:
             path = Path(d)/'theme.json'
             for name, theme in MANIFESTS.items():
