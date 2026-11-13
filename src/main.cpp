@@ -36,6 +36,9 @@
 #if WITH_RADAR
 #include "RadarMode.h"
 #endif
+#if WITH_RAIN
+#include "RainMode.h"
+#endif
 #if WITH_HA
 #include "HaBoot.h"
 #include "HaMode.h"
@@ -54,6 +57,9 @@ static DisplayMode* kModes[] = {
 #endif
 #if WITH_RADAR
   &g_radarMode,
+#endif
+#if WITH_RAIN
+  &g_rainMode,
 #endif
 #if WITH_HA
   &g_haMode,
@@ -76,6 +82,9 @@ static bool carouselHas(const Settings& s, const DisplayMode* m) {
     case MODE_STOCKS: return s.carouselTicker;
     case MODE_USAGE:  return s.carouselUsage;
     case MODE_RADAR:  return s.carouselRadar;
+#if WITH_RAIN
+    case MODE_RAIN:   return s.carouselRain;
+#endif
 #if WITH_HA
     case MODE_HA:     return s.carouselHa;
 #endif

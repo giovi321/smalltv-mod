@@ -59,6 +59,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <button data-t="ticker">Ticker</button>
  <button data-t="usage">Clawdmeter</button>
  <button data-t="radar">Radar</button>
+ <button data-t="rain">Rain</button>
  <button data-t="ha">Home Assistant</button>
  <button data-t="update">System</button>
 </nav>
@@ -118,6 +119,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="stocks">Ticker</option>
     <option value="usage">Clawdmeter</option>
     <option value="radar">Radar</option>
+    <option value="rain">Rain</option>
     <option value="ha">Home Assistant</option>
     <option value="theme">Theme clock</option>
     <option value="carousel">Carousel (rotate modes)</option>
@@ -127,6 +129,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <div class="chk"><input id="carouselTicker" type="checkbox"><label>Ticker</label></div>
     <div class="chk"><input id="carouselUsage" type="checkbox"><label>Clawdmeter</label></div>
     <div class="chk"><input id="carouselRadar" type="checkbox"><label>Radar</label></div>
+    <div class="chk"><input id="carouselRain" type="checkbox"><label>Rain</label></div>
     <div class="chk"><input id="carouselHa" type="checkbox"><label>Home Assistant</label></div>
     <div class="chk"><input id="carouselTheme" type="checkbox"><label>Theme clock</label></div>
    </div>
@@ -353,6 +356,36 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
   </div>
  </section>
 
+ <!-- RAIN (feature) -->
+ <section id="rain" class="tab">
+  <div class="card"><h2 data-i18n="rain.homeTitle">Home location</h2>
+   <div class="chk"><input id="rainUseDevice" type="checkbox" onchange="rainLocChanged()"><label data-i18n="rain.useDevice">Use the device location (Display tab, Clock &amp; night mode card)</label></div>
+   <div class="row">
+    <div><label data-i18n="rain.lat">Latitude</label><input id="rainLat" type="number" step="0.0001" placeholder="52.3676"></div>
+    <div><label data-i18n="rain.lon">Longitude</label><input id="rainLon" type="number" step="0.0001" placeholder="4.9041"></div>
+   </div>
+   <small class="hint" data-i18n="rain.homeHint">The rain radar centres on this point. Decimal degrees, e.g. <code>52.3676</code>, <code>4.9041</code>. Leave at 0/0 and the screen prompts you to set it.</small>
+  </div>
+  <div class="card"><h2 data-i18n="rain.rangeTitle">Range &amp; cadence</h2>
+   <div class="row">
+    <div><label data-i18n="rain.range">Range (km)</label><input id="rainRangeKm" type="number" min="10" max="100" step="5"></div>
+    <div><label data-i18n="rain.units">Units</label>
+     <select id="rainUnitsMi"><option value="false">km</option><option value="true">mi</option></select></div>
+   </div>
+   <div class="row">
+    <div><label data-i18n="rain.refresh">Refresh (s)</label><input id="rainPollSec" type="number" min="600" max="3600" step="60"></div>
+    <div><label data-i18n="rain.anim">Animation (s/frame)</label><input id="rainAnimSec" type="number" min="3" max="30"></div>
+   </div>
+   <small class="hint" data-i18n="rain.rangeHint">The screen loops the last 2 hours of rain in 10-minute steps, refreshed from RainViewer. Forecast frames appear automatically if the provider serves them.</small>
+  </div>
+  <div class="card"><h2 data-i18n="rain.showTitle">What to show</h2>
+   <label data-i18n="rain.uiScale">Text &amp; city size</label>
+   <select id="rainUiScale"><option value="0">Small</option><option value="1">Medium</option><option value="2">Large</option></select>
+   <div class="chk" style="margin-top:12px"><input id="rainShowCities" type="checkbox"><label data-i18n="rain.cities">Nearby cities as reference dots (France &amp; Europe)</label></div>
+   <small class="hint" data-i18n="rain.attribution">Weather data by RainViewer — personal use only.</small>
+  </div>
+ </section>
+
  <!-- HOME ASSISTANT (feature) -->
  <section id="ha" class="tab">
   <div class="card"><h2>MQTT</h2>
@@ -411,6 +444,8 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
 </main>
 
 <div style="text-align:center;padding:0 0 16px"><button class="btn" onclick="saveAll()">Save settings</button></div>
+<div style="text-align:center;padding:0 0 16px"><label class="muted" style="display:inline-block" data-i18n="ui.langLabel">UI language</label>
+ <select id="uiLang" onchange="langChanged()"><option value="en">English</option><option value="fr">Français</option></select></div>
 <div style="text-align:center;padding:0 0 24px;font-size:12px">
  <a id="footRepo" href="https://github.com/giovi321/smalltv-mod" target="_blank" style="color:var(--acc2);text-decoration:none">GitHub: giovi321/smalltv-mod</a>
  <span id="footVer" class="muted"></span>
@@ -443,6 +478,7 @@ function placePick(){var p=PLACES[parseInt(gv('locRes'))]; if(!p)return;
 function sunToggled(){if(gc('sunEnabled'))sc('autoBrightness',false)}
 function autoToggled(){if(gc('autoBrightness'))sc('sunEnabled',false)}
 function radarLocChanged(){var d=gc('radarUseDevice'); $('radarLat').disabled=d; $('radarLon').disabled=d}
+function rainLocChanged(){var d=gc('rainUseDevice'); $('rainLat').disabled=d; $('rainLon').disabled=d}
 // The line under the schedule, from the settings (c) and the status reply (s).
 // null: the schedule is off, leave the hint alone. s.bl is the backlight level
 // 0..255; it reads -1 until the first write after boot (and is missing on an
@@ -501,8 +537,8 @@ var TZMAP={
 function fillTz(){var s=$('tz');if(!s)return;var keys=Object.keys(TZMAP).filter(function(k){return k!==''});
  keys.sort();s.innerHTML='<option value="">UTC</option>'+keys.map(function(k){return '<option value="'+k+'">'+k+'</option>'}).join('');}
 
-var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',ha:'ha',theme:'theme'};
-var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',ha:'carouselHa',theme:'carouselTheme'};
+var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',rain:'rain',ha:'ha',theme:'theme'};
+var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',rain:'carouselRain',ha:'carouselHa',theme:'carouselTheme'};
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();
  var sec=$(name); if(sec)sec.remove();
@@ -511,6 +547,23 @@ function hideFeat(name){
 }
 function modeChanged(){if(!$('mode'))return;
  $('carouselRow').style.display=$('mode').value==='carousel'?'block':'none';}
+
+// --- UI language (FR/EN). The rain tab and the toggle are translated; the
+// rest of the UI stays English for now. Remembered per browser; the default
+// follows the device language (clock.lang).
+var LANG='en';
+var I18N={
+ en:{'ui.langLabel':'UI language','rain.homeTitle':'Home location','rain.useDevice':'Use the device location (Display tab, Clock &amp; night mode card)','rain.lat':'Latitude','rain.lon':'Longitude','rain.homeHint':'The rain radar centres on this point. Decimal degrees, e.g. <code>52.3676</code>, <code>4.9041</code>. Leave at 0/0 and the screen prompts you to set it.','rain.rangeTitle':'Range &amp; cadence','rain.range':'Range (km)','rain.units':'Units','rain.refresh':'Refresh (s)','rain.anim':'Animation (s/frame)','rain.rangeHint':'The screen loops the last 2 hours of rain in 10-minute steps, refreshed from RainViewer. Forecast frames appear automatically if the provider serves them.','rain.showTitle':'What to show','rain.uiScale':'Text &amp; city size','rain.cities':'Nearby cities as reference dots (France &amp; Europe)','rain.attribution':'Weather data by RainViewer — personal use only.'},
+ fr:{'ui.langLabel':'Langue de l’interface','rain.homeTitle':'Position','rain.useDevice':'Utiliser la position de l’appareil (onglet Display, carte Clock &amp; night mode)','rain.lat':'Latitude','rain.lon':'Longitude','rain.homeHint':'Le radar se centre sur ce point. Degrés décimaux, ex. <code>47.1519</code>, <code>-1.6084</code>. Laisser 0/0 pour que l’écran affiche une invite.','rain.rangeTitle':'Portée &amp; cadence','rain.range':'Portée (km)','rain.units':'Unités','rain.refresh':'Rafraîchissement (s)','rain.anim':'Animation (s/image)','rain.rangeHint':'L’écran boucle les 2 dernières heures de pluie par pas de 10 minutes, rafraîchies depuis RainViewer. Les images de prévision apparaissent automatiquement si le fournisseur les sert.','rain.showTitle':'Affichage','rain.uiScale':'Taille des textes &amp; des villes','rain.cities':'Villes proches en points de repère (France &amp; Europe)','rain.attribution':'Données météo par RainViewer — usage personnel uniquement.'}
+};
+function i18nApply(){
+ document.querySelectorAll('[data-i18n]').forEach(function(e){
+  var k=e.getAttribute('data-i18n');
+  var v=(I18N[LANG]&&I18N[LANG][k])||I18N.en[k];
+  if(v!==undefined)e.innerHTML=v;
+ });
+}
+function langChanged(){LANG=gv('uiLang')||'en'; try{localStorage.setItem('smalltv-lang',LANG)}catch(e){} i18nApply()}
 
 // The AP password is never read back into the form, so a blank field cannot be
 // told apart from "the user cleared it". Blank therefore keeps the stored one,
@@ -525,7 +578,7 @@ function setGain(id,lab,v){var n=(v!=null?v:100);sv(id,n);var e=$(lab);if(e)e.te
 function resetColors(){setGain('rGain','rgVal',100);setGain('gGain','ggVal',100);setGain('bGain','bgVal',100);
  toast('Gains reset — press Save settings to apply')}
 function loadConfig(){return j('/api/config').then(function(c){C=c;
- var f=c.features||{}; ['ticker','usage','radar','ha'].forEach(function(k){if(f[k]===false)hideFeat(k)});
+ var f=c.features||{}; ['ticker','usage','radar','rain','ha'].forEach(function(k){if(f[k]===false)hideFeat(k)});
  // WireGuard is only built for the chips with room for it; drop the card otherwise
  if(f.theme!==true){hideFeat('theme');var tc=$('themeCard');if(tc)tc.remove()}else{loadThemes()}
  if(f.wireguard===false){var wc=$('wgCard'); if(wc)wc.remove()}
@@ -569,7 +622,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('sunRise',ck.sunRise!=null?ck.sunRise:60); sv('sunSet',ck.sunSet!=null?ck.sunSet:60); sv('sunOverlap',ck.sunOverlap||0);
  $('mode').value=c.mode||'stocks'; modeChanged();
  sv('carouselSec',c.carouselSec||30);
- sc('carouselTicker',c.carouselTicker!==false); sc('carouselUsage',c.carouselUsage!==false); sc('carouselRadar',c.carouselRadar!==false);
+ sc('carouselTicker',c.carouselTicker!==false); sc('carouselUsage',c.carouselUsage!==false); sc('carouselRadar',c.carouselRadar!==false); sc('carouselRain',c.carouselRain!==false);
  sc('carouselHa',c.carouselHa!==false); sc('carouselTheme',c.carouselTheme===true);
  // HA / MQTT slice
  var h=c.ha||{};
@@ -605,6 +658,20 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('radarUiScale',r.uiScale!=null?r.uiScale:1);
  sv('radarMinAlt',r.minAltFt!=null?r.minAltFt:0);
  renderAps(r.airports||[]);
+ // rain slice
+ var rn=c.rain||{};
+ sv('rainLat',rn.lat); sv('rainLon',rn.lon);
+ sc('rainUseDevice',rn.useDevice!==false); rainLocChanged();
+ sv('rainRangeKm',rn.rangeKm||50);
+ sv('rainUnitsMi',rn.unitsMi?'true':'false');
+ sv('rainPollSec',rn.pollSec||900);
+ sv('rainAnimSec',rn.animSec||8);
+ sc('rainShowCities',rn.showCities!==false);
+ sv('rainUiScale',rn.uiScale!=null?rn.uiScale:1);
+ // UI language (FR/EN, remembered per browser; default follows clock.lang)
+ var savedLang=null; try{savedLang=localStorage.getItem('smalltv-lang')}catch(e){}
+ LANG=(savedLang==='fr'||savedLang==='en')?savedLang:((c.clock&&c.clock.lang==='fr')?'fr':'en');
+ sv('uiLang',LANG); i18nApply();
  var au=c.auth||{};
  sv('authUser',au.user||'admin'); authShow(!!au.passSet);
  var ap=$('apPass'); if(ap){ap.value='';ap.placeholder=c.apPassSet?'(unchanged)':'(open)';}
@@ -760,6 +827,14 @@ function collect(){
    if(ic)r.airports.push({icao:ic,lat:parseFloat(tr.querySelector('.ala').value)||0,lon:parseFloat(tr.querySelector('.alo').value)||0});
   });
   o.radar=r;
+ }
+ // rain slice
+ if($('rain')){
+  var rn={useDevice:gc('rainUseDevice'), lat:parseFloat(gv('rainLat'))||0, lon:parseFloat(gv('rainLon'))||0,
+   rangeKm:parseInt(gv('rainRangeKm'))||50, unitsMi:gv('rainUnitsMi')==='true',
+   pollSec:parseInt(gv('rainPollSec'))||900, animSec:parseInt(gv('rainAnimSec'))||8,
+   showCities:gc('rainShowCities'), uiScale:parseInt(gv('rainUiScale'))||0};
+  o.rain=rn;
  }
  return o;
 }

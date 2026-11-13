@@ -37,6 +37,15 @@ void         gfxSetRotation(uint8_t r);
 void         gfxApplyColors(const Settings& s);
 Arduino_GFX* gfxDev();                 // shared draw target for feature renderers
 
+// Streamed full-window blit (rain frames): one address window, then row
+// buffers pushed with the bus writePixels. The generic draw16bitRGBBitmap
+// goes writePixel per pixel (~1 s per frame on the ESP8266); this streams
+// the same 115 KB in one window (~30-50 ms) so the frame sweep is a blur
+// instead of a visible curtain.
+void gfxBlitBegin();
+void gfxBlitRow(uint16_t* row, uint32_t len);
+void gfxBlitEnd();
+
 // ---- Text helpers (built-in 6x8 font, integer scaled) ---------------------
 #define GFX_FONT_W 6
 #define GFX_FONT_H 8
