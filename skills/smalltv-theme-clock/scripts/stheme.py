@@ -3,7 +3,7 @@
 
 A pure-Python port of SmallTV Studio's core (validator, packer, RGB565
 renderer) extended with the spec 2 features of smalltv-mod: arcs, hands, tick
-marks, time.* / device.* sources, {H} {MO} {AMPM} {WW} and localized text. Needs
+marks, time.* / device.* sources, {H} {MO} {AMPM} {WW} {YY} and localized text. Needs
 Python 3.9+ and Pillow, nothing else.
 
   stheme.py scaffold DIR [--id ID --name NAME --author A --palette night]
@@ -44,7 +44,7 @@ MAX_SHOW_RULES = 36  # the firmware's default (THEME_MAX_SHOW_RULES); a build ma
 ANCHORS = ['top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right',
            'bottom-left', 'bottom-center', 'bottom-right']
 TOKENS = ['HH', 'hh', 'MM', 'SS', 'DD', 'MON', 'MONTH', 'WD', 'WEEKDAY', 'YYYY']
-TOKENS_SPEC2 = ['H', 'MO', 'AMPM', 'WW']
+TOKENS_SPEC2 = ['H', 'MO', 'AMPM', 'WW', 'YY']
 DEVICE_NAMES = ['focusToday', 'focusGoal', 'streak', 'humidity', 'temperature']
 TIME_NAMES = ['second', 'minute', 'hour', 'hour12', 'secondOfDay', 'day', 'month', 'weekday', 'moon']
 # The values each time.* source takes (ThemeEngine.cpp timeValue(); moonAge() counts whole days, 0 to 29).
@@ -1141,6 +1141,7 @@ def expand(value, t, data, lang, decimals=None):
             v = {'HH': f'{t.hour:02d}', 'hh': f'{(t.hour % 12) or 12:02d}', 'MM': f'{t.minute:02d}',
                  'SS': f'{t.second:02d}', 'DD': f'{t.day:02d}', 'YYYY': f'{t.year:04d}', 'MO': f'{t.month:02d}',
                  'H': str(t.hour), 'AMPM': 'AM' if t.hour < 12 else 'PM', 'WW': f'{t.isocalendar()[1]:02d}',
+                 'YY': f'{t.year % 100:02d}',
                  'MON': MONTHS_SHORT[lang][t.month - 1], 'MONTH': MONTHS[lang][t.month - 1],
                  'WD': DAYS_SHORT[lang][wd], 'WEEKDAY': DAYS[lang][wd]}.get(key)
         if v is not None:
