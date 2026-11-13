@@ -113,21 +113,33 @@ static void scrBegin() {
   digitalWrite(TFT_BL, BL_ON);
 }
 
+static const char* g_net = "";   // the network shown on the screen (a string literal)
+static char        g_url[16];    // the address shown on the screen
+
+// Where to go: the network to join and the address to open.
+static void scrWhere(int y) {
+  scrText(y, 2, C_GRAY, PSTR("1. Join Wi-Fi"));
+  scrText(y + 26, strlen_P(g_net) > 19 ? 1 : 2, C_YELLOW, g_net);
+  scrText(y + 72, 2, C_GRAY, PSTR("2. Open"));
+  scrText(y + 98, strlen(g_url) > 19 ? 1 : 2, C_YELLOW, g_url);
+}
+
 static void scrHome(const char* net, const char* url) {
+  g_net = net;
+  strlcpy(g_url, url, sizeof(g_url));
   scrClear();
   scrText(14, 2, C_WHITE, PSTR("SmallTV-Loader"));
-  scrText(60, 2, C_GRAY, PSTR("1. Join Wi-Fi"));
-  scrText(86, strlen_P(net) > 19 ? 1 : 2, C_YELLOW, net);
-  scrText(132, 2, C_GRAY, PSTR("2. Open"));
-  scrText(158, strlen_P(url) > 19 ? 1 : 2, C_YELLOW, url);
+  scrWhere(60);
   scrText(204, 1, C_GRAY, PSTR("and upload the firmware"));
 }
 
+// Keeps the network and address, so "Try again" says where to go.
 static void scrFail(const char* why) {
   scrClear();
-  scrText(70, 2, C_RED, PSTR("Update failed"));
-  scrText(110, 1, C_WHITE, why);
-  scrText(150, 1, C_GRAY, PSTR("Nothing was changed. Try again."));
+  scrText(14, 2, C_RED, PSTR("Update failed"));
+  scrText(44, 1, C_WHITE, why);
+  scrText(58, 1, C_GRAY, PSTR("Nothing was changed. Try again:"));
+  scrWhere(90);
 }
 
 static void scrProgress(uint8_t pct) {
