@@ -1303,7 +1303,7 @@ static const char handKeys[] PROGMEM = "|id|type|shape|x|y|length|tail|angle|str
 static const char ticksKeys[] PROGMEM = "|id|type|shape|x|y|radius|count|length|stroke|strokeWidth|bind|show|";
 static const char textKeys[] PROGMEM = "|id|type|x|y|anchor|value|size|font|color|scroll|bind|show|";
 static const char imageKeys[] PROGMEM = "|id|type|x|y|source|scroll|bind|show|";
-static const char animationKeys[] PROGMEM = "|id|type|x|y|width|height|source|frames|fps|loop|scroll|bind|show|";
+static const char animationKeys[] PROGMEM = "|id|type|x|y|width|height|source|frames|fps|loop|pause|scroll|bind|show|";
 // What one translation holds while the theme runs: its entry and, once the
 // text outgrows the string's inline buffer, the heap block behind it. This is
 // what MaxTranslationBytes bounds -- the text alone says nothing of the entry,
@@ -1410,6 +1410,12 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
       l.frames = frames;
       l.fps = fps;
       l.loop = o["loop"].as<bool>();
+      // `pause`: milliseconds hidden after the last frame, kept as whole
+      // frames (rounded up) so the frame clock below steps through them.
+      int pause = 0;
+      if (!f.number("pause", 0, 60000, pause, false)) return false;
+      if (pause && !l.loop) return f.fail("pause", "only for looping animations");
+      l.pauseFrames = (pause * fps + 999) / 1000;
     }
     // assetPath() appends a per-frame suffix; the *compiled* path (what
     // ends up inside the .stheme container) must itself fit the package
@@ -1462,6 +1468,9 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
   }
   if (f.has("bind") && !parseBindings(o, t, layerPath, error, l)) return false;
   if (f.has("show") && !parseShow(o, t, layerPath, error)) return false;
+  // A frame picked by a value never runs past its last frame, and a group has
+  // no "after the last frame" of its own, so there is nothing to pause.
+  if (l.frameBound && l.pauseFrames) return f.fail("pause", "not for a frame-bound animation");
   return true;
 }
 // A fetched value as text: strings are cut to 31 bytes, numbers and booleans
@@ -2353,10 +2362,12 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
       s.phase = ticks % 1000;
       s.lastMs = now;
       // A grouped layer plays only inside its group (group 0 = all the frames).
+      // `pauseFrames` is 0 for a grouped layer (the parser refuses `pause`
+      // there), so the loop length below is the group, or frames + pause.
       const uint16_t count = l.group ? l.group : l.frames;
       const uint16_t first = l.group ? s.frame / l.group * l.group : 0;
       const uint16_t at = s.frame - first;
-      uint16_t next = first + (l.loop ? (at + step) % count : std::min<uint64_t>(at + step, count - 1u));
+      uint16_t next = first + (l.loop ? (at + step) % (count + l.pauseFrames) : std::min<uint64_t>(at + step, count - 1u));
       if (!l.loop && next == first + count - 1) s.finished = true;
       if (next != s.frame) {
         s.frame = next;
@@ -2382,7 +2393,8 @@ std::vector<Rect> Engine::update(uint32_t now, const tm* time) {
     }
     // The dirty region is the union of this layer's old and new footprint, so
     // moving/shrinking/hiding a layer also erases wherever it used to be.
-    Rect next = bounds(theme_, l, s.resolved, s.text);
+    // An animation in its `pause` (frames past the last) covers nothing.
+    Rect next = l.type == LayerType::Animation && s.frame >= l.frames ? Rect(s.resolved.x, s.resolved.y, 0, 0) : bounds(theme_, l, s.resolved, s.text);
     // A rotation shape sweeps a thin diagonal: its old and new boxes are
     // repainted apart, since their union would also cover everything between.
     if (changed && !full_) {

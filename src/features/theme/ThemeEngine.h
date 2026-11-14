@@ -178,7 +178,8 @@ struct Layer {
   uint8_t font = 0;   // 1 + index into Theme::fonts; 0 is the built-in font
   bool frameBound = false;  // an animation whose frame is picked by a value (bind.frame)
   uint8_t group = 0;        // bind.frame "group": frames per group, 0 = not grouped (the layer does not play)
-  uint16_t frames = 1, fps = 1;
+  // `pauseFrames`: hidden frames after the last one in each loop (`pause`).
+  uint16_t frames = 1, fps = 1, pauseFrames = 0;
   Scroll scroll;
   std::vector<Binding> bindings;
 };

@@ -456,13 +456,18 @@ def validate(theme, assets=None):
             if not path_ok(o.get('source')):
                 fail(f'{p}.source', 'expected a safe relative path')
             if t == 'animation':
-                allowed += ['width', 'height', 'frames', 'fps', 'loop']
+                allowed += ['width', 'height', 'frames', 'fps', 'loop', 'pause']
                 number(o, 'width', p, 1, 240)
                 number(o, 'height', p, 1, 240)
                 number(o, 'frames', p, 1, 240)
                 number(o, 'fps', p, 1, 15)
                 if not isinstance(o.get('loop'), bool):
                     fail(f'{p}.loop', 'expected true or false')
+                number(o, 'pause', p, 0, 60000, True)
+                if is_int(o.get('pause')) and 0 < o['pause'] <= 60000 and o.get('loop') is False:
+                    fail(f'{p}.pause', 'only for looping animations')
+                elif is_int(o.get('pause')) and o['pause'] > 0 and isinstance(o.get('bind'), dict) and 'frame' in o['bind']:
+                    fail(f'{p}.pause', 'not for a frame-bound animation')
             if isinstance(o.get('source'), str):
                 last = asset_path(o, max(0, (o.get('frames') or 1) - 1) if t == 'animation' else 0)
                 if len(last) > 120:
@@ -1463,7 +1468,12 @@ class Renderer:
                 self.group_since[idx] = seen
             since = seen[1]
         n = int((elapsed - since) * l['fps'] // 1000)
-        return first + (n % count if l['loop'] else min(count - 1, n))
+        if not l['loop']:
+            return first + min(count - 1, n)
+        # `pause`: hidden frames after the last one, whole frames rounded up.
+        # A frame past the last is the layer in its pause: nothing is drawn.
+        pause_frames = (l.get('pause', 0) * l['fps'] + 999) // 1000
+        return first + n % (count + pause_frames)
 
     def layer_text(self, l):
         v = l['value']
@@ -1488,6 +1498,8 @@ class Renderer:
                 frame = 0
                 if t_ == 'animation':
                     frame = self.animation_frame(idx, l, r, elapsed)
+                    if frame >= l['frames']:
+                        continue   # in its `pause`
                 a = self.assets.get(asset_path(l, frame))
                 if not a:
                     continue
