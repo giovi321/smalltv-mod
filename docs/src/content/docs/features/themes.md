@@ -657,7 +657,17 @@ single hand repaints two small boxes, not the dial behind it.
 {"id":"cat","type":"animation","x":160,"y":170,"width":64,"height":64,"source":"animations/cat","frames":12,"fps":8,"loop":true}
 ```
 
-All shown fields are required. Source frames are `000.png`, `001.png`, etc.; their
+An optional `"pause"` (0–60,000 ms, looping animations only) hides the layer
+for that long after its last frame, then starts again at frame 0. It is rounded
+up to whole frames. Other layers keep moving. A shower can rain for a few
+seconds and then stop, without empty frames that would each cost an entry in the
+package. `pause` is not allowed on an animation whose frame is
+[picked by a value](#frame-by-value), with or without `group`: such a layer has
+no "after the last frame". `"pause": 0` is allowed there and means no pause.
+`pause` needs the next firmware release after v3.9.0. Older firmware refuses the
+package with `layers[0].pause: unknown field`.
+
+All shown fields except `pause` are required. Source frames are `000.png`, `001.png`, etc.; their
 dimensions must exactly match `width` and `height`. Each animation has its own
 elapsed-time schedule, independent of clock text. Late rendering skips to the due
 frame instead of queuing work. `loop:false` holds the final frame. Pausing under a
@@ -1058,7 +1068,7 @@ preview it with the `--data` workflow documented above.
 | Arc start, sweep; hand angle | −360 to 360 degrees |
 | Hand length / tail; tick length | 1–240 / 0–240 / 1–240 pixels |
 | Tick count | 1–60 |
-| Animation | 1–240 frames, 1–15 FPS |
+| Animation | 1–240 frames, 1–15 FPS, pause 0–60,000 ms |
 | Binding stops | 1–8 for a color binding; 1–16 for a frame binding (spec 2) |
 | Fonts (spec 2) | 4 per theme; names 1–32 ID characters; printable ASCII glyphs; line height 6–96 pixels; advance 1–120 pixels; 65,535 bytes of glyph bitmaps |
 | `show` (spec 2) | 1–4 rules per layer, at most 36 rules in a theme; 1–4 ranges per rule; `every` 2–3600 |
