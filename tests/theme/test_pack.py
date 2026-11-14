@@ -278,5 +278,37 @@ class PackTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 pack.build(root)
 
+    # `pause` on a looping animation: the packer takes it, writes it into the
+    # manifest, and refuses what the firmware refuses. (The name has
+    # "frame_bound" so the same mutation target as the test above runs it.)
+    def test_pause_of_a_looping_animation_packs_and_frame_bound_one_is_refused(self):
+        def theme(root, loop, pause, bind=None, spec=1):
+            layer = {'id': 'm', 'type': 'animation', 'x': 0, 'y': 0, 'width': 2, 'height': 2,
+                     'source': 'phase', 'frames': 3, 'fps': 2, 'loop': loop, 'pause': pause}
+            manifest = {'spec': spec, 'theme': {'id': 'rain', 'name': 'Rain', 'author': 'Me', 'version': '1'},
+                        'display': {'width': 240, 'height': 240, 'background': '#000000'},
+                        'layers': [layer]}
+            if bind:
+                layer['bind'] = {'frame': bind}
+                manifest['data'] = [{'id': 'w', 'url': 'http://example.test/a.json', 'interval': 600,
+                                     'fields': [{'id': 'moon', 'path': 'moon'}]}]
+            (root/'theme.json').write_text(json.dumps(manifest))
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/'phase').mkdir()
+            for i in range(3):
+                Image.new('RGB', (2, 2), (i * 100, 0, 0)).save(root/'phase'/f'{i:03d}.png')
+            theme(root, True, 900)
+            self.assertIn(b'"pause":900', pack.build(root))
+            theme(root, True, 0)
+            pack.build(root)
+            for loop, pause in ((True, 60001), (True, -1), (False, 500)):
+                theme(root, loop, pause)
+                with self.assertRaises(ValueError):
+                    pack.build(root)
+            theme(root, True, 500, bind={'source': 'w.moon', 'input': [0, 1], 'output': [0, 2]}, spec=2)
+            with self.assertRaises(ValueError):
+                pack.build(root)
+
 if __name__ == '__main__':
     unittest.main()

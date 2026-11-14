@@ -337,6 +337,36 @@ int main() {
   deserializeJson(d,base);d["layers"][0]["cornerRadius"]=8;rejected(d);
   dataDocument(d);rectangle(d["layers"][0]);d["layers"][0]["cornerRadius"]="8";rejected(d);
   dataDocument(d);rectangle(d["layers"][0]);d["layers"][0]["cornerRadius"]=121;rejected(d);
+  // `pause`: 0 to 60,000 ms, only on looping animations.
+  {
+    Theme theme;std::string error;
+    const std::string animation = R"({"spec":1,"theme":{"id":"p","name":"P","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},)"
+      R"("layers":[{"id":"rain","type":"animation","x":0,"y":0,"width":8,"height":8,"source":"rain","frames":4,"fps":2,"loop":LOOP,"pause":PAUSE}]})";
+    auto withPause = [&](const char* loop, const char* pause) {
+      std::string json = animation;
+      json.replace(json.find("LOOP"), 4, loop);
+      json.replace(json.find("PAUSE"), 5, pause);
+      return json;
+    };
+    assert(parseTheme(withPause("true", "0"), theme, error) && theme.layers[0].pauseFrames == 0);
+    assert(parseTheme(withPause("true", "60000"), theme, error) && theme.layers[0].pauseFrames == 120);
+    assert(parseTheme(withPause("true", "1"), theme, error) && theme.layers[0].pauseFrames == 1);
+    for (const char* bad : {"60001", "-1", "1.5", "\"500\""}) {
+      assert(!parseTheme(withPause("true", bad), theme, error) && error.find("layers[0].pause:") == 0);
+    }
+    assert(!parseTheme(withPause("false", "500"), theme, error) && error.find("layers[0].pause:") == 0);
+    assert(parseTheme(withPause("false", "0"), theme, error));   // asks for nothing
+    std::string image = R"({"spec":1,"theme":{"id":"p","name":"P","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},)"
+      R"("layers":[{"id":"sun","type":"image","x":0,"y":0,"source":"sun","pause":500}]})";
+    assert(!parseTheme(image, theme, error) && error.find("layers[0].pause:") == 0);
+    // Only a `pause` sets the field: an image, and an animation without the key, stay at 0.
+    image.replace(image.find(",\"pause\":500"), 12, "");
+    assert(parseTheme(image, theme, error) && theme.layers[0].pauseFrames == 0);
+    std::string plain = animation;
+    plain.replace(plain.find(",\"pause\":PAUSE"), 14, "");
+    plain.replace(plain.find("LOOP"), 4, "true");
+    assert(parseTheme(plain, theme, error) && theme.layers[0].pauseFrames == 0);
+  }
   tm t{};t.tm_hour=12;t.tm_year=100;t.tm_mon=0;t.tm_mday=1;t.tm_wday=6;
   assert(expandText("{hh} {HH} {DD} {MONTH} {WEEKDAY} {YYYY}",&t)=="12 12 01 January Saturday 2000");
   t.tm_hour=23;assert(expandText("{hh}",&t)=="11");assert(expandText("{HH}:{MM}",nullptr)=="--:--");

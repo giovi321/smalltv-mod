@@ -91,6 +91,10 @@ def make_moon(root):
             # An open input (clamp false) must still end on the last group.
             dict(cat, id='open', x=130, y=10, bind={'frame': {'source': 'w.day', 'input': [0, 1], 'output': [0, 1],
                                                               'group': 3, 'clamp': False}}),
+            # `pause`: 6 frames at 3 fps, then 1000 ms hidden (3 frames): a loop of 9 frames.
+            dict(cat, id='rain', x=160, y=10, pause=1000),
+            # A pause that is not a whole number of frames (400 ms at 3 fps: 1.2, so 2 frames).
+            dict(cat, id='drip', x=190, y=10, pause=400),
         ]}))
 
 
@@ -175,6 +179,8 @@ class PackageParityTests(unittest.TestCase):
             # An open input far past its end (group 5 would be frame 15), and far below its start.
             ('moon', '2026-11-06T10:00:00', 3, 9, {'w.moon': '0.5', 'w.day': '5'}, None),
             ('moon', '2026-11-06T10:00:00', 3, 9, {'w.moon': '0.5', 'w.day': '-5'}, None),
+            # `pause`: two loops of the rain (9 frames each) and of the drip (8 frames each) at 3 fps.
+            ('moon', '2026-11-06T10:00:00', 3, 20, {'w.moon': '0.5', 'w.day': '0'}, None),
         ]
         for name, start, fps, count, values, lang in runs:
             with self.subTest(theme=name, start=start, fps=fps, lang=lang):
@@ -220,6 +226,7 @@ def show_layers(rules):
 
 # Frame by value: a 6-frame animation bound on `frame` (spec 2).
 ANIM = dict(id='a', type='animation', x=0, y=0, width=2, height=2, source='anim', frames=6, fps=2, loop=True)
+IMAGE = dict(id='i', type='image', x=0, y=0, source='sun')
 FRAME_BIND = {'source': 'w.x', 'input': [0, 1], 'output': [0, 5]}
 FRAME_STOPS = {'source': 'w.x', 'stops': [{'at': 0, 'frame': 0}, {'at': 1, 'frame': 5}]}
 
@@ -326,13 +333,27 @@ MANIFESTS = {
     'frame group 4': framed(dict(FRAME_BIND, output=[0, 0], group=4)),
     'frame group 0': framed(dict(FRAME_BIND, output=[0, 0], group=0)),
     'frame group output in frames': framed(dict(FRAME_BIND, group=3)),
+    # `pause` on an animation: its range, looping only, and not with a frame binding.
+    'pause ok': manifest(layers=[dict(ANIM, pause=900)]),
+    'pause 0': manifest(layers=[dict(ANIM, pause=0)]),
+    'pause 60000': manifest(layers=[dict(ANIM, pause=60000)]),
+    'pause 60001': manifest(layers=[dict(ANIM, pause=60001)]),
+    'pause negative': manifest(layers=[dict(ANIM, pause=-1)]),
+    'pause fraction': manifest(layers=[dict(ANIM, pause=1.5)]),
+    'pause string': manifest(layers=[dict(ANIM, pause='500')]),
+    'pause without loop': manifest(layers=[dict(ANIM, loop=False, pause=500)]),
+    'pause 0 without loop': manifest(layers=[dict(ANIM, loop=False, pause=0)]),
+    'pause on an image': manifest(layers=[dict(IMAGE, pause=500)]),
+    'pause with frame': framed(FRAME_BIND, pause=500),
+    'pause with frame group': framed(dict(FRAME_BIND, output=[0, 1], group=3), pause=500),
+    'pause 0 with frame': framed(FRAME_BIND, pause=0),
 }
 
 
 @needs_native
 class ManifestParityTests(unittest.TestCase):
     def test_validators_agree(self):
-        self.assertEqual(len(MANIFESTS), 87)
+        self.assertEqual(len(MANIFESTS), 100)
         with tempfile.TemporaryDirectory() as d:
             path = Path(d)/'theme.json'
             for name, theme in MANIFESTS.items():

@@ -547,7 +547,40 @@ static void testGroupExtrapolates() {
   assert(frameFor(single, "50") == 5 && frameFor(single, "-50") == 0);
 }
 
+// `pause` hides a looping animation after its last frame. A frame-bound layer
+// never runs past its last frame (the value picks it), and a group has no
+// "after the last frame" of its own, so the two do not go together: refused.
+static std::string withPause(std::string layer, const char* pause) {
+  const std::string at = "\"loop\":true";
+  layer.insert(layer.find(at) + at.size(), std::string(",\"pause\":") + pause);
+  return layer;
+}
+static void testPauseRefused() {
+  const char* msg = "layers[0].pause: not for a frame-bound animation";
+  assert(bad(withPause(anim(8, linear("w.moon", "[0,29]", "[0,7]")), "500"), msg));
+  assert(bad(withPause(cat(), "500"), msg));
+  assert(bad(withPause(anim(6, steps("w.day", "[{\"at\":0,\"frame\":0}]", kGroup3)), "1"), msg));
+  // A pause of 0 asks for nothing, so it is allowed; so is a pause on a layer
+  // whose frame is not picked by a value (even with another binding).
+  Theme theme; std::string error;
+  assert(parse(manifest(2, withPause(cat(), "0")), theme, error) && theme.layers[0].group == 3);
+  assert(parse(manifest(2, withPause(anim(4, ""), "900")), theme, error) && theme.layers[0].pauseFrames == 5 && !theme.layers[0].frameBound);
+  assert(parse(manifest(2, withPause(anim(4, "\"x\":{\"source\":\"w.moon\",\"input\":[0,1],\"output\":[0,9]}"), "900")), theme, error) && theme.layers[0].pauseFrames == 5);
+  // Next to a grouped cat, a paused rain animation still pauses and the cat still plays its group.
+  const std::string rain = withPause(anim(4, "", "r"), "800");
+  Engine e = engineFor(cat("c") + "," + rain);
+  setDay(e, "1");
+  e.update(100, nullptr);
+  e.update(700, nullptr);   // cat: 3 frames after 600 ms -> back at the group's first
+  assert(e.states()[0].frame == 3);
+  assert(e.states()[1].frame == 3);   // rain: 5 fps, 4 frames + 4 paused = 8-frame loop, at frame 3 after 600 ms
+  e.update(1100, nullptr);            // 1000 ms: rain frame 5 is in its pause and covers nothing
+  assert(e.states()[1].frame == 5 && e.states()[1].bounds.empty());
+  assert(e.states()[0].frame == 5);   // the cat plays on inside its group
+}
+
 int main() {
+  testPauseRefused();
   testGroupExtrapolates();
   testGroupParsing();
   testGroupRefusals();
