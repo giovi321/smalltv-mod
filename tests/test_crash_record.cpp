@@ -16,9 +16,12 @@ static CrashRtc sample() {
 }
 
 int main() {
-  // The record is 12 words and must end inside the 128 user words from word 96.
-  assert(sizeof(CrashRtc) == 48);
-  assert(96 + sizeof(CrashRtc) / 4 <= 128);
+  // The record is 25 words. It must stay clear of the OTA hand-off (0..31), the
+  // diag build's record (32..74) and the words a build may keep from 112 on.
+  assert(sizeof(CrashRtc) == 100);
+  assert(CRASH_RTC_WORD >= 75 && CRASH_RTC_WORD + sizeof(CrashRtc) / 4 <= 112);
+  // A record of an older layout (#56's "CRSH" at word 96) is never read as this one.
+  assert(CRASH_MAGIC != 0x43525348);
 
   // Labels: 253/254 get their own, the hardware watchdog is only REASON_WDT_RST.
   assert(!strcmp(crashReasonLabel(2), "Exception"));
@@ -69,6 +72,94 @@ int main() {
   assert(crashBootAction(true, false, 6) == CRASH_KEEP);     // external reset
   assert(crashBootAction(false, false, 0) == CRASH_KEEP);    // power on, nothing stored
   assert(crashBootAction(true, false, 0) == CRASH_KEEP);
+
+  // `more` is outside the checksum: raising it must not invalidate the record.
+  {
+    CrashRtc m = sample();
+    m.more = 5;
+    m.check = crashCheck(m);
+    CrashRtc n = m; n.more = 6;
+    assert(crashCheck(n) == m.check);
+    // every other new field is inside it
+    n = m; n.failSize++;   assert(crashCheck(n) != m.check);
+    n = m; n.failAddr++;   assert(crashCheck(n) != m.check);
+    n = m; n.heapBlock++;  assert(crashCheck(n) != m.check);
+    n = m; n.low++;        assert(crashCheck(n) != m.check);
+    n = m; n.trace[7]++;   assert(crashCheck(n) != m.check);
+    n = m; n.trace[0]++;   assert(crashCheck(n) != m.check);
+  }
+
+  // 16 bit fields: clamped, and 0xFFFF is "block not known".
+  assert(crashClamp16(0) == 0 && crashClamp16(65535) == 65535 && crashClamp16(65536) == 65535 && crashClamp16(1u << 31) == 65535);
+  assert(crashBlockField(100) == 100);
+  // a real block is never turned into the "unknown" marker
+  assert(crashBlockField(0xFFFE) == 0xFFFE && crashBlockField(0xFFFF) == 0xFFFE && crashBlockField(70000) == 0xFFFE);
+  assert(crashBlockKnown(crashBlockField(0xFFFF)) && !crashBlockKnown(0xFFFF));
+
+  // The head is written before the heap walk: block unknown, detail flagged.
+  {
+    CrashRtc h; memset(&h, 0xAA, sizeof(h));
+    crashFillHead(h, 254, 0, 0, 0, 91, 3456, 756, 0x40201abc, 3000, 576, 4);
+    assert(h.magic == CRASH_MAGIC && h.flags == (CRASH_PENDING | CRASH_DETAIL));
+    assert(h.rstReason == 254 && h.uptimeS == 91 && h.uptimeKnown == 1);
+    assert((h.heapBlock & 0xFFFF) == 3456 && (h.heapBlock >> 16) == 0xFFFF);
+    assert(!crashBlockKnown(h.heapBlock >> 16));
+    assert(h.failSize == 756 && h.failAddr == 0x40201abc);
+    assert((h.low & 0xFFFF) == 3000 && (h.low >> 16) == 576);
+    assert(h.more == 4);   // the count of earlier crashes is kept
+    // then the walk finished: the block goes in, the heap half stays
+    crashSealBlock(h, 576);
+    assert((h.heapBlock & 0xFFFF) == 3456 && (h.heapBlock >> 16) == 576);
+    assert(h.check == crashCheck(h));
+    assert(crashBlockKnown(h.heapBlock >> 16));
+  }
+
+  // Adopting a record drops "pending" and keeps what else the flags say.
+  assert(crashAdoptFlags(CRASH_PENDING | CRASH_DETAIL) == CRASH_DETAIL);
+  assert(crashAdoptFlags(CRASH_PENDING) == 0);
+  assert(crashAdoptFlags(CRASH_DETAIL) == CRASH_DETAIL);
+
+  // Earlier crashes that were never cleared are counted, with the new one kept.
+  assert(crashMoreAfter(false, 9) == 0);        // no valid record: nothing earlier
+  assert(crashMoreAfter(true, 0) == 1);
+  assert(crashMoreAfter(true, 41) == 42);
+  assert(crashMoreAfter(true, 65535) == 65535);   // saturates
+  assert(crashMoreAfter(true, 0xFFFFFFFFu) == 65535);
+
+  // Trace: the first eight words that look like code, in stack order.
+  {
+    uint32_t stack[] = {0x3ffe8000, 0x40201000, 5, 0x40100010, 0x40300000, 0x4010ffff, 0x40110000, 0x402fffff,
+                        0x40200000, 0x40201001, 0x40201002, 0x40201003, 0x40201004};
+    uint32_t out[CRASH_TRACE_WORDS];
+    unsigned n = crashCollectTrace(stack, sizeof(stack) / 4, out);
+    assert(n == 8);
+    assert(out[0] == 0x40201000 && out[1] == 0x40100010 && out[2] == 0x4010ffff && out[3] == 0x402fffff);
+    assert(out[4] == 0x40200000 && out[5] == 0x40201001 && out[6] == 0x40201002 && out[7] == 0x40201003);
+    uint32_t few[] = {1, 0x40201000};
+    n = crashCollectTrace(few, 2, out);
+    assert(n == 1 && out[0] == 0x40201000 && out[1] == 0 && out[7] == 0);   // the rest is zero, not stale
+    assert(crashCollectTrace(nullptr, 0, out) == 0 && out[0] == 0);
+    assert(!crashCodeAddress(0x401fffff) && crashCodeAddress(0x40200000) && !crashCodeAddress(0x40300000));
+    assert(crashCodeAddress(0x40100000) && !crashCodeAddress(0x40110000) && !crashCodeAddress(0x400fffff));
+  }
+
+  // Low-water: the first 20 ticks after a reset are left out; then the minimum.
+  {
+    CrashLowWater w;
+    w.reset();
+    assert(!w.any());
+    for (unsigned i = 0; i < CRASH_QUIET_TICKS; i++) w.sample(100, 50);
+    assert(!w.any());
+    w.sample(5000, 4000); w.sample(3000, 4500); w.sample(4000, 900);
+    assert(w.any() && w.heap() == 3000 && w.block() == 900);
+    w.sample(70000, 70000);
+    assert(w.heap() == 3000 && w.block() == 900);
+    w.reset();
+    assert(!w.any());
+    for (unsigned i = 0; i < CRASH_QUIET_TICKS; i++) w.sample(100, 50);
+    w.sample(65536, 1);   // a clamped heap is not a low
+    assert(w.heap() == 65535 && w.block() == 1);
+  }
 
   std::cout << "crash record tests passed\n";
   return 0;
