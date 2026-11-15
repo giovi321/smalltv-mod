@@ -887,7 +887,17 @@ function showStatus(s){
   h+='<div class="kv"><b style="color:'+c+'">'+t.symbol+'</b><span>'+st+'</span></div>';});
  tb.innerHTML=h||'<span class="muted">No tickers configured</span>';}
 }
-function crashLine(x){return x.reason+(x.epc?', cause '+x.exccause+', epc '+x.epc+', addr '+x.addr:'')+', fw '+x.fw+(x.uptime!=null?', up '+fmtUp(x.uptime):'')}
+// The measured values come after the old ones; a key the device left out is not shown.
+function crashLine(x){
+ var t=x.reason+(x.epc?', cause '+x.exccause+', epc '+x.epc+', addr '+x.addr:'')+', fw '+x.fw+(x.uptime!=null?', up '+fmtUp(x.uptime):'');
+ if(x.heap!=null)t+=', heap '+x.heap;
+ if(x.maxBlock!=null)t+=', block '+x.maxBlock;
+ if(x.failSize)t+=', failed alloc '+x.failSize+' B from '+x.failAddr;
+ if(x.lowHeap!=null)t+=', low heap '+x.lowHeap;
+ if(x.lowBlk!=null)t+=', low block '+x.lowBlk;
+ if(x.trace&&x.trace.length)t+=', trace '+x.trace.join(' ');
+ if(x.more)t+=', '+x.more+' earlier';
+ return t}
 function clearCrash(){j('/api/crash/clear',{method:'POST'}).then(function(){toast('Crash record cleared');loadStatus()}).catch(function(e){toast(e.message)})}
 function kv(k,v){return '<div class="kv"><span class="muted">'+k+'</span><b>'+v+'</b></div>'}
 // WireGuard: one line that names the failure rather than just saying "down".
