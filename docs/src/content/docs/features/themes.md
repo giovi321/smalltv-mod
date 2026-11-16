@@ -317,7 +317,7 @@ v3.4.0 or later:
 | `{AMPM}` | `AM` for 00:00–11:59, `PM` for 12:00–23:59 |
 | `{device.focusToday}`, `{device.focusGoal}`, `{device.streak}`, `{device.humidity}`, `{device.temperature}` | The firmware's value, as text, exactly as it supplied it |
 
-One more token needs firmware from the next release (after v3.6.0), and a
+One more token needs a firmware newer than v3.6.0 and a
 `"spec": 2` theme:
 
 | Token | Value |
