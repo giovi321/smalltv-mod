@@ -142,9 +142,16 @@ The built-in icon set is small. The whole Material Design Icons catalogue works 
 python tools/mdi_to_hex.py window-open --size 24
 ```
 
+You can additionaly provide a local SVG file or a URL pointing to an SVG icon (remote icons have 2 MB limit):
+
+```bash
+python tools/mdi_to_hex.py path/to/local-icon.svg --size 32
+python tools/mdi_to_hex.py "https://example.com/path/to/remote-icon.svg" --size 16
+```
+
 It prints the raw hex plus a ready-made JSON fragment for a screen payload. Paste the hex into the bitmap field of the screen board blueprint, where it replaces the icon and draws in the foreground colour, or build the primitive yourself from the fragment. The script needs two Python packages (`svg.path` and `Pillow`); install them with `pip install -r tools/requirements-mdi.txt` into a virtualenv, not globally.
 
-Sizes 24 and 32 stay under the 700 B ESP8266 payload limit. A 48 px bitmap pushes a screen payload past it and only works on the ESP32 builds; on an ESP8266 the firmware ignores the oversized message. Prefer a 24 px source with `"s":2` over generating a large bitmap: you get the same 48 px result at a quarter of the payload size. Whatever size you pick, the hex length must match it (144 chars for 24 px, 256 for 32 px, 576 for 48 px); a size and hex mismatch makes the firmware silently skip the bitmap, so regenerate the hex at the same size you put in `w` and `h`.
+Sizes 16, 24 and 32 stay under the 700 B ESP8266 payload limit. A 48 px bitmap pushes a screen payload past it and only works on the ESP32 builds; on an ESP8266 the firmware ignores the oversized message. Prefer a 24 px source with `"s":2` over generating a large bitmap: you get the same 48 px result at a quarter of the payload size. Whatever size you pick, the hex length must match it (64 chars for 16 px, 144 for 24 px, 256 for 32 px, 576 for 48 px); a size and hex mismatch makes the firmware silently skip the bitmap, so regenerate the hex at the same size you put in `w` and `h`.
 
 ## Installing a blueprint
 
