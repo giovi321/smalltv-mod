@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <algorithm>
 #include <cerrno>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -193,17 +194,27 @@ static const char deviceNames[5][12] PROGMEM = {"focusToday", "focusGoal", "stre
 // halves must be valid IDs, and the source and field must actually appear in
 // this theme's `data` block. Shared between text-template validation
 // (validText) and binding source validation (declaredSource).
-static bool validFieldToken(const std::string& token, const Theme& theme) {
+// When `sourceIndex` and `fieldIndex` are given, they receive the position of
+// the source in theme.data and of the field in it (ShowAgeField for `age`).
+static bool validFieldToken(const std::string& token, const Theme& theme, uint8_t* sourceIndex = nullptr, uint8_t* fieldIndex = nullptr) {
   size_t dot = token.find('.');
   if (dot == std::string::npos || dot == 0 || dot + 1 >= token.size()) return false;
   std::string source = token.substr(0, dot), field = token.substr(dot + 1);
   if (!validId(source) || !validId(field)) return false;
-  for (const auto& data : theme.data) {
+  for (size_t s = 0; s < theme.data.size(); ++s) {
+    const auto& data = theme.data[s];
     if (data.id != source) continue;
+    if (sourceIndex) *sourceIndex = static_cast<uint8_t>(s);
     // Spec 2: every source also has an "age" field, the minutes since its last
     // successful fetch, which the firmware supplies (DataAges in ThemeData.h).
-    if (theme.spec >= 2 && field == "age") return true;
-    for (const auto& f : data.fields) if (f.id == field) return true;
+    if (theme.spec >= 2 && field == "age") {
+      if (fieldIndex) *fieldIndex = ShowAgeField;
+      return true;
+    }
+    for (size_t f = 0; f < data.fields.size(); ++f) if (data.fields[f].id == field) {
+      if (fieldIndex) *fieldIndex = static_cast<uint8_t>(f);
+      return true;
+    }
   }
   return false;
 }
@@ -890,6 +901,75 @@ static bool parseScroll(JsonObjectConst object, const std::string& path, std::st
   result.scroll.enabled = true;
   return true;
 }
+// parseShow's messages and its key list, in flash like the ones above.
+static const char showRulesMsg[] PROGMEM = "expected 1 to 4 rules";
+static const char showRangesMsg[] PROGMEM = "expected 1 to 4 ranges";
+static const char showPairMsg[] PROGMEM = "expected [low, high]";
+static const char showNumbersMsg[] PROGMEM = "expected numbers or null";
+static const char showSizeMsg[] PROGMEM = "expected numbers from -3.4e38 to 3.4e38, or null";
+static const char showTooManyMsg[] PROGMEM = "expected at most " SMALLTV_STRINGIFY(THEME_MAX_SHOW_RULES) " rules in a theme";
+static const char showOneNullMsg[] PROGMEM = "at most one end may be null";
+static const char showOrderMsg[] PROGMEM = "low must not be above high";
+static const char showUndeclaredMsg[] PROGMEM = "expected a declared data field";
+static const char showKeys[] PROGMEM = "|source|in|missing|";
+// True when `key` is "<source id>.<field id>" of a show rule's source and
+// field (ShowAgeField: "<source id>.age"), compared in place so that no key
+// string is built for each rule of each frame.
+static bool isShowKey(const std::string& key, const ThemeDataSource& source, uint8_t field) {
+  const std::string* name = field == ShowAgeField ? nullptr : &source.fields[field].id;
+  const size_t length = name ? name->size() : 3;
+  const size_t dot = source.id.size();
+  if (key.size() != dot + 1 + length || key.compare(0, dot, source.id) != 0 || key[dot] != '.') return false;
+  return (name ? key.compare(dot + 1, length, *name) : key.compare(dot + 1, length, "age")) == 0;
+}
+// Parses the last parsed layer's `show` list into t.show (see ShowRule): 1 to
+// 4 rules, each a declared data field and 1 to 4 inclusive [low, high]
+// ranges, where null is an open end; spec 2 only, and at most MaxShowRules
+// rules in all.
+__attribute__((noinline)) static bool parseShow(JsonObjectConst object, Theme& t, const std::string& path, std::string& error) {
+  Fields layer(object, path, error);
+  if (t.spec < 2) return layer.fail("show", fromFlash(fontNeedsSpec2));
+  JsonArrayConst rules = object["show"].as<JsonArrayConst>();
+  if (rules.isNull() || rules.size() == 0 || rules.size() > 4) return layer.fail("show", fromFlash(showRulesMsg));
+  if (t.show.size() + rules.size() > MaxShowRules) return layer.fail("show", fromFlash(showTooManyMsg));
+  for (size_t i = 0; i < rules.size(); ++i) {
+    const std::string rulePath = path + ".show[" + std::to_string(i) + "]";
+    JsonObjectConst item = rules[i].as<JsonObjectConst>();
+    Fields fields(item, rulePath, error);
+    if (item.isNull()) return fields.fail("", "expected an object");
+    ShowRule& rule = t.show.emplace_back();
+    rule.layer = static_cast<uint8_t>(t.layers.size() - 1);
+    std::string source;
+    if (!fields.keys(showKeys) || !fields.text("source", source, 64) || !fields.boolean("missing", rule.missing, false)) return false;
+    // Declared data fields only: the built-in time.*/device.* sources of spec 2 are not offered to `show`.
+    if (!validFieldToken(source, t, &rule.source, &rule.field)) return fields.fail("source", fromFlash(showUndeclaredMsg));
+    JsonArrayConst ranges = item["in"].as<JsonArrayConst>();
+    if (ranges.isNull() || ranges.size() == 0 || ranges.size() > 4) return fields.fail("in", fromFlash(showRangesMsg));
+    rule.count = static_cast<uint8_t>(ranges.size());   // 1 to 4, checked above
+    for (size_t r = 0; r < ranges.size(); ++r) {
+      Fields range(item, rulePath + ".in[" + std::to_string(r) + "]", error);
+      JsonArrayConst ends = ranges[r].as<JsonArrayConst>();
+      if (ends.isNull() || ends.size() != 2) return range.fail("", fromFlash(showPairMsg));
+      float value[2];
+      for (size_t e = 0; e < 2; ++e) {
+        JsonVariantConst end = ends[e];
+        if (end.isNull()) value[e] = e ? INFINITY : -INFINITY;
+        else if (end.is<double>() || end.is<long>() || end.is<int>()) {
+          // A number that is infinite, or too big for a float, is not an open end: null is.
+          const double number = end.as<double>();
+          // (FLT_MAX, not 3.4e38: the float nearest to 3.4e38 is a little above it, and must pass.)
+          if (!(std::fabs(number) <= static_cast<double>(FLT_MAX))) return range.fail("", fromFlash(showSizeMsg));
+          value[e] = static_cast<float>(number);
+        } else return range.fail("", fromFlash(showNumbersMsg));
+      }
+      if (std::isinf(value[0]) && std::isinf(value[1])) return range.fail("", fromFlash(showOneNullMsg));
+      if (value[0] > value[1]) return range.fail("", fromFlash(showOrderMsg));
+      rule.low[r] = value[0];
+      rule.high[r] = value[1];
+    }
+  }
+  return true;
+}
 // Parses a layer's `bind` object: at most 8 entries (already enforced key-by-
 // key by ManifestScanner, but re-checked here on the parsed count),
 // each either a numeric mapping or a color-stop table depending on which
@@ -1077,10 +1157,14 @@ __attribute__((noinline)) static bool readLayer(ManifestSource& json, const Mani
 // about 750 bytes for a text of two letters. The count is capped at what
 // MaxTranslationBytes can hold at the least, and parseTextValue() still checks
 // every text against it, so a manifest over the limit is refused there.
-__attribute__((noinline)) static bool reserveTranslations(ManifestSource& json, const ManifestLayout& scan, Theme& t, std::string& error) {
+// The same pass counts the `show` rules, for the same reason: the first rule
+// would open a whole block (768 bytes). That count is capped at MaxShowRules,
+// which parseShow() enforces.
+__attribute__((noinline)) static bool reserveCounted(ManifestSource& json, const ManifestLayout& scan, Theme& t, std::string& error) {
   JsonDocument filter;
   filter["value"] = true;
-  size_t count = 0;
+  filter["show"] = true;
+  size_t count = 0, rules = 0;
   for (const auto& range : scan.layerRanges) {
     JsonDocument doc;
     ManifestReader reader(json, range.begin, range.end);
@@ -1088,16 +1172,18 @@ __attribute__((noinline)) static bool reserveTranslations(ManifestSource& json, 
     if (jsonFailed(err, reader, error)) return false;
     for (JsonPairConst p : doc["value"].as<JsonObjectConst>())
       if (languageIndex(p.key().c_str(), p.key().size()) > 0) ++count;
+    rules += doc["show"].as<JsonArrayConst>().size();
   }
   size_t most = MaxTranslationBytes / sizeof(LocalizedText);
   t.translations.reserve(count < most ? count : most);
+  t.show.reserve(rules < MaxShowRules ? rules : MaxShowRules);
   return true;
 }
 // The second pass: each layer `scan` found, parsed on its own and its JSON
 // freed before the next.
 __attribute__((noinline)) static bool parseLayers(ManifestSource& json, const ManifestLayout& scan, Theme& t, std::string& error) {
   t.layers.reserve(scan.layerRanges.size());
-  if (t.spec >= 2 && !reserveTranslations(json, scan, t, error)) return false;
+  if (t.spec >= 2 && !reserveCounted(json, scan, t, error)) return false;
   // The layer IDs seen so far, for the duplicate check; Layer does not keep
   // its ID, so they exist only while the layers are parsed.
   BlockList<std::string> ids;
@@ -1139,16 +1225,19 @@ bool parseTheme(ManifestSource& json, Theme& out, std::string& error) {
 }
 // Each shape's allowed keys. In flash on the ESP8266, where a string literal
 // would take RAM; Fields::keys() reads them with the _P functions.
-static const char rectangleKeys[] PROGMEM = "|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|cornerRadius|scroll|bind|";
-static const char circleKeys[] PROGMEM = "|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|";
-static const char lineKeys[] PROGMEM = "|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|";
-static const char arcKeys[] PROGMEM = "|id|type|shape|x|y|radius|start|sweep|stroke|strokeWidth|bind|";
-static const char handKeys[] PROGMEM = "|id|type|shape|x|y|length|tail|angle|stroke|strokeWidth|bind|";
-static const char ticksKeys[] PROGMEM = "|id|type|shape|x|y|radius|count|length|stroke|strokeWidth|bind|";
+static const char rectangleKeys[] PROGMEM = "|id|type|shape|x|y|width|height|fill|stroke|strokeWidth|cornerRadius|scroll|bind|show|";
+static const char circleKeys[] PROGMEM = "|id|type|shape|x|y|radius|fill|stroke|strokeWidth|scroll|bind|show|";
+static const char lineKeys[] PROGMEM = "|id|type|shape|x|y|x2|y2|stroke|strokeWidth|scroll|bind|show|";
+static const char arcKeys[] PROGMEM = "|id|type|shape|x|y|radius|start|sweep|stroke|strokeWidth|bind|show|";
+static const char handKeys[] PROGMEM = "|id|type|shape|x|y|length|tail|angle|stroke|strokeWidth|bind|show|";
+static const char ticksKeys[] PROGMEM = "|id|type|shape|x|y|radius|count|length|stroke|strokeWidth|bind|show|";
+static const char textKeys[] PROGMEM = "|id|type|x|y|anchor|value|size|font|color|scroll|bind|show|";
+static const char imageKeys[] PROGMEM = "|id|type|x|y|source|scroll|bind|show|";
+static const char animationKeys[] PROGMEM = "|id|type|x|y|width|height|source|frames|fps|loop|scroll|bind|show|";
 // What one translation holds while the theme runs: its entry and, once the
 // text outgrows the string's inline buffer, the heap block behind it. This is
 // what MaxTranslationBytes bounds -- the text alone says nothing of the entry,
-// which dwarfs a two-letter text -- and what reserveTranslations() sets aside.
+// which dwarfs a two-letter text -- and what reserveCounted() sets aside.
 static size_t translationCost(size_t length) {
   return sizeof(LocalizedText) + (length > std::string().capacity() ? length + 1 : 0);
 }
@@ -1209,7 +1298,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
   if (!f.text("type", type, 16) || !f.number("x", -240, 479, l.x) || !f.number("y", -240, 479, l.y)) return false;
   if (type == "text") {
     l.type = LayerType::Text;
-    if (!f.keys("|id|type|x|y|anchor|value|size|font|color|scroll|bind|") || !parseTextValue(o, t, f, l)) return false;
+    if (!f.keys(textKeys) || !parseTextValue(o, t, f, l)) return false;
     if (f.has("font")) {
       // A package font (#31): fonts/<name>.stf, whose line height is the
       // layer's size, so `size` is not given.
@@ -1242,7 +1331,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
     l.anchorY = a / 3;
   } else if (type == "image" || type == "animation") {
     l.type = type == "image" ? LayerType::Image : LayerType::Animation;
-    if (!f.keys(type == "image" ? "|id|type|x|y|source|scroll|bind|" : "|id|type|x|y|width|height|source|frames|fps|loop|scroll|bind|") || !f.text("source", l.source, 110)) return false;
+    if (!f.keys(type == "image" ? imageKeys : animationKeys) || !f.text("source", l.source, 110)) return false;
     if (!validPath(l.source)) return f.fail("source", "expected a safe relative asset path");
     if (type == "animation") {
       int frames = 0, fps = 0;
@@ -1295,13 +1384,14 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
       if (!f.number("x2", -240, 479, l.x2) || !f.number("y2", -240, 479, l.y2)) return false;
     }
   } else return f.fail("type", "expected text, image, animation or shape");
-  // `scroll` and `bind` are common to every layer type's own `keys()` list
-  // above, so they are parsed once here rather than duplicated per branch.
+  // `scroll`, `bind` and `show` are common to every layer type's own `keys()`
+  // list above, so they are parsed once here rather than duplicated per branch.
   if (f.has("scroll")) {
     if (l.type != LayerType::Text) return f.fail("scroll", "only allowed on text layers");
     if (!parseScroll(o, layerPath, error, l)) return false;
   }
   if (f.has("bind") && !parseBindings(o, t, layerPath, error, l)) return false;
+  if (f.has("show") && !parseShow(o, t, layerPath, error)) return false;
   return true;
 }
 std::string expandText(const std::string& value, const tm* t) {
@@ -1510,6 +1600,26 @@ void Engine::resolveLayer(size_t index) {
   if (layer.type == LayerType::Shape && layer.shape == Shape::Rectangle)
     resolved.cornerRadius = std::min<int>(resolved.cornerRadius,
       std::max(0, std::min(resolved.width, resolved.height) / 2));
+  // `show`: every rule of this layer must hold (see ShowRule).
+  for (const auto& rule : theme_.show) {
+    if (rule.layer != index || !resolved.visible) continue;
+    const std::string* source = nullptr;
+    for (const auto& item : values_) if (isShowKey(item.key, theme_.data[rule.source], rule.field)) {
+      source = &item.value;
+      break;
+    }
+    double number = 0;
+    if (!source || !parseFiniteNumber(*source, number)) {
+      resolved.visible = rule.missing;
+      continue;
+    }
+    // Compared as a float, the precision the bounds are kept in: a bound of
+    // 9.49 holds for the value 9.49 whatever it rounds to.
+    const float value = static_cast<float>(number);
+    resolved.visible = false;
+    for (size_t r = 0; r < rule.count; ++r)
+      if (value >= rule.low[r] && value <= rule.high[r]) resolved.visible = true;
+  }
   states_[index].resolved = resolved;
 }
 // True once `now` is strictly past `deadline`; wrap-safe across millis() rollover.
@@ -1607,7 +1717,7 @@ static bool sameGeometry(const ResolvedLayer& a, const ResolvedLayer& b) {
   return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height &&
     a.x2 == b.x2 && a.y2 == b.y2 && a.radius == b.radius &&
     a.cornerRadius == b.cornerRadius && a.size == b.size &&
-    a.strokeWidth == b.strokeWidth && a.scrollWidth == b.scrollWidth;
+    a.strokeWidth == b.strokeWidth && a.scrollWidth == b.scrollWidth && a.visible == b.visible;
 }
 static bool sameColors(const ResolvedLayer& a, const ResolvedLayer& b) {
   return a.color == b.color && a.fill == b.fill && a.stroke == b.stroke;
@@ -1756,6 +1866,8 @@ static Rect arcBounds(const ResolvedLayer& r) {
 // the full (possibly much wider) expanded text -- render() maps viewport-
 // local pixels back to a position in the text itself via scrollContentColumn.
 static Rect bounds(const Theme& theme, const Layer& l, const ResolvedLayer& resolved, const std::string& text) {
+  // A hidden layer (`show`) covers nothing, so it is neither drawn nor repainted.
+  if (!resolved.visible) return Rect(resolved.x, resolved.y, 0, 0);
   if (l.type == LayerType::Text) {
     int w = l.scroll.enabled ? resolved.scrollWidth : textPixelWidth(theme, l, resolved.size, text);
     return Rect(resolved.x - w * l.anchorX / 2, resolved.y - resolved.size * l.anchorY / 2, w, resolved.size);

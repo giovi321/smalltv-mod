@@ -20,10 +20,14 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCL
 /tmp/smalltv-theme-font-review-example
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_render.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-render-tests
 /tmp/smalltv-theme-render-tests
-c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_validation.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-validation-tests
+c++ -std=c++11 -Wall -Wextra -Werror -g -DEXPECT_DOUBLE_JSON=1 -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_validation.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-validation-tests
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_language.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-language-tests
 /tmp/smalltv-theme-language-tests
 /tmp/smalltv-theme-validation-tests
+# The same tests with floats, as the device parses numbers (ARDUINOJSON_USE_DOUBLE=0).
+# EXPECT_FLOAT_JSON makes the build fail if that flag is missing.
+c++ -std=c++11 -Wall -Wextra -Werror -g -DARDUINOJSON_USE_DOUBLE=0 -DEXPECT_FLOAT_JSON=1 -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_validation.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-validation-float-tests
+/tmp/smalltv-theme-validation-float-tests
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" -I".pio/libdeps/smalltv_esp32_8mb/GFX Library for Arduino/src" tests/theme/check_example.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-example-check
 /tmp/smalltv-theme-example-check examples/themes/pixel-room.stheme
 /tmp/smalltv-theme-example-check examples/themes/terminal-ops.stheme

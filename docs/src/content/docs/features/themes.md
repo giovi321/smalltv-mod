@@ -773,6 +773,38 @@ text (`{w.age}`), for example to mark data that has gone stale.
 - In a `"spec": 1` theme `w.age` is refused like any name that is not a declared
   field.
 
+### Showing and hiding layers (spec 2)
+
+`show` is an optional list on any layer, in a theme with `"spec": 2`. It needs
+a firmware newer than v3.6.0: a firmware up to v3.6.0 does not know the key and
+refuses the layer as an unknown field. A spec 1 theme that uses `show` is
+refused with `layers[N].show: needs "spec": 2`, and a spec 1 theme installs
+exactly as before. The layer is drawn only while every rule in the list holds:
+
+```json
+{"show": [{"source": "w.code", "in": [[51, 67], [80, 82]]},
+          {"source": "w.age", "in": [[null, 30]], "missing": true}]}
+```
+
+| Field | Type | Required | Rule |
+| --- | --- | --- | --- |
+| `source` | string | yes | A declared data field, or `<source>.age` (see [Data age](#data-age-sourceage)) |
+| `in` | array | yes | 1–4 ranges `[low, high]`, ends included; `null` is an open end (not both); other ends must be numbers from −3.4e38 to 3.4e38 |
+| `missing` | boolean | no, default false | Whether the rule holds while the value is missing or not a number |
+
+A layer takes 1–4 rules, and a theme at most 36 rules in all (the most that load inside the memory budget; a rule costs
+40 bytes of RAM; a firmware build can raise the limit with
+`-DTHEME_MAX_SHOW_RULES=<n>`). A rule holds
+when the fetched number lies in any of its ranges. The built-in `time.*` and
+`device.*` sources are refused for now (`expected a declared data field`); the
+second rule above, on `w.age`, is the way to hide a layer whose data has gone
+stale. Bounds are kept as 32-bit floats, and the value is compared with them
+at that precision, so a bound with more digits than a float holds is rounded.
+A hidden layer is not drawn, and showing
+or hiding it repaints only its own area; its bindings and animation keep
+running. Before the first fetch every value is missing, so `"missing": true`
+picks the layers a theme shows until its data arrives.
+
 ## Example: a dynamic dashboard
 
 `examples/themes/live-status` builds `examples/themes/live-status.stheme` from a
@@ -811,6 +843,7 @@ preview it with the `--data` workflow documented above.
 | Tick count | 1–60 |
 | Animation | 1–240 frames, 1–15 FPS |
 | Fonts (spec 2) | 4 per theme; names 1–32 ID characters; printable ASCII glyphs; line height 6–96 pixels; advance 1–120 pixels; 65,535 bytes of glyph bitmaps |
+| `show` (spec 2) | 1–4 rules per layer, at most 36 rules in a theme; 1–4 ranges per rule |
 | Container | 256 entries, at most 3 MiB |
 | Installed packages | 16, within available storage |
 

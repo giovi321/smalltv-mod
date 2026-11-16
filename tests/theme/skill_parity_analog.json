@@ -11,6 +11,19 @@
   "height": 240,
   "background": "#0b1420"
  },
+ "data": [
+  {
+   "id": "w",
+   "url": "http://example.test/w.json",
+   "interval": 60,
+   "fields": [
+    {
+     "id": "code",
+     "path": "code"
+    }
+   ]
+  }
+ ],
  "layers": [
   {
    "id": "bg",
@@ -296,6 +309,31 @@
     "speed": 20,
     "pause": 300
    }
+  },
+  {
+   "id": "rain",
+   "type": "shape",
+   "shape": "rectangle",
+   "x": 200,
+   "y": 20,
+   "width": 20,
+   "height": 12,
+   "fill": "#47c2ff",
+   "show": [
+    {
+     "source": "w.code",
+     "in": [
+      [
+       51,
+       67
+      ],
+      [
+       80,
+       null
+      ]
+     ]
+    }
+   ]
   }
  ]
 }
