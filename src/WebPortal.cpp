@@ -15,6 +15,10 @@
 #if WITH_RADAR
 #include "RadarClient.h"
 #endif
+#if WITH_RAIN
+#include "RainClient.h"
+#include "RainMode.h"
+#endif
 #if WITH_NOTIFY
 #include "NotifyMode.h"
 #endif
@@ -145,6 +149,7 @@ static void handleGetConfig() {
   feat["ticker"] = (bool)WITH_TICKER;
   feat["usage"]  = (bool)WITH_USAGE;
   feat["radar"]  = (bool)WITH_RADAR;
+  feat["rain"]   = (bool)WITH_RAIN;
   feat["ha"]     = (bool)WITH_HA;
   feat["theme"]  = (bool)WITH_THEME;
   // WireGuard is a per-chip decision rather than a per-feature one: it is
@@ -323,6 +328,30 @@ static void handleStatus() {
   r.url = radarLastUrl().c_str();
   smalltv::writeStatusRadar(out, r);
 #endif
+#if WITH_RAIN
+  smalltv::StatusRain rn;
+  char rainStage[32];                // the stage name, from flash
+  rn.frames = rainCount();           // frames currently on disk
+  rn.error = rainError();
+  rn.stale = rainStale(S->rain.pollSec, clockSynced() ? (uint32_t)time(nullptr) : 0);
+  rn.stage = rainStageName(rainStage, sizeof rainStage);   // why the last poll produced what it did
+  rn.http = rainLastHttp();          // <0 = HTTPClient internal error
+  rn.cropK = rainCropK();            // centre crop of the last poll
+  rn.generated = rainGenerated();    // unix time the server generated the set
+  if (rainLastTryMs()) { rn.hasTried = true; rn.triedAgo = (millis() - rainLastTryMs()) / 1000; }
+  if (rainLastOkMs())  { rn.hasOk = true;    rn.okAgo    = (millis() - rainLastOkMs()) / 1000; }
+  rn.url = rainLastUrl();
+  rn.drawMs = rainDrawMs();
+  rn.blitMs = rainBlitMs();
+  rn.citiesMs = rainCitiesMs();
+  rn.decodeMs = rainDecodeMs();
+  rn.smallMem = rainSmallMem();
+  rn.minHeap = rainMinHeap();
+  rn.minBlk = rainMinBlk();
+  rn.minWhere = rainMinWhere();
+  rn.fsFree = rainFsFree();
+  smalltv::writeStatusRain(out, rn);
+#endif
   smalltv::writeStatusEnd(out);
   // A piece the client did not take ended the reply and gave the connection
   // up; otherwise the web server writes the last chunk (a chunked reply only:
@@ -498,8 +527,12 @@ static void handleRefresh() {
 #if WITH_TICKER
   stocksForceRefresh();
 #endif
+#if WITH_RAIN
+  rainForceRefresh();
+#endif
   server.send(200, "application/json", "{\"ok\":true}");
 }
+
 
 #if WITH_HA
 // Purge every HA screen: empties the local store + deletes /ha_screens.json,
