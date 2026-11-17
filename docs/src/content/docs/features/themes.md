@@ -829,6 +829,14 @@ first for seconds 0–4 of every 10 and the second for seconds 5–9:
  "show": [{"source": "time.second", "every": 10, "in": [[5, 9]]}]}
 ```
 
+The values are those of the table of time sources above. Note that
+`time.hour12` runs from 0 to 11 (midnight and noon are 0), unlike the `{hh}`
+token, which shows 01 to 12. With `every: N` the values are 0 to N-1. A range
+that lies wholly outside the values (`[[12, 12]]` on `time.hour12`, `[[7, 7]]`
+on `time.weekday`, `[[10, 20]]` with `every: 10`) never matches and loads
+without a message from the firmware; the theme skill's `stheme.py` prints a
+warning for it and goes on.
+
 `every` is refused on a data field, because
 a fetched number can be negative or fractional, where a remainder is not
 well defined. Without a clock (before it is set) the rule holds only with
