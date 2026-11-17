@@ -35,7 +35,7 @@ These force spec 2 (firmware 3.4.0+, not editable in SmallTV Studio yet):
 
 - `arc`, `hand` and `ticks` shapes;
 - `time.*` and `device.*` binding sources;
-- the `{H}`, `{MO}`, `{AMPM}` and `{device.*}` text tokens;
+- the `{H}`, `{MO}`, `{AMPM}`, `{WW}` (ISO 8601 week, 01-53) and `{device.*}` text tokens;
 - per-language text values (`{"en": …, "de": …}`).
 
 Everything else builds as spec 1. Spec 1 always shows English month and day names; set
