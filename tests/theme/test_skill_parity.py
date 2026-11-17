@@ -5,8 +5,10 @@ validator accepts, preview frames equal to the native renderer's, and the same
 accept/reject verdict as the firmware's manifest validator.
 
 A change to the theme format must update stheme.py in the same PR."""
+import contextlib
 import copy
 import datetime as dt
+import io
 import json
 import os
 from pathlib import Path
@@ -230,6 +232,9 @@ MANIFESTS = {
     'show time every 2.5': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, every=2.5)])]),
     'show time every true': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, every=True)])]),
     'show time every null': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, every=None)])]),
+    'show time every 10.0': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, every=10.0)])]),
+    'show time every no source': manifest(layers=[dict(TEXT, show=[{'every': 10, 'in': [[0, 4]]}])]),
+    'show time every number source': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, source=5, every=10)])]),
     'show time unknown': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, source='time.millis')])]),
     'show time spec1': manifest(spec=1, layers=[dict(TEXT, show=[TIME_SHOW])]),
     'show device source': manifest(layers=[dict(TEXT, show=[dict(TIME_SHOW, source='device.humidity')])]),
@@ -351,6 +356,108 @@ class ShowTests(unittest.TestCase):
         bg, red = stheme.color565('#000000'), stheme.color565('#ff0000')
         pixel = lambda s: stheme.Renderer(theme, {}, 'en', {}).frame(dt.datetime(2026, 9, 18, 15, 4, s), 0)[12 * 240 + 12]
         self.assertEqual([pixel(s) for s in (10, 12, 14, 15, 17, 19)], [red] * 3 + [bg] * 3)
+
+    def test_a_missing_or_non_string_source_says_what_the_firmware_says(self):
+        # The firmware reads "source" first, so every other field of the rule waits for it.
+        for source in (None, 5, True, ['time.second'], {}):
+            for extra in ({}, {'every': 10}, {'every': 1}):
+                rule = dict(TIME_SHOW, source=source, **extra)
+                if source is None:
+                    del rule['source']
+                self.assertEqual(stheme.validate(self.theme([rule])),
+                                 ['layers[0].show[0].source: expected a string'], (source, extra))
+
+    def test_every_as_a_float_is_refused_by_both(self):
+        # 10.0 is a number to JSON, but not an integer to the firmware: both refuse it.
+        self.assertEqual(stheme.validate(self.theme([dict(TIME_SHOW, every=10.0)])),
+                         ['layers[0].show[0].every: expected an integer from 2 to 3600'])
+
+    def test_warns_about_a_range_that_can_never_match(self):
+        # The values of each time.* source (ThemeEngine.cpp timeValue(), and moonAge() for 0 to 29).
+        ranges = {'second': (0, 59), 'minute': (0, 59), 'hour': (0, 23), 'hour12': (0, 11), 'secondOfDay': (0, 86399),
+                  'day': (1, 31), 'month': (1, 12), 'weekday': (0, 6), 'moon': (0, 29)}
+        self.assertEqual(stheme.TIME_RANGES, ranges)
+        for name, (low, high) in ranges.items():
+            rule = lambda *ends, **kw: self.theme([dict(TIME_SHOW, source=f'time.{name}', **kw, **{'in': [list(ends)]})])
+            where = f'layers[0].show[0].in[0]'
+            for ends in ((low, high), (low - 5, low), (high, high + 5), (None, low), (high, None), (low, low), (high, high)):
+                self.assertEqual(stheme.warnings(rule(*ends)), [], (name, ends))
+            for ends in ((high + 1, high + 5), (low - 5, low - 1), (high + 1, None), (None, low - 1)):
+                warning = stheme.warnings(rule(*ends))
+                self.assertEqual(len(warning), 1, (name, ends))
+                self.assertTrue(warning[0].startswith(f'{where}: can never match: time.{name} is {low} to {high}'), warning)
+                self.assertEqual(stheme.validate(rule(*ends)), [], 'a warning does not refuse the theme')
+        # hour12 is 0 to 11, unlike the {hh} token: noon is 0.
+        self.assertEqual(len(stheme.warnings(self.theme([{'source': 'time.hour12', 'in': [[12, 12]]}]))), 1)
+        self.assertEqual(len(stheme.warnings(self.theme([{'source': 'time.weekday', 'in': [[7, 7]]}]))), 1)
+
+    def test_warns_by_the_values_of_every(self):
+        turn = lambda every, *ends, source='time.second': self.theme([dict(TIME_SHOW, source=source, every=every, **{'in': [list(ends)]})])
+        self.assertEqual(len(stheme.warnings(turn(10, 10, 20))), 1)
+        self.assertIn('every 10 gives 0 to 9', stheme.warnings(turn(10, 10, 20))[0])
+        self.assertEqual(stheme.warnings(turn(10, 9, 20)), [])
+        self.assertEqual(stheme.warnings(turn(10, 0, 4)), [])
+        # The values reach N-1 only when the source reaches it: time.weekday every 10 is still 0 to 6.
+        self.assertEqual(len(stheme.warnings(turn(10, 7, 9, source='time.weekday'))), 1)
+        self.assertEqual(stheme.warnings(turn(10, 6, 9, source='time.weekday')), [])
+        # With a big modulus the source's own range is the limit (hour 0-23 stays below 3600).
+        self.assertEqual(len(stheme.warnings(turn(3600, 24, 100, source='time.hour'))), 1)
+        # A modulus right at the source's top: every 59 on seconds gives 0 to 58, every 60 gives 0 to 59.
+        self.assertEqual(len(stheme.warnings(turn(59, 59, 59))), 1)
+        self.assertEqual(stheme.warnings(turn(60, 59, 59)), [])
+        self.assertEqual(len(stheme.warnings(turn(61, 60, 60))), 1)
+        self.assertNotIn('every', stheme.warnings(turn(61, 60, 60))[0])
+        # Closest to the edge: every 2 gives 0 and 1.
+        self.assertEqual(len(stheme.warnings(turn(2, 2, 2))), 1)
+        self.assertEqual(stheme.warnings(turn(2, 1, 2)), [])
+
+    def test_warnings_ignore_data_rules_and_invalid_rules(self):
+        self.assertEqual(stheme.warnings(self.theme([dict(SHOW, **{'in': [[500, 600]]})])), [])
+        self.assertEqual(stheme.warnings(self.theme([dict(TIME_SHOW, every=1, **{'in': [[500, 600]]})])), [])
+        self.assertEqual(stheme.warnings(self.theme([dict(TIME_SHOW, source='time.nope', **{'in': [[500, 600]]})])), [])
+        self.assertEqual(stheme.warnings(self.theme([dict(TIME_SHOW, **{'in': [[5, 1]]})])), [])
+        self.assertEqual(stheme.warnings(self.theme([dict(TIME_SHOW, **{'in': 7})])), [])
+        self.assertEqual(stheme.warnings({'layers': 3}), [])
+        self.assertEqual(stheme.warnings(self.theme([dict(TIME_SHOW, **{'in': [['a', 1]]})])), [])
+        self.assertEqual(stheme.warnings(self.theme([dict(TIME_SHOW, **{'in': [[0, 'b']]})])), [])
+        # One bad range among good ones is named by its own index.
+        two = self.theme([dict(TIME_SHOW, **{'in': [[0, 4], [90, 99]]})])
+        self.assertEqual([w.split(':')[0] for w in stheme.warnings(two)], ['layers[0].show[0].in[1]'])
+        # And so is its rule, and its layer.
+        never = dict(TIME_SHOW, **{'in': [[90, 99]]})
+        later = manifest(layers=[dict(TEXT), dict(TEXT, show=[TIME_SHOW, never])])
+        self.assertEqual([w.split(':')[0] for w in stheme.warnings(later)], ['layers[1].show[1].in[0]'])
+
+    def test_the_command_line_prints_the_warnings_and_goes_on(self):
+        def run(*args):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = stheme.main([str(a) for a in args])
+            return code, out.getvalue(), err.getvalue()
+        text = 'warning: layers[0].show[0].in[0]: can never match: time.hour12 is 0 to 11'
+        with tempfile.TemporaryDirectory() as d:
+            source = Path(d)
+            (source/'theme.json').write_text(json.dumps(self.theme([{'source': 'time.hour12', 'in': [[12, 12]]}])))
+            for args in (('validate', source), ('build', source, source/'out.stheme')):
+                code, out, err = run(*args)
+                self.assertEqual((code, err.strip()), (0, text), args)
+            self.assertTrue((source/'out.stheme').exists())
+            (source/'theme.json').write_text(json.dumps(self.theme([{'source': 'time.hour12', 'in': [[0, 11]]}])))
+            for args in (('validate', source), ('build', source, source/'out.stheme')):
+                self.assertEqual(run(*args)[::2], (0, ''), args)
+
+    def test_warnings_agree_with_the_clock(self):
+        # The table is the set of values stheme's own clock (the one the firmware matches) produces.
+        seen = {n: [10 ** 9, -10 ** 9] for n in stheme.TIME_NAMES}
+        start = dt.datetime(2026, 1, 1)
+        stamps = [start + dt.timedelta(seconds=61 * i) for i in range(57000)]   # about 40 days: every moon age too
+        stamps += [dt.datetime(2026, 1, 1, 23, 59, 59), dt.datetime(2026, 1, 31)]
+        stamps += [dt.datetime(2026, month, 1) for month in range(1, 13)]
+        for t in stamps:
+            for name, bounds in seen.items():
+                value = stheme.time_value(name, t)
+                bounds[0], bounds[1] = min(bounds[0], value), max(bounds[1], value)
+        self.assertEqual({n: tuple(b) for n, b in seen.items()}, stheme.TIME_RANGES)
 
     def test_spec_1_text_of_other_features_is_unchanged(self):
         # Only the show message follows the firmware's text; the rest keep the skill's own hint.
