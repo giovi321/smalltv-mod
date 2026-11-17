@@ -405,6 +405,7 @@ The packer compiles `fonts/clock.json` in the source theme into
 | `size` | Pixels per em, 4–200 |
 | `glyphs` | The printable ASCII characters to keep, for example `"0123456789:"` |
 | `fallback` | Optional: one of `glyphs`, or `-`, which every font keeps; drawn for any character the font lacks. Default `?` when kept, else `-` |
+| `grain` | Optional, cosmetic: `{"seed": 0-65535, "density": 1-100, "strength": 1-100}`, all integers. A chalk look, see below |
 
 Keep only the characters the theme shows: each costs flash in the package,
 not RAM on the device. For a clock face, the digits and `:` are enough; for
@@ -425,6 +426,23 @@ It does not apply hinting or kerning. To check a font on its own:
 
 ```bash
 python3 tools/theme_font.py fonts/BebasNeue-Regular.ttf /tmp/clock.stf --size 80 --glyphs 0123456789:
+```
+
+The optional `grain` is purely cosmetic, and it happens in the packer: the
+package holds an ordinary `.stf`, so the device does nothing different. The
+packer picks `density` percent of the pixels of every glyph by a fixed integer
+hash of `seed`, the glyph, the column and the row, and lowers each picked
+pixel's coverage by `strength` percent times a random share between a half and
+all of it. That gives the worn look of chalk on a board. It only ever lowers
+coverage inside the glyph's ink box, so no glyph moves or changes its advance
+or the line height. The whole step uses integers only, so the same settings
+give the same bytes on every computer and Python version. Without `grain` the
+font is exactly the one it was before the key existed. A bad value is refused
+with the field named, for example `fonts/clock.json: grain.density: expected an
+integer from 1 to 100`.
+
+```json
+{"file": "BebasNeue-Regular.ttf", "size": 80, "glyphs": "0123456789:", "grain": {"seed": 7, "density": 40, "strength": 70}}
 ```
 
 A theme may use up to four fonts, and a package with more than four `.stf`
