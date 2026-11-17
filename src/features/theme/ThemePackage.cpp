@@ -525,8 +525,8 @@ bool Package::glyphRow(AssetHandle handle, uint8_t code, int y, uint8_t* coverag
   left = g.left;
   width = 0;
   if (y < g.top || y >= g.top + g.rows) return true;
-  const unsigned bytes = (g.width + 1) / 2;
   if (g.width > MaxGlyphWidth) return false;   // the load check allows none; `coverage` has no room for it
+  const unsigned bytes = (g.width + 1) / 2;
   if (!source_.read(e.offset + 12 + 8u * e.height + g.bitmap + (y - g.top) * bytes, coverage, bytes)) return false;
   for (int i = g.width - 1; i >= 0; --i) coverage[i] = (i % 2 ? coverage[i / 2] & 15 : coverage[i / 2] >> 4) * 17;
   width = g.width;
