@@ -29,8 +29,12 @@ class Package : public Assets {
   AssetHandle resolve(const std::string& path) override;
   using Assets::row;
   bool row(AssetHandle handle, int y, int x, int count, uint16_t* colors, uint8_t* alpha) override;
+  bool blendRow(AssetHandle handle, int y, int x, int count, uint16_t* pixels) override;
   bool glyphRow(AssetHandle font, uint8_t code, int y, uint8_t* coverage, int& left, int& width) override;
  private:
+  // What row() and blendRow() both do: reads the pixels of a row and hands
+  // them back in `colors`/`alpha`, or, when `pixels` is set, blends them over it.
+  inline bool readRow(AssetHandle handle, int y, int x, int count, uint16_t* colors, uint8_t* alpha, uint16_t* pixels);
   // Every animation frame is an entry, so an entry is kept small: its path
   // is not held in RAM (that took ~45 bytes more per frame), only its FNV-1a
   // hash and length. The path itself stays in the package, just before the

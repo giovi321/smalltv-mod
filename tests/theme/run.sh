@@ -23,6 +23,10 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCL
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_render.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-render-tests
 /tmp/smalltv-theme-render-tests
 c++ -std=c++11 -Wall -Wextra -Werror -g -DEXPECT_DOUBLE_JSON=1 -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_validation.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-validation-tests
+# Image rows blended in the reader, so render() holds no colour/alpha buffers.
+c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_blend_row.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-blend-row-tests
+/tmp/smalltv-theme-blend-row-tests
+sh tests/theme/check_render_stack.sh
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_language.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-language-tests
 /tmp/smalltv-theme-language-tests
 /tmp/smalltv-theme-validation-tests
