@@ -30,7 +30,9 @@ struct EspClass {
   rst_info* getResetInfoPtr() { return nullptr; }
   unsigned getMaxFreeBlockSize() { return 0; }
   unsigned getFreeContStack() { return 0; }
-  unsigned getFreeHeap() { return 0; }
+  unsigned freeHeap = 0;               // what getFreeHeap() reports (a test may set it)
+  unsigned getFreeHeap() { return freeHeap; }
+  void wdtFeed() {}
 };
 extern EspClass ESP;
 inline void configTime(const char*, const char*, const char*) {}
