@@ -734,6 +734,15 @@ static void testFetchWiring(const char* clientFile) {
   // The start gate, before the fetch runs; the refusal is counted.
   const std::string gate = "if (ESP.getFreeHeap() < smalltv::FetchFreeHeap || platformMaxFreeBlock() < smalltv::FetchLargestBlock) {\n    noteFetch(Outcome::Refused);\n    return false;\n  }\n  request->finish(fetchThemeSource(*request));";
   assert(code.find(gate) != std::string::npos);
+  // The ESP32 start (the second definition) refuses the same way, so
+  // fetchRefused counts the ESP32's refusals too: a short heap, and the two
+  // allocations (the shared request, the task) that a short heap makes fail.
+  const size_t esp32Start = code.find("bool startThemeDataFetch(", code.find("bool startThemeDataFetch(") + 1);
+  assert(esp32Start != std::string::npos);
+  const std::string esp32 = code.substr(esp32Start);
+  assert(esp32.find("if (ESP.getFreeHeap() < StackBytes + 18000) {\n    noteFetch(Outcome::Refused);\n    return false;\n  }") != std::string::npos);
+  assert(esp32.find("if (!context) {\n    noteFetch(Outcome::Refused);\n    return false;\n  }") != std::string::npos);
+  assert(esp32.find("    delete context;\n    noteFetch(Outcome::Refused);\n    return false;\n") != std::string::npos);
   // After GET() and before the reply is read: the heap for the parse.
   const size_t get = code.find("http.GET() != HTTP_CODE_OK");
   const size_t parseGate = code.find("if (ESP.getFreeHeap() < smalltv::FetchParseHeap) return Outcome::Refused;");

@@ -644,6 +644,74 @@ static FetchMeasure measureParse(const std::string& body, const ThemeDataSource&
   counting = false;
   return {peak, largest, ok};
 }
+// The most a VALID source can ask of the parse: 8 fields (the most a source may
+// declare), each with a 96-byte path (the longest the theme parser accepts) and
+// each naming a string, in a reply of the largest size (MaxDataBody). Measured
+// with no ceiling, then under each target's ceiling.
+static void testWorstValidSource() {
+  ThemeDataSource source;
+  source.id = "w";
+  std::string reply = "{";
+  for (size_t i = 0; i < MaxDataFields; ++i) {
+    std::string key = "k" + std::to_string(i);
+    key.append(96 - key.size(), 'x');
+    ThemeDataField f;
+    f.id = "f" + std::to_string(i);
+    f.path = key;
+    source.fields.push_back(f);
+    // 153 characters per value fill the reply to the byte limit.
+    reply += (i ? ",\"" : "\"") + key + "\":\"" + std::string(153, char('a' + i)) + "\"";
+  }
+  reply += "}";
+  assert(reply.size() <= MaxDataBody && reply.size() + 8 > MaxDataBody);
+  auto measure = [&](size_t budget, std::vector<ThemeValue>& values) {
+    live = peak = largest = 0;
+    counting = true;
+    const bool ok = extractThemeValues(reply, source, values, budget);
+    counting = false;
+    return FetchMeasure{peak, largest, ok};
+  };
+  std::vector<ThemeValue> free_, small, big;
+  const FetchMeasure none = measure(0, free_);
+  printf("worst valid source (8 fields, 96 B paths, %zu B reply): peak %zu B, largest %zu B\n", reply.size(), none.peak, none.largest);
+  fflush(stdout);
+  assert(none.ok && free_.size() == MaxDataFields);
+  // ESP32: the ceiling holds it, with the 31-byte cut on every value.
+  const FetchMeasure esp32 = measure(DataParseBudgetEsp32, big);
+  assert(esp32.ok && big.size() == MaxDataFields);
+  for (const auto& v : big) assert(v.value.size() == 31);
+  // ESP8266: the ceiling is the heap's, so this source is refused, whole and
+  // with the values as they were (the same as a failed fetch).
+  const FetchMeasure esp8266 = measure(DataParseBudgetEsp8266, small);
+  assert(!esp8266.ok && small.empty());
+  // The ESP32 ceiling still stops a reply that names a list as long as a reply
+  // may be (about 1,000 numbers): refused, and the parse stays under the
+  // ceiling (the allocator's own 8 bytes a block and the rounding come on top).
+  ThemeDataSource listed;
+  listed.id = "l";
+  ThemeDataField listField;
+  listField.id = "a";
+  listField.path = "a";
+  listed.fields.push_back(listField);
+  std::string numbers = "{\"a\":[";
+  while (numbers.size() + 4 < MaxDataBody) numbers += "1,";
+  numbers += "1]}";
+  std::vector<ThemeValue> hostile;
+  live = peak = largest = 0;
+  counting = true;
+  const bool hostileOk = extractThemeValues(numbers, listed, hostile, DataParseBudgetEsp32);
+  counting = false;
+  printf("long list under the ESP32 ceiling: %s, peak %zu B\n", hostileOk ? "read" : "refused", peak);
+  assert(!hostileOk && hostile.empty());
+  assert(peak <= DataParseBudgetEsp32 + 1024);
+  // The ESP32 ceiling is not far above what this source needs.
+  assert(DataParseBudgetEsp32 >= none.peak);
+  assert(DataParseBudgetEsp32 <= 2 * none.peak);
+  // On the ESP8266 the ceiling stays at the 2 KiB the heap allows.
+  assert(DataParseBudgetEsp8266 == 2048);
+  // And the build picks the ESP8266's for the host tests (which model it).
+  assert(DataParseBudget == DataParseBudgetEsp8266);
+}
 static void testDataReply() {
   auto source = [](const char* id, std::initializer_list<const char*> paths) {
     ThemeDataSource s;
@@ -714,6 +782,7 @@ int main(int argc, char** argv) {
   if (sizeof(ShowRule) > 40) fprintf(stderr, "sizeof(ShowRule) %zu\n", sizeof(ShowRule));
   assert(sizeof(ShowRule) <= 40);
   testShowRules();
+  testWorstValidSource();
   testDataReply();
   testBlockList();
   testDecimalsRecord();

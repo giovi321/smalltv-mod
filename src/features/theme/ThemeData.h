@@ -14,7 +14,9 @@ constexpr uint32_t DataTimeoutMs = 3000;
 // extractThemeValues). ArduinoJson's first pool is 1,024 B on the device, so
 // this allows one pool and the strings next to it, and no second pool: the
 // real weather replies need 1.4 to 1.8 KB (tests/theme/test_memory.cpp).
-constexpr size_t DataParseBudget = 2048;
+constexpr size_t DataParseBudgetEsp8266 = 2048;
+constexpr size_t DataParseBudgetEsp32 = 2048;
+constexpr size_t DataParseBudget = DataParseBudgetEsp8266;
 
 // What a data fetch needs on the ESP8266 before it may start. An allocation
 // that fails in `new` (the HTTP client, the parse) restarts the device, so a
