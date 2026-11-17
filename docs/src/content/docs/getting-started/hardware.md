@@ -100,7 +100,7 @@ The pins are set in `src/board_esp32c2.h`. Two panel quirks are worth knowing: t
 | WireGuard VPN | in the second image only, `-esp32-wg` |
 | Build env | `smalltv_esp32`, or `smalltv_esp32_wg` |
 
-Two images are published for this board, and the only difference is the WireGuard client. `smalltv-mod-firmware-esp32.bin` leaves it out; `smalltv-mod-firmware-esp32-wg.bin` compiles it in. Both carry every other feature, run the same code and use the same partition table.
+Two images are published for this board, and the difference is the WireGuard client. `smalltv-mod-firmware-esp32.bin` leaves it out; `smalltv-mod-firmware-esp32-wg.bin` compiles it in, and leaves out the [rain radar](/smalltv-mod/features/rain/) in exchange, as the two do not fit the slot together. Both carry every other feature, run the same code and use the same partition table.
 
 The split exists because of flash. The 4 MB layout gives each OTA slot 1,572,864 bytes, and the classic ESP32's own framework libraries cost about 100 KB more than the ESP32-C2's. The v3.0.0 images measure 1,434,192 bytes (91.2%) without the client and 1,479,984 bytes (94.1%) with it, so the tunnel costs 45,792 bytes and leaves 92,880 free. Both fit comfortably. It is still a choice because the slot cannot be grown without a new partition table, and a device in the field cannot install one over the air, so the room the plain image keeps is the only room this board will ever have for whatever the firmware grows into next, and the tunnel spends about a third of it.
 
