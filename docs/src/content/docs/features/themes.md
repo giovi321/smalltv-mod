@@ -317,7 +317,7 @@ v3.4.0 or later:
 | `{AMPM}` | `AM` for 00:00–11:59, `PM` for 12:00–23:59 |
 | `{device.focusToday}`, `{device.focusGoal}`, `{device.streak}`, `{device.humidity}`, `{device.temperature}` | The firmware's value, as text, exactly as it supplied it |
 
-One more token needs a firmware newer than v3.6.0 and a
+One more token needs firmware v3.7.0 or later and a
 `"spec": 2` theme:
 
 | Token | Value |
@@ -787,7 +787,7 @@ text (`{w.age}`), for example to mark data that has gone stale.
 ### Showing and hiding layers (spec 2)
 
 `show` is an optional list on any layer, in a theme with `"spec": 2`. It needs
-a firmware newer than v3.6.0: a firmware up to v3.6.0 does not know the key and
+firmware v3.7.0 or later: firmware up to v3.6.0 does not know the key and
 refuses the layer as an unknown field. A spec 1 theme that uses `show` is
 refused with `layers[N].show: needs "spec": 2`, and a spec 1 theme installs
 exactly as before. The layer is drawn only while every rule in the list holds:

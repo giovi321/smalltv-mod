@@ -142,7 +142,7 @@ The built-in icon set is small. The whole Material Design Icons catalogue works 
 python tools/mdi_to_hex.py window-open --size 24
 ```
 
-You can additionaly provide a local SVG file or a URL pointing to an SVG icon (remote icons have 2 MB limit):
+You can also provide a local SVG file or a URL pointing to an SVG icon (remote icons have 2 MB limit):
 
 ```bash
 python tools/mdi_to_hex.py path/to/local-icon.svg --size 32
