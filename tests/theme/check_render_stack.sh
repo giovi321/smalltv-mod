@@ -8,11 +8,16 @@
 #   sh tests/theme/check_render_stack.sh [render limit] [fontRow limit]   (bytes)
 set -eu
 cd "$(dirname "$0")/../.."
-renderLimit=${1:-1000}
-# Host frames now: render 912 B (GCC 12; main 1,632), fontRow 288 B (GCC 12) and
-# 320 B (GCC 15). A coverage row of 240 instead of 120 makes fontRow 400 B
-# (GCC 12), so its limit sits between: 360.
-fontLimit=${2:-360}
+# The limits are for what this check must catch: a row buffer (the 720 B
+# colour and alpha rows, or one of them) coming back. The frame sizes depend on
+# the compiler, so each limit sits far above what any compiler gave so far, and
+# well below what the regression gives:
+#   render:  912 B (GCC 12), 864 B (GCC 15); with the 720 B back, 1,632 B (main)
+#   fontRow: 288 B (GCC 12), 320 B (GCC 15); with 720 B added, over 1,000 B
+# A compiler change moves these by tens of bytes, so a limit 200-300 B above
+# them does not trip on one, and a 720 B buffer still fails by a wide margin.
+renderLimit=${1:-1200}
+fontLimit=${2:-520}
 THEME_JSON_INCLUDE=.pio/libdeps/smalltv_esp32_8mb/ArduinoJson/src
 out=/tmp/smalltv-render-stack
 mkdir -p "$out"
