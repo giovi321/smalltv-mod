@@ -257,9 +257,55 @@ def bounds(contours):
     return (min(x for x, _ in points), min(y for _, y in points), max(x for x, _ in points), max(y for _, y in points))
 
 
-def compile_font(data, size, glyphs, fallback=None):
+def hash32(*values):
+    """A small deterministic hash (32 bits) of integers: only integer
+    arithmetic masked to 32 bits, so every platform and Python gives the same
+    result."""
+    x = 0x9E3779B9
+    for v in values:
+        x ^= (v + 0x7F4A7C15 + (x << 6) + (x >> 2)) & 0xFFFFFFFF
+        x = (x * 0x85EBCA6B) & 0xFFFFFFFF
+        x ^= x >> 13
+        x = (x * 0xC2B2AE35) & 0xFFFFFFFF
+        x ^= x >> 16
+    return x
+
+
+def check_grain(grain):
+    """Chalk grain: {"seed": 0-65535, "density": 1-100, "strength": 1-100},
+    all three integers (a bool is not one)."""
+    ranges = {'seed': (0, 65535), 'density': (1, 100), 'strength': (1, 100)}
+    if not isinstance(grain, dict) or grain.keys() != ranges.keys():
+        raise ValueError('grain: expected "seed", "density" and "strength"')
+    for key, (low, high) in ranges.items():
+        if type(grain[key]) is not int or not low <= grain[key] <= high:
+            raise ValueError(f'grain.{key}: expected an integer from {low} to {high}')
+
+
+def grained(level, grain, code, x, y):
+    """The level (0-15) of the pixel x, y of glyph `code` after the grain. The
+    pixel is chosen with probability density/100 (hash salt 1); a chosen pixel
+    loses strength/100 * (0.5 + 0.5 * h) of its level, h in [0, 1) from the
+    hash (salt 2), and the result is rounded half up. All integer arithmetic:
+    h is h2 / 2**32, so the kept share is
+    (200 * 2**32 - strength * (2**32 + h2)) / (200 * 2**32).
+    x, y count in the glyph's raster before it is trimmed to its ink, so the
+    grain does not depend on which other glyphs set the line height."""
+    seed = grain['seed']
+    if hash32(seed, code, x, y, 1) * 100 >= grain['density'] * 4294967296:
+        return level
+    whole = 200 * 4294967296
+    kept = whole - grain['strength'] * (4294967296 + hash32(seed, code, x, y, 2))
+    return (2 * level * kept + whole) // (2 * whole)
+
+
+def compile_font(data, size, glyphs, fallback=None, grain=None):
     """STF bytes for the characters in `glyphs` (printable ASCII) of the
-    TrueType font `data`, at `size` pixels per em."""
+    TrueType font `data`, at `size` pixels per em. With `grain` (see
+    check_grain) some pixels lose coverage, like chalk on a board; the ink
+    box, the advances and the header stay those of the plain font."""
+    if grain is not None:
+        check_grain(grain)
     font = TrueType(data)
     if type(size) is not int or not 4 <= size <= 200:
         raise ValueError('size: expected an integer from 4 to 200 pixels per em')
@@ -322,6 +368,11 @@ def compile_font(data, size, glyphs, fallback=None):
             rows = [y for y in range(height) if any(levels[y])]
             columns = [x for x in range(width) if any(levels[y][x] for y in range(height))]
             if rows:
+                if grain is not None:
+                    # The ink box above comes from the plain levels; the grain
+                    # only lowers what is inside it.
+                    levels = [[grained(level, grain, code, x, y) for x, level in enumerate(row)]
+                              for y, row in enumerate(levels)]
                 ink = [levels[y][columns[0]:columns[-1] + 1] for y in range(rows[0], rows[-1] + 1)]
                 left, top = left + columns[0], rows[0]
         if not ink:
