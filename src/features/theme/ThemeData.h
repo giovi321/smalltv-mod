@@ -11,12 +11,24 @@ constexpr uint32_t DataTimeoutMs = 3000;
 
 // The most heap the parse of one reply may take (the filter, the document and
 // ArduinoJson's strings together, counted by the allocator; see
-// extractThemeValues). ArduinoJson's first pool is 1,024 B on the device, so
-// this allows one pool and the strings next to it, and no second pool: the
-// real weather replies need 1.4 to 1.8 KB (tests/theme/test_memory.cpp).
+// extractThemeValues). A reply that needs more fails the whole source, as a
+// failed fetch.
+//  - ESP8266: 2,048 B. ArduinoJson's first pool is 1,024 B on the device, so
+//    this allows one pool and the strings next to it, and no second pool: the
+//    real weather replies need 1.4 to 1.8 KB (tests/theme/test_memory.cpp).
+//  - ESP32: 8,192 B. The parse runs in the fetch task, with far more heap
+//    (a fetch starts only with 26 KB free), so a valid source with 8 fields,
+//    96-byte paths and string values (5.4 KB at the most, measured in
+//    test_memory.cpp) is read. A field that names a list as long as a reply
+//    may be (about 1,000 numbers) still exceeds it.
+// The host tests model the ESP8266, so they take its ceiling.
 constexpr size_t DataParseBudgetEsp8266 = 2048;
-constexpr size_t DataParseBudgetEsp32 = 2048;
+constexpr size_t DataParseBudgetEsp32 = 8192;
+#if defined(ARDUINO) && !defined(SMALLTV_ESP8266)
+constexpr size_t DataParseBudget = DataParseBudgetEsp32;
+#else
 constexpr size_t DataParseBudget = DataParseBudgetEsp8266;
+#endif
 
 // What a data fetch needs on the ESP8266 before it may start. An allocation
 // that fails in `new` (the HTTP client, the parse) restarts the device, so a
@@ -44,10 +56,12 @@ constexpr uint32_t FetchParseHeap = 2048;
 // Stream supplies a monotonic clock and nonblocking socket reads. The total
 // elapsed time is limited, slow trickles included; a socket's idle timeout is
 // insufficient.
-// `length` is the declared Content-Length, or -1 for chunked/unknown length
-// (HTTPClient already de-chunks the stream; here that just means "read until
-// the connection closes" instead of "read until N bytes"). Either way the
-// reply is capped at MaxDataBody: a longer one fails.
+// `length` is the declared Content-Length, or -1 when the reply has none
+// (chunked, or no length at all: "read until the connection closes" instead
+// of "read until N bytes"). The fetch asks for HTTP/1.0, so a server does not
+// send chunks. (getStream() does not de-chunk: a chunked reply would reach
+// the parse with its chunk sizes in it.) Either way the reply is capped at
+// MaxDataBody: a longer one fails.
 template <class Stream>
 class BodyReader : public DataReply {
  public:

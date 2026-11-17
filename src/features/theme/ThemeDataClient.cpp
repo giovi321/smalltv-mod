@@ -167,12 +167,21 @@ bool startThemeDataFetch(const std::shared_ptr<smalltv::DataFetch>& request) {
 }
 #else
 bool startThemeDataFetch(const std::shared_ptr<smalltv::DataFetch>& request) {
+  // Short of heap, or of what the task needs, the fetch is refused and
+  // counted, like on the ESP8266 (fetchRefused in /api/status).
   constexpr uint32_t StackBytes = 8192;
-  if (ESP.getFreeHeap() < StackBytes + 18000) return false;
+  if (ESP.getFreeHeap() < StackBytes + 18000) {
+    noteFetch(Outcome::Refused);
+    return false;
+  }
   auto context = new(std::nothrow) std::shared_ptr<smalltv::DataFetch>(request);
-  if (!context) return false;
+  if (!context) {
+    noteFetch(Outcome::Refused);
+    return false;
+  }
   if (xTaskCreate(runFetch, "theme-json", StackBytes, context, 1, nullptr) != pdPASS) {
     delete context;
+    noteFetch(Outcome::Refused);
     return false;
   }
   return true;
