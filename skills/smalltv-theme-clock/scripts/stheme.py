@@ -46,6 +46,9 @@ TOKENS = ['HH', 'hh', 'MM', 'SS', 'DD', 'MON', 'MONTH', 'WD', 'WEEKDAY', 'YYYY']
 TOKENS_SPEC2 = ['H', 'MO', 'AMPM', 'WW']
 DEVICE_NAMES = ['focusToday', 'focusGoal', 'streak', 'humidity', 'temperature']
 TIME_NAMES = ['second', 'minute', 'hour', 'hour12', 'secondOfDay', 'day', 'month', 'weekday', 'moon']
+# The values each time.* source takes (ThemeEngine.cpp timeValue(); moonAge() counts whole days, 0 to 29).
+TIME_RANGES = {'second': (0, 59), 'minute': (0, 59), 'hour': (0, 23), 'hour12': (0, 11), 'secondOfDay': (0, 86399),
+               'day': (1, 31), 'month': (1, 12), 'weekday': (0, 6), 'moon': (0, 29)}
 LANGS = ['en', 'pt', 'es', 'fr', 'de', 'it']
 ROTATION = ('arc', 'hand', 'ticks')
 
@@ -548,7 +551,10 @@ def validate_show(o, p, fields, spec, used, fail, obj):
         src = rule.get('source')
         if rule.get('missing') is not None and not isinstance(rule['missing'], bool):
             fail(f'{rp}.missing', 'expected true or false')
-        if isinstance(src, str) and src.startswith('time.'):
+        if not isinstance(src, str):
+            # The firmware reads "source" before anything else of the rule, so `every` waits for it.
+            fail(f'{rp}.source', 'expected a string')
+        elif src.startswith('time.'):
             # A time.* source, with the optional modulus. device.* is not offered to `show`.
             if src[5:] not in TIME_NAMES:
                 fail(f'{rp}.source', 'unknown time.* name')
@@ -557,7 +563,7 @@ def validate_show(o, p, fields, spec, used, fail, obj):
         else:
             if 'every' in rule:
                 fail(f'{rp}.every', 'only for a time.* source')
-            if not isinstance(src, str) or not (src in fields or src.rpartition('.')[2] == 'age' and src.rpartition('.')[0] in sources):
+            if not (src in fields or src.rpartition('.')[2] == 'age' and src.rpartition('.')[0] in sources):
                 fail(f'{rp}.source', 'expected a declared data field or a time.* source')
         ranges = rule.get('in')
         if not isinstance(ranges, list) or not 1 <= len(ranges) <= 4:
@@ -576,6 +582,40 @@ def validate_show(o, p, fields, spec, used, fail, obj):
             elif ends[0] is not None and ends[1] is not None and ends[0] > ends[1]:
                 fail(ep, 'low must not be above high')
     return used + len(rules)
+
+
+def warnings(theme):
+    """Problems that do not stop a theme from loading, as 'path: reason' (validate() has the errors).
+
+    A `show` range that lies wholly outside the values its source can take never matches, so its
+    layer is never drawn by it. With `every: N` the values are 0 to N-1, or fewer when the source
+    stops earlier."""
+    found = []
+    layers = theme.get('layers') if isinstance(theme, dict) else None
+    for i, layer in enumerate(layers if isinstance(layers, list) else []):
+        rules = layer.get('show') if isinstance(layer, dict) else None
+        for r, rule in enumerate(rules if isinstance(rules, list) else []):
+            src = rule.get('source') if isinstance(rule, dict) else None
+            if not (isinstance(src, str) and src.startswith('time.') and src[5:] in TIME_RANGES):
+                continue
+            own = TIME_RANGES[src[5:]]
+            low, high = own
+            every = rule.get('every')
+            note = ''
+            if every is not None:
+                if type(every) is not int or not 2 <= every <= 3600:
+                    continue   # an error, reported by validate()
+                if every - 1 < high:
+                    high = every - 1
+                    note = f' (every {every} gives {low} to {high})'
+            ranges = rule.get('in')
+            for j, ends in enumerate(ranges if isinstance(ranges, list) else []):
+                if not (isinstance(ends, list) and len(ends) == 2) or any(
+                        e is not None and type(e) not in (int, float) for e in ends):
+                    continue   # an error, reported by validate()
+                if (ends[1] is not None and ends[1] < low) or (ends[0] is not None and ends[0] > high):
+                    found.append(f'layers[{i}].show[{r}].in[{j}]: can never match: {src} is {own[0]} to {own[1]}{note}')
+    return found
 
 
 def validate_bindings(o, p, fields, spec, fail, obj, color):
@@ -1468,11 +1508,17 @@ def cmd_scaffold(a):
     print(f'Wrote {d / "theme.json"}')
 
 
+def print_warnings(theme):
+    for text in warnings(theme):
+        print(f'warning: {text}', file=sys.stderr)
+
+
 def cmd_validate(a):
     theme, _ = load_any(a.source)
     reasons = spec2_reasons(theme)
     print(f'Valid: {theme["theme"]["name"]} ({theme["theme"]["id"]}), spec {theme["spec"]}'
           + (f' (needed for: {"; ".join(reasons[:4])}{"..." if len(reasons) > 4 else ""})' if reasons else ''))
+    print_warnings(theme)
 
 
 def cmd_build(a):
@@ -1491,6 +1537,7 @@ def cmd_build(a):
         was = f'"spec": {json.dumps(raw["spec"])}' if 'spec' in raw else 'no "spec"'
         print(f'Rewrote {src / "theme.json"}: {was} -> "spec": {theme["spec"]} '
               '(--keep-auto leaves the file unchanged)')
+    print_warnings(theme)
 
 
 def parse_data(pairs):
