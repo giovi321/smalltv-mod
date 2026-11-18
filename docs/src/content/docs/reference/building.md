@@ -8,6 +8,7 @@ The four board targets share one codebase and build from [PlatformIO](https://pl
 ```bash
 pio run -e smalltv                 # ESP8266
 pio run -e smalltv_lean            # ESP8266, without HA screens, the usage meter or theme clocks
+pio run -e smalltv_noupdate        # ESP8266, without the GitHub self-update (a fork's build option, see below)
 pio run -e smalltv_c2              # ESP32-C2
 pio run -e smalltv_esp32           # NM-TV-154 (classic ESP32)
 pio run -e smalltv_esp32_wg        # the same board, with the WireGuard client
@@ -17,7 +18,7 @@ pio device monitor -e smalltv_c2   # serial logs @ 115200
 pio run -e smalltv_loader          # ESP8266 loader for the SmallTV-ultra
 ```
 
-Seven envs, six published images plus the loader. Two boards get two images each: the ESP8266 (`smalltv` and `smalltv_lean`) and the NM-TV-154 (`smalltv_esp32` and `smalltv_esp32_wg`). Which file each env becomes is in [Which release file to download](/smalltv-mod/reference/release-assets/).
+Eight envs: six published images, the loader, and `smalltv_noupdate`, which CI builds but does not publish (see [Build options for forks](#build-options-for-forks)). Two boards get two images each: the ESP8266 (`smalltv` and `smalltv_lean`) and the NM-TV-154 (`smalltv_esp32` and `smalltv_esp32_wg`). Which file each env becomes is in [Which release file to download](/smalltv-mod/reference/release-assets/).
 
 ## The smalltv_lean env
 
@@ -60,6 +61,29 @@ Each figure is that one flag measured on its own against the 55,536-byte standar
 Every feature is guarded at the module level, so dropping one takes its code, its settings handling, and its web UI tab with it. The tab disappears because `/api/config` reports the compiled-in features and the UI hides what is missing, which means a slim build needs no separate web UI.
 
 Two caveats if you publish your own combination. `UPDATE_ASSET` still points at whichever variant your flags select, so a build that is neither standard nor lean will self-update into one of the published images and pick up the features you removed. And the mascot frame data lives in flash rather than RAM, so `WITH_USAGE=0` saves far more flash than heap.
+
+## Build options for forks
+
+Two build flags are for people who build and flash their own firmware, for example a fork that should not update itself over the original project's releases. Both are off by default, so every published image is built as before. They are build options only: there is no setting for either one in the web UI or in `/api/config`, and a device cannot change them after it is flashed.
+
+Set them in an env's `build_flags` in `platformio.ini`, or pass them through `PLATFORMIO_BUILD_FLAGS`.
+
+| Flag | Effect |
+|------|--------|
+| `-D FW_VERSION_SUFFIX=\"-fork\"` | The label the device shows becomes `3.7.0-fork` instead of `3.7.0`. |
+| `-D FW_NO_GITHUB_UPDATE` | The GitHub self-update is left out of the image. |
+
+**The version suffix is display only.** `FW_VERSION` in `src/config.h` stays the plain release number. The suffix goes into `FW_VERSION_FULL` (`src/BuildInfo.h`), which is shown in the `version` field of `/api/status`, on the serial line, on the boot screen and in the `ver` entry of the mDNS record (builds with the usage meter). The update check compares `FW_VERSION`, so the suffix never changes a version comparison, and the crash record keeps the plain number in its 16-byte field.
+
+**With `FW_NO_GITHUB_UPDATE` no download code is compiled in.** `src/OtaUpdate.cpp` then holds only stubs that answer "no", and the update at boot and the download in the web loop are not built. The web API says so:
+
+- `/api/selfupdate` answers `403` with `{"ok":false,"error":"updates are off in this build"}`.
+- `/api/checkupdate` answers `200` with `"disabled":true` and the same error text. It does not contact GitHub.
+- `/api/status` gets `"githubUpdate":false` (the key is absent in a normal build), and the Update card in the System tab says that updates are off and points to the manual upload.
+
+The manual firmware upload in the System tab is not affected.
+
+`smalltv_noupdate` is a ready-made env for the second flag: it extends `smalltv` and adds `-D FW_NO_GITHUB_UPDATE`. CI builds it on every run, so the option keeps compiling, and `tests/buildflags/check_images.py` checks that its image holds none of the download code. It is not a release image and has no release asset. For your own fork, copy the pattern: an env that extends `smalltv` and interpolates `${env:smalltv.build_flags}` before adding the flags.
 
 ## The smalltv_loader env
 
@@ -104,6 +128,7 @@ src/                    shared core (device, net, web, settings)
   board_esp32.h         NM-TV-154 (classic ESP32) pin map and panel quirks
   board_esp32_pro.h     SmallTV Pro (classic ESP32, 8 MB) pin map and panel quirks
   config.h              limits, feature flags, defaults, board selector
+  BuildInfo.h           the fork build options: FW_VERSION_SUFFIX, FW_NO_GITHUB_UPDATE
   Settings.*            settings struct and LittleFS persistence
   Net.*                 WiFi station, fallback AP, captive portal, mDNS
   WebPortal.*           web server, REST API, OTA endpoint

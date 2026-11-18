@@ -3,6 +3,23 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include "config.h"
+#include "BuildInfo.h"
+
+#if !FW_GITHUB_UPDATE
+// A build with the GitHub update off (-DFW_NO_GITHUB_UPDATE, src/BuildInfo.h)
+// carries none of the download code: every entry point answers "no", and the
+// TLS and update libraries are not used.
+OtaLatest otaCheckLatest(const Settings&) {
+  OtaLatest r;
+  r.error = FW_UPDATE_OFF_MSG;
+  return r;
+}
+String otaUpdateFromGitHub(const Settings&) { return String(FW_UPDATE_OFF_MSG); }
+bool   otaBootRequested() { return false; }
+bool   otaRequestBootUpdate(const char*) { return false; }
+void   otaBootUpdate(const Settings&) {}
+String otaTakeBootResult() { return String(); }
+#else
 
 #if defined(SMALLTV_FAMILY_ESP32)
 #include <HTTPUpdate.h>
@@ -228,4 +245,6 @@ bool   otaBootRequested() { return false; }
 bool   otaRequestBootUpdate(const char*) { return false; }
 void   otaBootUpdate(const Settings&) {}
 String otaTakeBootResult() { return String(); }
+#endif
+
 #endif

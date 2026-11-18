@@ -102,7 +102,14 @@ jobs:
         run: python3 tools/gzip_webui.py --check
 
       - name: Build firmware (all targets)
-        run: pio run -e smalltv -e smalltv_lean -e smalltv_c2 -e smalltv_esp32 -e smalltv_esp32_wg -e smalltv_esp32_8mb -e smalltv_loader
+        run: pio run -e smalltv -e smalltv_lean -e smalltv_noupdate -e smalltv_c2 -e smalltv_esp32 -e smalltv_esp32_wg -e smalltv_esp32_8mb -e smalltv_loader
+
+      # smalltv_noupdate is the build option for forks that leaves the GitHub
+      # self-update out (-D FW_NO_GITHUB_UPDATE). Its image must hold none of the
+      # download code, and the standard image must (or the check sees nothing).
+      # Prints both sizes. The image is not published: no staging line below.
+      - name: Check the no-update image has no download code
+        run: python3 tests/buildflags/check_images.py
 
       # tests/theme/run.sh also builds the memory test with -m32, so it
       # measures with the ESP8266's 32-bit pointers and sizes.
@@ -204,6 +211,12 @@ jobs:
       # WebPortal.cpp asks the rule before Update.begin().
       - name: Test firmware upload memory check
         run: sh tests/update/run.sh
+
+      # Build options for forks (src/BuildInfo.h): the version suffix, and the
+      # GitHub update left out. The label and the switch built both ways, the
+      # update-off OtaUpdate.cpp, the page, the wiring, and the env checks.
+      - name: Test build options for forks
+        run: sh tests/buildflags/run.sh
 
       - name: Test crash record labels and boot decisions
         run: |

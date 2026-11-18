@@ -1,5 +1,6 @@
 #include "Net.h"
 #include "Platform.h"
+#include "BuildInfo.h"
 #include <DNSServer.h>
 
 static NetMode     g_mode = NET_AP;
@@ -219,7 +220,7 @@ void netBegin(const Settings& s, void (*onProgress)(const char*)) {
         // device id, firmware version, and the push path.
         MDNS.addService("clawdmeter", "tcp", 80);
         MDNS.addServiceTxt("clawdmeter", "tcp", "id",   g_hostname.c_str());
-        MDNS.addServiceTxt("clawdmeter", "tcp", "ver",  FW_VERSION);
+        MDNS.addServiceTxt("clawdmeter", "tcp", "ver",  FW_VERSION_FULL);
         MDNS.addServiceTxt("clawdmeter", "tcp", "path", "/api/usage");
 #endif
       }

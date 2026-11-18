@@ -8,8 +8,21 @@
 #include <cassert>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 using namespace smalltv;
+
+// The "githubUpdate":false key belongs to the build option -DFW_NO_GITHUB_UPDATE.
+// Only that build has the field and the code that writes it: every other
+// image is byte for byte what it was (the ESP8266's flash and static RAM are
+// tight, and an option that is off must cost nothing).
+template <class T> static auto hasUpdateOff(int) -> decltype(std::declval<T&>().githubUpdateOff, std::true_type());
+template <class T> static std::false_type hasUpdateOff(...);
+#ifdef FW_NO_GITHUB_UPDATE
+static_assert(decltype(hasUpdateOff<StatusData>(0))::value, "StatusData has no githubUpdateOff in the update-off build");
+#else
+static_assert(!decltype(hasUpdateOff<StatusData>(0))::value, "StatusData carries githubUpdateOff in a build with the update on");
+#endif
 
 // wgStatusJson() as 3.2.1 had it (WgClient.cpp), for a build with and
 // without the tunnel.
@@ -50,6 +63,9 @@ static std::string reference(const Case& c) {
   o["variant"] = d.variant;
   o["repo"] = d.repo;
   if (d.updateMsg[0]) o["updateMsg"] = std::string(d.updateMsg);
+#ifdef FW_NO_GITHUB_UPDATE
+  if (d.githubUpdateOff) o["githubUpdate"] = false;
+#endif
   o["mode"] = d.mode;
   o["connected"] = d.connected;
   o["ssid"] = std::string(d.ssid);
@@ -231,6 +247,22 @@ static std::vector<Case> cases() {
   lit.d.sun = "";
   lit.d.bl = 255;
   all.push_back(lit);
+
+  // A build with the GitHub update off (-DFW_NO_GITHUB_UPDATE): the key is
+  // there, false, right after the update message. In a build without the
+  // flag the same data gives a reply with no key.
+  Case off("update-off", true, true);
+  off.d.version = "3.7.0-fork";
+#ifdef FW_NO_GITHUB_UPDATE
+  off.d.githubUpdateOff = true;
+#endif
+  all.push_back(off);
+  Case offMsg("update-off-msg", true, true);
+  offMsg.d.updateMsg = "no WiFi at boot";
+#ifdef FW_NO_GITHUB_UPDATE
+  offMsg.d.githubUpdateOff = true;
+#endif
+  all.push_back(offMsg);
   return all;
 }
 
@@ -260,6 +292,32 @@ int main() {
       std::fprintf(stderr, "an empty sun text must be left out; bl stays:\n%s\n", want.c_str());
       return 1;
     }
+    // The key sits straight after the update message (or after repo), and
+    // is never written when the update is on.
+#ifdef FW_NO_GITHUB_UPDATE
+    if (std::string(c.name) == "update-off" &&
+        want.find(",\"githubUpdate\":false,\"mode\":") == std::string::npos) {
+      std::fprintf(stderr, "githubUpdate is not just before mode:\n%s\n", want.c_str());
+      return 1;
+    }
+    if (std::string(c.name) == "update-off-msg" &&
+        want.find("\"updateMsg\":\"no WiFi at boot\",\"githubUpdate\":false,\"mode\":") == std::string::npos) {
+      std::fprintf(stderr, "githubUpdate is not right after updateMsg:\n%s\n", want.c_str());
+      return 1;
+    }
+    if (std::string(c.name) != "update-off" && std::string(c.name) != "update-off-msg" &&
+        want.find("githubUpdate") != std::string::npos) {
+      std::fprintf(stderr, "%s: githubUpdate present although the field is not set\n", c.name);
+      return 1;
+    }
+#else
+    // No flag: no reply has the key (the streamed bytes are compared with the
+    // reference below).
+    if (want.find("githubUpdate") != std::string::npos) {
+      std::fprintf(stderr, "%s: githubUpdate in the reference of a build with the update on\n", c.name);
+      return 1;
+    }
+#endif
     StringSink big, small;
     const std::string a = streamed<128>(c, big);
     const std::string b = streamed<5>(c, small);   // pieces that split every token

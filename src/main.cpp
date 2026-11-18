@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include "Platform.h"
 #include "config.h"
+#include "BuildInfo.h"
 #include "Settings.h"
 #include "Net.h"
 #include "Gfx.h"
@@ -304,7 +305,7 @@ static void bootProgress(const char* msg) {
 void setup() {
   Serial.begin(115200);
   Serial.println();
-  Serial.println(FW_NAME " " FW_VERSION);
+  Serial.println(FW_NAME " " FW_VERSION_FULL);
 
   // Capture why we (re)booted. On a reboot loop this is the key clue, and the
   // device's UART isn't exposed — so we also show it on screen below. On the
@@ -341,7 +342,7 @@ void setup() {
 
   Serial.println("[boot] display");
   gfxBegin(g_settings);
-  gfxBoot(g_safeMode ? "Crashed" : "SmallTV", FW_VERSION);
+  gfxBoot(g_safeMode ? "Crashed" : "SmallTV", FW_VERSION_FULL);
 
   Serial.println("[boot] net");
   netAllowRetry(!g_safeMode);   // a retry's reboot would clear the crash flag
@@ -364,6 +365,8 @@ void setup() {
   // A GitHub update queued from the web UI runs now, before the features claim
   // the heap (the download needs a 16 KB TLS buffer that only fits at boot).
   // On success it reboots into the new image; a no-op stub on the ESP32 targets.
+  // A build with the update off (-DFW_NO_GITHUB_UPDATE) skips all of it.
+#if FW_GITHUB_UPDATE
   if (otaBootRequested()) {
     Serial.println("[boot] github update");
     gfxBoot("SmallTV", "updating...");
@@ -371,6 +374,7 @@ void setup() {
     gfxBoot("SmallTV", "update failed");   // still here -> failed; details in the web UI
     delay(1200);
   }
+#endif
 
   Serial.println("[boot] web");
   webPortalBegin(g_settings);
