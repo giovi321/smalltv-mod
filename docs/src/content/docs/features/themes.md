@@ -227,7 +227,24 @@ loop, like the ticker and radar fetchers, and the display waits for it within
 the same deadline. An HTTPS fetch is skipped while free heap is below 18,000
 bytes and counts as a failed request. Switching themes cancels the old request
 and discards its result.
-Failed requests keep the last displayed values until the next scheduled attempt.
+Failed requests keep the last displayed values. A source that failed is tried
+again after 1, 2, 4 and 8 minutes, then at its own interval, and a success goes
+back to the interval at once; a wait is never longer than the interval.
+
+The reply is parsed while it arrives and only the declared fields are kept, so
+the firmware never holds the reply (or a document of all of it) in memory. On
+the ESP8266 a fetch is refused, like a failed request, when the free heap or
+the largest free block is too small for the connection and the parse; the
+reply's parse may take at most 2 KiB there, and at most 8 KiB on the ESP32
+boards. A reply that needs more fails the whole source, like any failed
+fetch, and keeps its old values: on the ESP8266, 2 KiB holds the usual
+weather replies, but not a source with eight fields and long paths, or a field
+that names a long string or a list. The reply's root must be a JSON object or
+a list: anything else (`"x"`, `42`, an error page) is refused and the source
+keeps its old values, where it used to succeed with every field showing `--`.
+`/api/status` reports `fetchRefused` (fetches refused for memory since boot,
+on every board) and `fetchLast` (`ok`, `refused` or `failed`) once a fetch has
+ended.
 When a value changes, only text whose rendered content changed is repainted,
 including the area needed to erase its previous contents.
 

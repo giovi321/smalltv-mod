@@ -5,6 +5,7 @@
 // and listing or installing a theme loads a second one next to it.
 #include "BlockList.h"
 #include "ThemeCatalog.h"
+#include "ThemeData.h"
 #include "ThemePackage.h"
 #include <algorithm>
 #include <cassert>
@@ -620,12 +621,169 @@ static void testDecimalsRecord() {
   assert(theme.data.size() == 4 && theme.data[3].fields[7].decimals == 3 && theme.data[0].fields[0].decimals == 0);
 }
 
+// A data fetch on the ESP8266 must not run out of heap: an allocation that
+// fails in `new` (the HTTP client, the values) restarts the device, and a parse
+// that takes the heap until it fails would starve the network driver. The
+// reply is never held: it is parsed as it arrives, keeping only what the
+// fields name, inside an allocator that stops the parse at DataParseBudget.
+// So whatever a source sends, a fetch needs a block for the biggest single
+// request (FetchLargestBlock) and the heap for the parse's peak
+// (FetchParseHeap), and the gate checks both. The numbers here are the host's
+// counts (32-bit, doubles aligned to 8 as on the device) of the parse of a
+// realistic reply and of the worst replies for the budget; the constants must
+// cover the largest of them and stay close to it.
+struct FetchMeasure {
+  size_t peak, largest;
+  bool ok;
+};
+static FetchMeasure measureParse(const std::string& body, const ThemeDataSource& source) {
+  std::vector<ThemeValue> values;
+  live = peak = largest = 0;
+  counting = true;
+  const bool ok = extractThemeValues(body, source, values, DataParseBudget);
+  counting = false;
+  return {peak, largest, ok};
+}
+// The most a VALID source can ask of the parse: 8 fields (the most a source may
+// declare), each with a 96-byte path (the longest the theme parser accepts) and
+// each naming a string, in a reply of the largest size (MaxDataBody). Measured
+// with no ceiling, then under each target's ceiling.
+static void testWorstValidSource() {
+  ThemeDataSource source;
+  source.id = "w";
+  std::string reply = "{";
+  for (size_t i = 0; i < MaxDataFields; ++i) {
+    std::string key = "k" + std::to_string(i);
+    key.append(96 - key.size(), 'x');
+    ThemeDataField f;
+    f.id = "f" + std::to_string(i);
+    f.path = key;
+    source.fields.push_back(f);
+    // 153 characters per value fill the reply to the byte limit.
+    reply += (i ? ",\"" : "\"") + key + "\":\"" + std::string(153, char('a' + i)) + "\"";
+  }
+  reply += "}";
+  assert(reply.size() <= MaxDataBody && reply.size() + 8 > MaxDataBody);
+  auto measure = [&](size_t budget, std::vector<ThemeValue>& values) {
+    live = peak = largest = 0;
+    counting = true;
+    const bool ok = extractThemeValues(reply, source, values, budget);
+    counting = false;
+    return FetchMeasure{peak, largest, ok};
+  };
+  std::vector<ThemeValue> free_, small, big;
+  const FetchMeasure none = measure(0, free_);
+  printf("worst valid source (8 fields, 96 B paths, %zu B reply): peak %zu B, largest %zu B\n", reply.size(), none.peak, none.largest);
+  fflush(stdout);
+  assert(none.ok && free_.size() == MaxDataFields);
+  // ESP32: the ceiling holds it, with the 31-byte cut on every value.
+  const FetchMeasure esp32 = measure(DataParseBudgetEsp32, big);
+  assert(esp32.ok && big.size() == MaxDataFields);
+  for (const auto& v : big) assert(v.value.size() == 31);
+  // ESP8266: the ceiling is the heap's, so this source is refused, whole and
+  // with the values as they were (the same as a failed fetch).
+  const FetchMeasure esp8266 = measure(DataParseBudgetEsp8266, small);
+  assert(!esp8266.ok && small.empty());
+  // The ESP32 ceiling still stops a reply that names a list as long as a reply
+  // may be (about 1,000 numbers): refused, and the parse stays under the
+  // ceiling (the allocator's own 8 bytes a block and the rounding come on top).
+  ThemeDataSource listed;
+  listed.id = "l";
+  ThemeDataField listField;
+  listField.id = "a";
+  listField.path = "a";
+  listed.fields.push_back(listField);
+  std::string numbers = "{\"a\":[";
+  while (numbers.size() + 4 < MaxDataBody) numbers += "1,";
+  numbers += "1]}";
+  std::vector<ThemeValue> hostile;
+  live = peak = largest = 0;
+  counting = true;
+  const bool hostileOk = extractThemeValues(numbers, listed, hostile, DataParseBudgetEsp32);
+  counting = false;
+  printf("long list under the ESP32 ceiling: %s, peak %zu B\n", hostileOk ? "read" : "refused", peak);
+  assert(!hostileOk && hostile.empty());
+  assert(peak <= DataParseBudgetEsp32 + 1024);
+  // The ESP32 ceiling is not far above what this source needs.
+  assert(DataParseBudgetEsp32 >= none.peak);
+  assert(DataParseBudgetEsp32 <= 2 * none.peak);
+  // On the ESP8266 the ceiling stays at the 2 KiB the heap allows.
+  assert(DataParseBudgetEsp8266 == 2048);
+  // And the build picks the ESP8266's for the host tests (which model it).
+  assert(DataParseBudget == DataParseBudgetEsp8266);
+}
+static void testDataReply() {
+  auto source = [](const char* id, std::initializer_list<const char*> paths) {
+    ThemeDataSource s;
+    s.id = id;
+    for (const char* path : paths) {
+      ThemeDataField f;   // not brace-initialised: it has a default member initializer
+      f.id = "f" + std::to_string(s.fields.size());
+      f.path = path;
+      s.fields.push_back(f);
+    }
+    return s;
+  };
+  // Open-Meteo's shape with made-up numbers and coordinates 0/0: the current
+  // reply (6 fields) and the daily one (2 fields), as a weather theme's two
+  // sources get them. (A path does not go into a list here, so the daily
+  // reply is shaped with plain values.)
+  const std::string current =
+      R"({"latitude":0.0,"longitude":0.0,"generationtime_ms":0.04,"utc_offset_seconds":0,"timezone":"GMT","timezone_abbreviation":"GMT","elevation":0.0,)"
+      R"("current_units":{"time":"iso8601","interval":"seconds","temperature_2m":"C","relative_humidity_2m":"%","apparent_temperature":"C","is_day":"","weather_code":"wmo code","wind_speed_10m":"km/h"},)"
+      R"("current":{"time":"2030-01-01T12:00","interval":900,"temperature_2m":18.4,"relative_humidity_2m":55,"apparent_temperature":17.1,"is_day":1,"weather_code":3,"wind_speed_10m":9.3}})";
+  const std::string daily =
+      R"({"latitude":0.0,"longitude":0.0,"generationtime_ms":0.05,"utc_offset_seconds":0,"timezone":"GMT","timezone_abbreviation":"GMT","elevation":0.0,)"
+      R"("daily_units":{"time":"iso8601","temperature_2m_max":"C","temperature_2m_min":"C"},)"
+      R"("daily":{"time":"2030-01-01","temperature_2m_max":18.4,"temperature_2m_min":9.1}})";
+  const ThemeDataSource now = source("w", {"current.temperature_2m", "current.relative_humidity_2m", "current.apparent_temperature",
+                                           "current.is_day", "current.weather_code", "current.wind_speed_10m"});
+  const ThemeDataSource day = source("d", {"daily.temperature_2m_max", "daily.temperature_2m_min"});
+  // The worst replies for the budget: a list of numbers and a list of strings
+  // that a field names (so it is kept whole), as long as a reply may be.
+  const ThemeDataSource listed = source("l", {"a"});
+  std::string numbers = "{\"a\":[", words = "{\"a\":[";
+  while (numbers.size() + 4 < MaxDataBody) numbers += "1,";
+  numbers += "1]}";
+  while (words.size() + 12 < MaxDataBody) words += "\"abcdefg\",";
+  words += "\"abcdefg\"]}";
+  assert(numbers.size() <= MaxDataBody && words.size() <= MaxDataBody);
+  const FetchMeasure a = measureParse(current, now), b = measureParse(daily, day), c = measureParse(numbers, listed), d = measureParse(words, listed);
+  printf("fetch: current reply (%zu B) peak %zu B, largest %zu B; daily (%zu B) peak %zu B, largest %zu B; numbers %s peak %zu B, largest %zu B; strings %s peak %zu B, largest %zu B\n",
+         current.size(), a.peak, a.largest, daily.size(), b.peak, b.largest, c.ok ? "read" : "refused", c.peak, c.largest, d.ok ? "read" : "refused", d.peak, d.largest);
+  fflush(stdout);
+  // The real replies are read; the replies the budget cannot hold are refused.
+  assert(a.ok && b.ok && !c.ok && !d.ok);
+  const size_t worstPeak = std::max(std::max(a.peak, b.peak), std::max(c.peak, d.peak));
+  const size_t worstBlock = std::max(std::max(a.largest, b.largest), std::max(c.largest, d.largest));
+  // The block the gate asks for covers the biggest single request, with the
+  // allocator's own overhead (8 bytes); and is not much more.
+  const size_t blockOverhead = 8;
+  if (FetchLargestBlock < worstBlock + blockOverhead || FetchLargestBlock > worstBlock + 1024)
+    fprintf(stderr, "FetchLargestBlock %u, largest single request %zu\n", unsigned(FetchLargestBlock), worstBlock);
+  assert(FetchLargestBlock >= worstBlock + blockOverhead);
+  assert(FetchLargestBlock <= worstBlock + 1024);
+  // The heap the gate asks for before the parse covers the worst peak of the
+  // four, and is not much more.
+  if (FetchParseHeap < worstPeak || FetchParseHeap > worstPeak + 1024)
+    fprintf(stderr, "FetchParseHeap %u, worst parse peak %zu\n", unsigned(FetchParseHeap), worstPeak);
+  assert(FetchParseHeap >= worstPeak);
+  assert(FetchParseHeap <= worstPeak + 1024);
+  // The budget itself is what makes the worst peak bounded: it holds the real
+  // replies (the biggest of them needs less than half again) and stops at the
+  // allocator's ceiling for the hostile ones.
+  assert(DataParseBudget >= std::max(a.peak, b.peak));
+  assert(DataParseBudget <= 2 * std::max(a.peak, b.peak));
+}
+
 int main(int argc, char** argv) {
   // A show rule holds its ranges itself (4 floats a side) and names its source
   // by index: 40 bytes, no string and no vector of its own.
   if (sizeof(ShowRule) > 40) fprintf(stderr, "sizeof(ShowRule) %zu\n", sizeof(ShowRule));
   assert(sizeof(ShowRule) <= 40);
   testShowRules();
+  testWorstValidSource();
+  testDataReply();
   testBlockList();
   testDecimalsRecord();
   testManyEntries();
