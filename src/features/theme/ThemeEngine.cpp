@@ -184,9 +184,9 @@ uint16_t resolveColorBinding(const ColorBinding& binding, double value) {
 // theme declares; anything else must resolve to a declared "<source>.<field>".
 static const char* const tokens[] = {"HH", "hh", "MM", "SS", "DD", "MON", "MONTH", "WD", "WEEKDAY", "YYYY"};
 // Added by spec 2 (#31 item 6): the hour without a leading zero, the month as
-// a number, and AM/PM; then the ISO 8601 week number. A spec 1 theme that uses
-// one is refused like any other unknown {...} span.
-static const char* const tokensSpec2[] = {"H", "MO", "AMPM", "WW"};
+// a number, and AM/PM; then the ISO 8601 week number and the two-digit year. A
+// spec 1 theme that uses one is refused like any other unknown {...} span.
+static const char* const tokensSpec2[] = {"H", "MO", "AMPM", "WW", "YY"};
 // The `device.*` names a firmware may provide, shared by binding sources and
 // text tokens (docs/features/themes.md).
 static const char deviceNames[5][12] PROGMEM = {"focusToday", "focusGoal", "streak", "humidity", "temperature"};
@@ -1602,6 +1602,8 @@ static std::string expandTextWith(const std::string& value, const tm* t, const s
       else if (key == "YYYY") n = t->tm_year + 1900;
       else if (key == "MO" && t->tm_mon >= 0 && t->tm_mon < 12) n = t->tm_mon + 1;
       else if (key == "WW") n = isoWeek(*t);
+      // Two digits of the year; a year below 0 stays "--" (its remainder could be 0).
+      else if (key == "YY" && t->tm_year >= -1900) n = (t->tm_year + 1900) % 100;
       if (n >= 0) {
         snprintf(b, sizeof(b), key == "YYYY" ? "%04d" : "%02d", n);
         v = b;

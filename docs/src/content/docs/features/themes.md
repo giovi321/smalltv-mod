@@ -328,16 +328,18 @@ v3.4.0 or later:
 | `{AMPM}` | `AM` for 00:00–11:59, `PM` for 12:00–23:59 |
 | `{device.focusToday}`, `{device.focusGoal}`, `{device.streak}`, `{device.humidity}`, `{device.temperature}` | The firmware's value, as text, exactly as it supplied it |
 
-One more token needs firmware v3.7.0 or later and a
-`"spec": 2` theme:
+Two more tokens need a `"spec": 2` theme. `{WW}` needs firmware v3.7.0 or
+later, and `{YY}` needs firmware newer than v3.7.0:
 
 | Token | Value |
 | --- | --- |
 | `{WW}` | 01–53 ISO 8601 week (weeks start on Monday; week 1 holds the year's first Thursday) |
+| `{YY}` | 00–99 the last two digits of the year (2026 is `26`, 2100 is `00`) |
 
 The first days of January can belong to the last week of the year before (52 or
 53), and the last days of December to week 1 of the next year. Like the clock
-tokens, `{WW}` shows `--` until the clock has been set.
+tokens, `{WW}` and `{YY}` show `--` until the clock has been set. `{YY}` is
+`{YYYY}` without the century, so `{DD}.{MO}.{YY}` reads `24.08.26`.
 
 `{hh}` is the 12-hour clock with a leading zero, so `{hh}:{MM} {AMPM}` reads
 `03:04 PM`; `{H}:{MM}` reads `15:04`. Like the other clock tokens, the three
@@ -348,7 +350,7 @@ that must also run here should leave room for `--`. The names are the same as
 for bindings; `time.*` is not a text token, because `{HH}`, `{MM}` and the other
 clock tokens already cover it.
 
-In a `"spec": 1` theme none of these is accepted: `{H}`, `{MO}`, `{AMPM}`, `{WW}` and
+In a `"spec": 1` theme none of these is accepted: `{H}`, `{MO}`, `{AMPM}`, `{WW}`, `{YY}` and
 `{device.*}` are unknown variables, so the package is refused when it is checked
 with `layers[n].value: use printable ASCII and declared clock/data variables only`,
 the same as any other unknown `{...}`. (A spec 1 theme that declares its own

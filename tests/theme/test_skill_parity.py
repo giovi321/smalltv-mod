@@ -211,6 +211,10 @@ MANIFESTS = {
     'decimals': manifest(data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'x', 'decimals': 2}])]),
     'spec1 decimals': manifest(spec=1, data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'x', 'decimals': 2}])]),
     'decimals 4': manifest(data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'x', 'decimals': 4}])]),
+    'year token': layer(value='{DD} {MON} {YY}'),
+    'spec1 year token': manifest(spec=1, layers=[dict(TEXT, value='{YY}')]),
+    'year token near miss': layer(value='{YYY}'),
+    'year token lower case': layer(value='{yy}'),
     'data id time': manifest(data=[dict(SOURCE, id='time')]),
     'https no insecure': manifest(data=[dict(SOURCE, url='https://a/b')]),
     'interval 5': manifest(data=[dict(SOURCE, interval=5)]),
@@ -258,7 +262,7 @@ MANIFESTS = {
 @needs_native
 class ManifestParityTests(unittest.TestCase):
     def test_validators_agree(self):
-        self.assertEqual(len(MANIFESTS), 65)
+        self.assertEqual(len(MANIFESTS), 69)
         with tempfile.TemporaryDirectory() as d:
             path = Path(d)/'theme.json'
             for name, theme in MANIFESTS.items():
@@ -575,6 +579,42 @@ class DecimalsTests(unittest.TestCase):
             with self.assertRaises(ValueError) as raised:
                 native.validate_manifest(path)
         self.assertEqual(str(raised.exception).strip().splitlines()[-1], stheme.validate(theme)[0])
+
+
+class YearTokenTests(unittest.TestCase):
+    """{YY} in the skill's own preview and spec detection (no native tool needed)."""
+
+    def test_preview_shows_two_digits(self):
+        for year, want in ((2026, '26'), (2000, '00'), (2005, '05'), (2099, '99'), (2100, '00'), (1999, '99')):
+            with self.subTest(year=year):
+                self.assertEqual(stheme.expand('{YY}', dt.datetime(year, 8, 24, 12), {}, 0), want)
+        # The turn of the year, next to other tokens, and no clock.
+        a, b = dt.datetime(2026, 12, 31, 23, 59, 59), dt.datetime(2027, 1, 1)
+        self.assertEqual(stheme.expand('{DD}.{MO}.{YY}', a, {}, 0), '31.12.26')
+        self.assertEqual(stheme.expand('{DD}.{MO}.{YY}', b, {}, 0), '01.01.27')
+        self.assertEqual(stheme.expand('{DD} {MON} {YY}', dt.datetime(2026, 8, 24), {}, 0), '24 Aug 26')
+        self.assertEqual(stheme.expand('{YYYY}/{YY}', dt.datetime(2026, 8, 24), {}, 0), '2026/26')
+        self.assertEqual(stheme.expand('{YY}', None, {}, 0), '--')
+
+    def test_year_token_needs_spec_2(self):
+        theme = copy.deepcopy(BASE)
+        theme['layers'][0]['value'] = '{DD} {MON} {YY}'
+        self.assertTrue(any('{YY}' in reason for reason in stheme.spec2_reasons(theme)))
+        self.assertEqual(stheme.validate(dict(theme, spec=2)), [])
+        theme['spec'] = 1
+        errors = stheme.validate(theme)
+        # Refused twice, like the firmware's unknown variable: by the spec check
+        # and by the text check (so {YY} is not in the spec 1 token list).
+        self.assertTrue(any('needs "spec": 2' in e for e in errors), errors)
+        self.assertTrue(any('declared clock/data variables only' in e for e in errors), errors)
+
+    def test_near_misses_are_refused_in_spec_2(self):
+        for bad in ('{Y}', '{YYY}', '{yy}', '{YYYYY}'):
+            with self.subTest(value=bad):
+                theme = copy.deepcopy(BASE)
+                theme['spec'] = 2
+                theme['layers'][0]['value'] = bad
+                self.assertTrue(any('declared clock/data variables only' in e for e in stheme.validate(theme)))
 
 
 if __name__ == '__main__':

@@ -1,5 +1,5 @@
 // Text tokens added by spec 2 (#31 item 6): {H}, {MO}, {AMPM} and {device.*},
-// and the ISO 8601 week number {WW}.
+// the ISO 8601 week number {WW}, and the two-digit year {YY}.
 #include "ThemeEngine.h"
 #include <cassert>
 #include <cstdio>
@@ -48,15 +48,17 @@ static void testClockTokens() {
 static void testSpecs() {
   Theme theme; std::string error;
   for (const char* value : {"{H}", "{MO}", "{AMPM}", "{H}:{MM} {AMPM} {MO}", "{device.temperature}", "{device.focusToday}",
-                            "{device.focusGoal}", "{device.streak}", "{device.humidity}", "{WW}", "KW {WW}"})
+                            "{device.focusGoal}", "{device.streak}", "{device.humidity}", "{WW}", "KW {WW}",
+                            "{YY}", "{DD} {MON} {YY}", "{YYYY}{YY}"})
     assert(parseTheme(manifest(2, value), theme, error));
   // Spec 1 keeps its set: the same text is refused like any unknown variable.
-  for (const char* value : {"{H}", "{MO}", "{AMPM}", "{device.temperature}", "{device.streak}", "{WW}", "KW {WW}"}) {
+  for (const char* value : {"{H}", "{MO}", "{AMPM}", "{device.temperature}", "{device.streak}", "{WW}", "KW {WW}",
+                            "{YY}", "{DD} {MON} {YY}"}) {
     assert(!parseTheme(manifest(1, value), theme, error));
     assert(error.find("layers[0].value") != std::string::npos && error.find("declared clock/data variables") != std::string::npos);
   }
   // Names are exact, even in spec 2.
-  for (const char* value : {"{h}", "{Mo}", "{ampm}", "{AM}", "{ww}", "{W}", "{WWW}", "{WW }", "{device.}", "{device.Streak}", "{device.unknown}", "{device.streak.x}", "{time.minute}", "{devices.streak}"})
+  for (const char* value : {"{h}", "{Mo}", "{ampm}", "{AM}", "{ww}", "{W}", "{WWW}", "{WW }", "{Y}", "{YYY}", "{yy}", "{Yy}", "{YY }", "{ YY}", "{YYYYY}", "{YY.YY}", "{device.}", "{device.Streak}", "{device.unknown}", "{device.streak.x}", "{time.minute}", "{devices.streak}"})
     assert(!parseTheme(manifest(2, value), theme, error));
   // A spec 1 theme may still declare its own "device" data source and use it.
   const std::string data = "\"data\":[{\"id\":\"device\",\"url\":\"http://example.test/a.json\",\"interval\":60,\"fields\":[{\"id\":\"temperature\",\"path\":\"t\"}]}],";
@@ -193,10 +195,67 @@ static void testWeekToken() {
   assert(!parseTheme(manifest(1, "KW {WW}"), theme, error));
 }
 
+// ---- {YY}: the year of the century, two digits ----
+static std::string yearOf(int year) {
+  tm t{}; t.tm_year = year - 1900; t.tm_mon = 0; t.tm_mday = 1; t.tm_wday = 1;
+  return expandText("{YY}", &t);
+}
+static void testYearToken() {
+  // The year modulo 100, always two digits.
+  assert(yearOf(2026) == "26");
+  assert(yearOf(2000) == "00");
+  assert(yearOf(2005) == "05");
+  assert(yearOf(2009) == "09");
+  assert(yearOf(2010) == "10");
+  assert(yearOf(2099) == "99");
+  assert(yearOf(2100) == "00");
+  assert(yearOf(2101) == "01");
+  assert(yearOf(1999) == "99");
+  assert(yearOf(1970) == "70");
+  assert(yearOf(1900) == "00");
+  // The turn of the year: 31 December 2026 and 1 January 2027.
+  tm eve = clockAt(23, 12); eve.tm_mday = 31; eve.tm_year = 126;
+  tm day = clockAt(0, 1); day.tm_mday = 1; day.tm_year = 127;
+  assert(expandText("{DD}.{MO}.{YY}", &eve) == "31.12.26");
+  assert(expandText("{DD}.{MO}.{YY}", &day) == "01.01.27");
+  // Next to the long year, a month name and a day: "17 Sep 26".
+  tm t = clockAt(0, 9);
+  assert(expandText("{DD} {MON} {YY}", &t) == "17 Sep 26");
+  assert(expandText("{YYYY}/{YY}", &t) == "2026/26");
+  // No clock yet: "--". A year before 1900 still has its two digits (1899 is
+  // "99", as {YYYY} prints 1899); a year below 0 is "--".
+  assert(expandText("{YY}", nullptr) == "--");
+  tm old = clockAt(0, 1); old.tm_year = -1;
+  assert(expandText("{YY}", &old) == "99");
+  old.tm_year = -2000;   // year -100 would give "00" by the remainder alone
+  assert(expandText("{YY}", &old) == "--");
+  assert(yearOf(0) == "00");
+  // Only the exact name expands; the engine does not look at prefixes.
+  assert(expandText("{Y}|{YYY}|{yy}", &t) == "--|--|--");
+  // The month name follows the language; the year digits do not.
+  for (const char* code : {"en", "pt", "es", "fr", "de", "it"}) {
+    assert(expandText("{YY}", &t, {}, languageFromCode(code)) == "26");
+    assert(expandText("{MON} {YY}", &t, {}, languageFromCode(code)) ==
+           expandText("{MON}", &t, {}, languageFromCode(code)) + " 26");
+  }
+  // End to end: the text of a layer changes at midnight on New Year, and only then.
+  Theme theme; std::string error;
+  assert(parseTheme(manifest(2, "{YY}"), theme, error));
+  Engine e; e.setTheme(theme, 0);
+  e.update(0, &eve);
+  assert(e.states()[0].text == "26");
+  eve.tm_hour = 23; eve.tm_min = 59;
+  assert(e.update(1, &eve).empty() && e.states()[0].text == "26");
+  assert(!e.update(2, &day).empty() && e.states()[0].text == "27");
+  // A spec 1 theme never reaches the token: validation refuses it.
+  assert(!parseTheme(manifest(1, "{YY}"), theme, error));
+}
+
 int main() {
   testClockTokens();
   testSpecs();
   testDevice();
   testWeekToken();
+  testYearToken();
   std::cout << "text token tests passed\n";
 }
