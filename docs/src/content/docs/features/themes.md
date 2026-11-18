@@ -279,7 +279,7 @@ Bindings always use the exact value. Values that are not plain decimal numbers,
 including numbers with an exponent such as `1e-6`, are shown as fetched. A
 JSON string that holds a number (`"12.5"`) is rounded too, since the text is
 what counts.
-`decimals` needs a firmware newer than v3.7.0 and a
+`decimals` needs firmware v3.8.0 or later and a
 `"spec": 2` theme; a `"spec": 1` theme that uses it is refused with
 `data[n].fields[m].decimals: needs "spec": 2`. URLs must use `http://` or
 `https://`. Because
@@ -346,7 +346,7 @@ v3.4.0 or later:
 | `{device.focusToday}`, `{device.focusGoal}`, `{device.streak}`, `{device.humidity}`, `{device.temperature}` | The firmware's value, as text, exactly as it supplied it |
 
 Two more tokens need a `"spec": 2` theme. `{WW}` needs firmware v3.7.0 or
-later, and `{YY}` needs firmware newer than v3.7.0:
+later, and `{YY}` needs firmware v3.8.0 or later:
 
 | Token | Value |
 | --- | --- |

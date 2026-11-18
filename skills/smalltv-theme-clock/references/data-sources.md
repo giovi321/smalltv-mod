@@ -23,7 +23,7 @@ Use only when the clock shows live values. The TV polls each URL itself.
 - Values become strings: strings as-is but cut to 31 characters; numbers and booleans as
   their JSON text (`18`, `7.9`, `true`); missing/null/objects → `--`. Only printable ASCII
   renders properly (no `°`).
-- A field may set `"decimals"` (0–3, spec 2 only, needs a firmware newer than v3.7.0): text shows its
+- A field may set `"decimals"` (0–3, spec 2 only, needs firmware v3.8.0 or later): text shows its
   number rounded to that many places, half away from zero (`13.5` → `14`, `7` with 1 → `7.0`,
   never `-0`). A JSON string holding a number (`"12.5"`) is rounded too. Bindings still get the
   exact value. Words and exponent forms (`1e-6`) show as fetched.
