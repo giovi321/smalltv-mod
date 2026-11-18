@@ -208,6 +208,9 @@ MANIFESTS = {
     'week token': layer(value='KW {WW}'),
     'spec1 week token': manifest(spec=1, layers=[dict(TEXT, value='{WW}')]),
     'week token near miss': layer(value='{WWW}'),
+    'decimals': manifest(data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'x', 'decimals': 2}])]),
+    'spec1 decimals': manifest(spec=1, data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'x', 'decimals': 2}])]),
+    'decimals 4': manifest(data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'x', 'decimals': 4}])]),
     'data id time': manifest(data=[dict(SOURCE, id='time')]),
     'https no insecure': manifest(data=[dict(SOURCE, url='https://a/b')]),
     'interval 5': manifest(data=[dict(SOURCE, interval=5)]),
@@ -255,7 +258,7 @@ MANIFESTS = {
 @needs_native
 class ManifestParityTests(unittest.TestCase):
     def test_validators_agree(self):
-        self.assertEqual(len(MANIFESTS), 62)
+        self.assertEqual(len(MANIFESTS), 65)
         with tempfile.TemporaryDirectory() as d:
             path = Path(d)/'theme.json'
             for name, theme in MANIFESTS.items():
@@ -522,6 +525,56 @@ class WeekTokenTests(unittest.TestCase):
         # and by the text check (so {WW} is not in the spec 1 token list).
         self.assertTrue(any('needs "spec": 2' in e for e in errors), errors)
         self.assertTrue(any('declared clock/data variables only' in e for e in errors), errors)
+
+
+class DecimalsTests(unittest.TestCase):
+    """`decimals` in the skill's own preview and spec detection (no native tool needed)."""
+
+    def shown(self, value, places):
+        return stheme.expand('{w.x}', None, {'w.x': value}, 0, {'w.x': places})
+
+    def test_preview_rounds_like_the_firmware(self):
+        # The cases of the firmware test: half away from zero, on the digits.
+        for value, places, want in (('13.5', 0, '14'), ('12.5', 0, '13'), ('13.4', 0, '13'), ('21', 0, '21'),
+                                    ('-2.5', 0, '-3'), ('-0.4', 0, '0'), ('1.15', 1, '1.2'), ('99.96', 1, '100.0'),
+                                    ('999.5', 0, '1000'), ('7', 1, '7.0'), ('-0.04', 1, '0.0'), ('3.14159', 3, '3.142'),
+                                    ('007.5', 0, '8'), ('.5', 0, '1'), ('+4.6', 0, '5'), ('13.5', None, '13.5')):
+            self.assertEqual(self.shown(value, places), want, (value, places))
+        for value in ('n/a', '--', '12abc', '1e-6', '1.5e3', '', '-', '.'):
+            self.assertEqual(self.shown(value, 0), value)
+        # Only the field that sets it is rounded.
+        self.assertEqual(stheme.expand('{w.x}|{w.y}', None, {'w.x': '4.6', 'w.y': '4.6'}, 0, {'w.x': 0}), '5|4.6')
+        # Without a decimals map nothing changes.
+        self.assertEqual(stheme.expand('{w.x}', None, {'w.x': '4.6'}, 0), '4.6')
+
+    def test_decimals_need_spec_2(self):
+        theme = copy.deepcopy(BASE)
+        theme['data'] = [dict(SOURCE, fields=[{'id': 'x', 'path': 'x', 'decimals': 1}])]
+        self.assertTrue(any('decimals' in reason for reason in stheme.spec2_reasons(theme)))
+        self.assertEqual(stheme.validate(theme), [])
+        theme['spec'] = 1
+        self.assertTrue(stheme.validate(theme))
+        theme['spec'] = 2
+        theme['data'][0]['fields'][0]['decimals'] = 4
+        self.assertTrue(stheme.validate(theme))
+
+    def test_spec_1_message_is_the_firmwares(self):
+        theme = copy.deepcopy(BASE)
+        theme['spec'] = 1
+        theme['data'] = [dict(SOURCE, fields=[{'id': 'x', 'path': 'x', 'decimals': 1}])]
+        self.assertEqual(stheme.validate(theme), ['data[0].fields[0].decimals: needs "spec": 2'])
+
+    @needs_native
+    def test_spec_1_message_matches_the_firmware_text(self):
+        theme = copy.deepcopy(BASE)
+        theme['spec'] = 1
+        theme['data'] = [dict(SOURCE, fields=[{'id': 'x', 'path': 'x', 'decimals': 1}])]
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d)/'theme.json'
+            path.write_text(json.dumps(theme))
+            with self.assertRaises(ValueError) as raised:
+                native.validate_manifest(path)
+        self.assertEqual(str(raised.exception).strip().splitlines()[-1], stheme.validate(theme)[0])
 
 
 if __name__ == '__main__':
