@@ -860,7 +860,8 @@ function showStatus(s){
  // Surface the result of a boot-time GitHub update (ESP8266) once on first load,
  // so a failure that happened across the reboot is visible even if the original
  // System tab was closed. Don't clobber an in-progress check/update message.
- if(!window._otaShown){window._otaShown=1;var gm=$('ghMsg');if(gm&&!gm.textContent&&s.updateMsg&&s.updateMsg!=='updating...')gm.textContent='Last update: '+s.updateMsg}
+ if(s.githubUpdate===false)updatesOff();
+ else if(!window._otaShown){window._otaShown=1;var gm=$('ghMsg');if(gm&&!gm.textContent&&s.updateMsg&&s.updateMsg!=='updating...')gm.textContent='Last update: '+s.updateMsg}
  var fv=$('footVer'); if(fv)fv.textContent=' v'+s.version;
  if(s.repo){var rl=$('repoLink'); if(rl)rl.href=s.repo+'/releases'; var fr=$('footRepo'); if(fr)fr.href=s.repo;}
  $('statusBox').innerHTML=
@@ -929,8 +930,15 @@ function haClearScreens(){if(!confirm('Clear all HA screens on the device and on
   toast('Cleared '+r.cleared+' screen(s)'+(r.broker?'':' — device only, broker not connected'));})}
 
 // GitHub self-update
+// A build with the GitHub update off (-DFW_NO_GITHUB_UPDATE) says so in the
+// status ("githubUpdate":false), in the check reply ("disabled":true) and with
+// a 403 on the update request; the card then offers nothing.
+var UPDATES_OFF='updates are off in this build';
+function updatesOff(){$('chkBtn').disabled=true;$('ghUpBtn').disabled=true;
+ $('ghMsg').textContent='Updates are off in this build. Use the manual upload in the System tab.'}
 function checkUpdate(){$('ghMsg').textContent='Checking GitHub...';$('chkBtn').disabled=true;
  j('/api/checkupdate').then(function(u){$('chkBtn').disabled=false;
+  if(u.disabled){updatesOff();return}
   if(!u.ok){$('ghMsg').textContent='Check failed: '+(u.error||'unknown');return}
   if(u.newer){$('ghMsg').innerHTML='Version <b>'+u.latest+'</b> is available (installed '+u.current+').';$('ghUpBtn').disabled=false}
   else{$('ghMsg').textContent='Up to date ('+u.current+').';$('ghUpBtn').disabled=true}
@@ -950,7 +958,9 @@ function selfUpdate(){if(!confirm('Download and flash the latest release from Gi
    }).catch(function(){});
    if(n>100)clearInterval(t);
   },3000);
- }).catch(function(){$('ghMsg').textContent='Could not start update';$('chkBtn').disabled=false})}
+ }).catch(function(e){
+  if(e&&e.message===UPDATES_OFF){updatesOff();return}
+  $('ghMsg').textContent='Could not start update';$('chkBtn').disabled=false})}
 
 // settings backup
 function importCfg(){var f=$('cfgFile').files[0];if(!f){toast('Pick a config .json first');return}

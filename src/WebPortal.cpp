@@ -9,6 +9,7 @@
 #include "Net.h"
 #include "Gfx.h"
 #include "OtaUpdate.h"
+#include "BuildInfo.h"
 #include "StockClient.h"
 #include "UsageClient.h"
 #if WITH_RADAR
@@ -202,10 +203,13 @@ static void handleStatus() {
   const String clockText = clockTimeStr();
   smalltv::StatusData d;
   d.fw = FW_NAME;
-  d.version = FW_VERSION;
+  d.version = FW_VERSION_FULL;
   d.variant = FW_VARIANT;   // which release image this is, e.g. "esp8266-lean"
   d.repo = REPO_URL;
   d.updateMsg = g_updateMsg.c_str();
+#ifdef FW_NO_GITHUB_UPDATE
+  d.githubUpdateOff = true;
+#endif
   d.mode = (netMode() == NET_AP) ? "ap" : "sta";
   d.connected = netConnected();
   d.ssid = ssid.c_str();
@@ -481,6 +485,7 @@ static void handleHaClear() {
 // Check the newest GitHub release against the running version.
 static void handleCheckUpdate() {
   if (!requireAuth()) return;
+  if (!FW_GITHUB_UPDATE) { server.send(200, "application/json", FW_UPDATE_OFF_CHECK_REPLY); return; }
   OtaLatest r = otaCheckLatest(*S);
   JsonDocument doc;
   JsonObject o = doc.to<JsonObject>();
@@ -496,6 +501,7 @@ static void handleCheckUpdate() {
 // this response returns first; on success the device reboots into the new image.
 static void handleSelfUpdate() {
   if (!requireAuth()) return;
+  if (!FW_GITHUB_UPDATE) { server.send(403, "application/json", FW_UPDATE_OFF_SELF_REPLY); return; }
   g_selfUpdate = true;
   g_updateMsg = "starting...";
   server.send(200, "application/json", "{\"ok\":true}");
@@ -724,8 +730,10 @@ void webPortalBegin(Settings& settings) {
 void webPortalLoop() {
   server.handleClient();
 
+#if FW_GITHUB_UPDATE
   // Run the GitHub self-update outside the request handler so the browser gets its
-  // response first.
+  // response first. A build with the update off (-DFW_NO_GITHUB_UPDATE) has none
+  // of this.
   if (g_selfUpdate) {
     g_selfUpdate = false;
 #if defined(SMALLTV_FAMILY_ESP8266)
@@ -748,6 +756,7 @@ void webPortalLoop() {
     g_updateMsg = err.length() ? err : "updating...";
 #endif
   }
+#endif
 }
 
 bool webPortalRebootDue() {

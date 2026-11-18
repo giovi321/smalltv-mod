@@ -35,6 +35,9 @@ struct StatusWg {
 struct StatusData {
   const char *fw = "", *version = "", *variant = "", *repo = "";
   const char* updateMsg = "";   // left out when empty
+#ifdef FW_NO_GITHUB_UPDATE
+  bool githubUpdateOff = false; // "githubUpdate":false; only a build with the update off has this (BuildInfo.h)
+#endif
   const char *mode = "", *ssid = "", *ip = "";
   const char* wifiFail = "";    // left out when empty
   const char* reset = "";
@@ -99,6 +102,11 @@ template <class Out> void writeStatusHead(Out& out, const StatusData& d) {
   member(out, PSTR(",\"variant\":"), d.variant);
   member(out, PSTR(",\"repo\":"), d.repo);
   if (d.updateMsg[0]) member(out, PSTR(",\"updateMsg\":"), d.updateMsg);
+#ifdef FW_NO_GITHUB_UPDATE
+  // Only a build with the GitHub update off carries the code (and the text)
+  // for this key; every other image is unchanged by the build option.
+  if (d.githubUpdateOff) member(out, PSTR(",\"githubUpdate\":"), false);
+#endif
   member(out, PSTR(",\"mode\":"), d.mode);
   member(out, PSTR(",\"connected\":"), d.connected);
   member(out, PSTR(",\"ssid\":"), d.ssid);
