@@ -11,10 +11,10 @@ import struct
 import tempfile
 try:
     from .theme_native import validate_manifest, validate_package
-    from .theme_font import compile_font
+    from .theme_font import check_grain, compile_font
 except ImportError:
     from theme_native import validate_manifest, validate_package
-    from theme_font import compile_font
+    from theme_font import check_grain, compile_font
 from PIL import Image
 
 MAX_PACKAGE = 3 * 1024 * 1024
@@ -157,12 +157,17 @@ def build_font(root, name):
     in fonts/, its size in pixels per em, the glyphs to keep and optionally
     the fallback glyph (spec 2, #31)."""
     settings = json.loads(source_file(root, f'fonts/{name}.json').read_text(encoding='utf-8'), object_pairs_hook=unique_keys)
-    if not isinstance(settings, dict) or not {'file', 'size', 'glyphs'} <= settings.keys() <= {'file', 'size', 'glyphs', 'fallback'}:
-        raise ValueError(f'fonts/{name}.json: expected "file", "size", "glyphs" and optionally "fallback"')
+    if not isinstance(settings, dict) or not {'file', 'size', 'glyphs'} <= settings.keys() <= {'file', 'size', 'glyphs', 'fallback', 'grain'}:
+        raise ValueError(f'fonts/{name}.json: expected "file", "size", "glyphs" and optionally "fallback" and "grain"')
     if not isinstance(settings['file'], str) or '/' in settings['file']:
         raise ValueError('file: expected a font file name in fonts/')
+    if 'grain' in settings:
+        try:
+            check_grain(settings['grain'])   # a null grain is refused, not read as "off"
+        except ValueError as error:
+            raise ValueError(f'fonts/{name}.json: {error}') from error
     data = source_file(root, 'fonts/' + settings['file']).read_bytes()
-    return compile_font(data, settings['size'], settings['glyphs'], settings.get('fallback'))
+    return compile_font(data, settings['size'], settings['glyphs'], settings.get('fallback'), settings.get('grain'))
 
 
 def font_glyphs(stf):
