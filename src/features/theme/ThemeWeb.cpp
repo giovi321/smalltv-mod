@@ -19,6 +19,11 @@ uint32_t uploaded = 0, uploadBudget = 0;
 constexpr unsigned MaxThemes = 16;
 static_assert(MaxThemes <= 32, "listThemes() marks packages in a 32-bit mask");
 const char* staging = "/themes/.upload";
+#if defined(SMALLTV_ESP8266)
+// The web server's upload object is alive while finishUpload() parses the
+// package; platformio.ini sets its buffer to 1 KB to leave the heap for that.
+static_assert(HTTP_UPLOAD_BUFLEN <= 1024, "HTTP_UPLOAD_BUFLEN: see build_flags in platformio.ini");
+#endif
 // Every theme API route replies with the same small JSON shape: `{"id":...}`
 // on success, `{"error":...}` otherwise, keyed by whether `code` is a success
 // status.
@@ -525,7 +530,7 @@ void themeWebBegin(WebServerClass& web, Settings& s, bool (*requireAuth)(), bool
   web.on("/api/themes/delete", HTTP_POST, deleteTheme);
   removeSidecars();
 #if defined(SMALLTV_ESP8266)
-  // The web server reserves its 2 KB upload buffer before the first call to
+  // The web server reserves its upload buffer (1 KB here) before the first call to
   // receiveUpload(), so the release there comes too late: beside a running
   // theme the heap fell to 512 B at that point, and the Wi-Fi driver crashed
   // on an empty heap. This hook runs once the request line is read, before
