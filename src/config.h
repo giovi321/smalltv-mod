@@ -251,7 +251,6 @@
 // Compile-time feature toggles. All shipping features are on by default; a lean
 // build drops one by setting e.g. -D WITH_RADAR=0 in a PlatformIO env, which
 // omits that feature's module from the registry and its web UI section.
-// (WITH_RADAR ships off until the radar module lands.)
 // ---------------------------------------------------------------------------
 #ifndef WITH_TICKER
 #define WITH_TICKER 1
@@ -336,7 +335,7 @@
 // Plane radar (MODE_RADAR)
 //   Data source (radar's own selector, independent of the stock one):
 //     0 = adsb.fi opendata, fetched directly by the device over HTTPS (no key)
-//     1 = custom webhook (a LAN proxy that pre-filters — robust on the ESP8266)
+//     1 = custom URL (a LAN proxy or a local receiver aircraft.json)
 //     2 = adsb.lol opendata, same JSON shape, also direct over HTTPS (no key)
 // ---------------------------------------------------------------------------
 #define RADAR_SRC_ADSBFI   0
@@ -347,18 +346,18 @@
 // same lat/lon/dist-in-nautical-miles path; only host and prefix differ.
 //   adsb.fi:  /api/v3/lat/{lat}/lon/{lon}/dist/{nm}
 //   adsb.lol: /v2/lat/{lat}/lon/{lon}/dist/{nm}
-// Public rate limit is ~1 req/s on both; neither needs an API key.
+// These public endpoints do not require an API key.
 #define ADSB_FI_HOST     "opendata.adsb.fi"
 #define ADSB_FI_PATH     "/api/v3/lat/"
 #define ADSB_LOL_HOST    "api.adsb.lol"
 #define ADSB_LOL_PATH    "/v2/lat/"
 #define ADSB_USER_AGENT  "Mozilla/5.0 (SmallTV)"
 
-// Default direct provider. adsb.fi sits behind Cloudflare, which does not
-// negotiate the TLS max_fragment_length extension and sends records larger
-// than BearSSL's fallback 4 KB buffer, so the ESP8266 cannot read a busy
-// response; adsb.lol still honours MFLN and keeps the TLS footprint tiny.
-// The ESP32 uses mbedTLS with dynamic buffers and is not affected either way.
+// Preserve the platform defaults for new settings. Neither provider is
+// guaranteed to negotiate small TLS records: either can exceed the ESP8266's
+// 4096-byte fallback or leave insufficient heap for parsing. A plain HTTP LAN
+// receiver/proxy avoids that TLS cost. ESP32 uses a different TLS stack and
+// does not use this BearSSL fallback, but requests can still fail.
 #if defined(SMALLTV_FAMILY_ESP8266)
   #define DEFAULT_RADAR_SRC  RADAR_SRC_ADSBLOL
 #else
@@ -374,7 +373,7 @@
 #define DEFAULT_RADAR_LAT       0.0f
 #define DEFAULT_RADAR_LON       0.0f
 #define DEFAULT_RADAR_RANGE_KM  20
-#define DEFAULT_RADAR_POLL_SEC  10     // >=3 keeps us under the 1 req/s limit
+#define DEFAULT_RADAR_POLL_SEC  10     // seconds; saved settings clamp the interval to 3..3600
 
 // ---------------------------------------------------------------------------
 // Defaults (used on first boot / factory reset)

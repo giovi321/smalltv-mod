@@ -25,7 +25,7 @@ The Radar tab's **What to show** card tunes what appears. Alongside the two sett
 
 ## Data sources
 
-Three choices, set in the Radar tab. Two fetch a free open-data feed straight from the device; the third goes through a proxy on your own network.
+Three choices, set in the Radar tab. Two fetch a free open-data feed directly; Custom webhook accepts a LAN proxy or a local receiver URL.
 
 ### adsb.lol, the default on the ESP8266
 
@@ -35,7 +35,7 @@ The device fetches the free [adsb.lol](https://adsb.lol) API directly over HTTPS
 GET https://api.adsb.lol/v2/lat/<lat>/lon/<lon>/dist/<nm>
 ```
 
-No API key. The device parses the feed and keeps the closest 24 aircraft. The endpoint is rate-limited to about one request a second, so keep the refresh interval sensible. The default is 10 seconds.
+No API key. The device parses the feed and retains up to 24 nearest aircraft with numeric coordinates that pass the minimum-altitude filter. The default refresh interval is 10 seconds.
 
 ### adsb.fi, the default on the ESP32
 
@@ -47,22 +47,19 @@ GET https://opendata.adsb.fi/api/v3/lat/<lat>/lon/<lon>/dist/<nm>
 
 ### Which direct feed to pick
 
-On the ESP8266, HTTPS is tight on RAM, and the deciding factor is the TLS record size the server uses. The device probes the server's Maximum Fragment Length support so its buffer can stay at 512 bytes; without MFLN it has to fall back to 4 KB, and if the server then sends a record larger than that, the read fails part-way through and the scope stays empty.
-
-adsb.fi moved behind Cloudflare in August 2026. Cloudflare does not negotiate MFLN and ramps its record size up on large responses, so **direct adsb.fi no longer works on the ESP8266**. A 50 nm response is around 50 KB and the connection breaks mid-stream. adsb.lol still honours MFLN, which is why it is the ESP8266 default.
-
-The ESP32 boards use mbedTLS with dynamically sized buffers and are unaffected, so either feed works there.
-
-If your chosen feed ever goes behind a CDN too, switch to the other one or to the webhook below.
+On ESP8266, either direct feed can fail when TLS records exceed the 4096-byte fallback buffer or too little heap remains for packets and parsing; a small JSON response does not guarantee either will fit. adsb.lol remains the default, while a local receiver or LAN proxy over plain HTTP avoids that TLS cost. ESP32 uses a different TLS stack and has more RAM, but network, timeout, memory and input errors can still prevent an update.
 
 ### When the scope stays empty on an ESP8266
 
-Start at the **Radar** line in the Status tab. Since 2.12.1 it reports what the last poll actually did: `ok` with an aircraft count, `skipped, low heap`, `connect failed`, `http error` with the code, `parse failed`, `no aircraft in feed`, or `all filtered out` when traffic was there but your minimum-altitude setting dropped it. The same detail is in `/api/status` under `radar`.
+Start at the **Radar** line in the Status tab. Since 2.12.1 it reports what the last poll actually did: `ok` with an aircraft count, `skipped, low heap`, `connect failed`, `http error` with the code, `parse failed`, `no aircraft in feed`, or `all filtered out` when entries were present but none had numeric coordinates and passed the minimum-altitude filter. The same detail is in `/api/status` under `radar`.
 
-Two of those stages have known causes on the ESP8266:
+Use these outcomes to narrow down a failure:
 
-- `skipped, low heap`: the radar refuses to start a TLS handshake unless a 16,000-byte contiguous block is free (shown in the Status tab next to Free heap). Install `smalltv-mod-firmware-lean.bin`, which compiles out Home Assistant screens and the usage meter, or use the webhook below, which is plain HTTP and skips the check. See [Which release file to download](/smalltv-mod/reference/release-assets/).
-- `no aircraft in feed` on every poll while flightradar shows a full sky: before 2.12.1 this is what a device pointed at adsb.fi showed after Cloudflare fronted that feed, because Cloudflare's chunked responses misparsed as empty. 2.12.1 requests HTTP/1.0, which cannot be chunked; on older firmware, switch the source to adsb.lol.
+- `skipped, low heap`: the radar refuses to start a TLS handshake unless a 16,000-byte contiguous block is free (shown in the Status tab next to Free heap). The lean image omits Home Assistant screens, the usage meter and theme clocks to leave more heap. A LAN URL using plain HTTP skips this TLS check. Neither choice guarantees every request will succeed. See [Which release file to download](/smalltv-mod/reference/release-assets/).
+- `no aircraft in feed` on every poll while flightradar shows a full sky: older firmware could misparse chunked responses as empty. Radar requests now use HTTP/1.1 and decode chunked bodies before parsing JSON.
+- `parse failed, JSON NoMemory`: the bounded parser could not obtain the memory it needed, or an individual retained value was too large.
+- `connect failed`: a negative HTTPClient result can include connection refusal, connection loss or a response timeout, not just failure to open a socket.
+- `http error, HTTP 426` with adsb.lol: firmware requesting HTTP/1.0 can be rejected by this feed. Update to 3.5.1 or later, or use a LAN webhook. Direct HTTPS can still exceed the ESP8266 TLS buffer even after the HTTP/1.1 fix.
 
 ### Custom webhook, a LAN proxy
 
@@ -73,3 +70,18 @@ GET <webhookUrl>?lat=<lat>&lon=<lon>&dist=<km>
 ```
 
 It expects the same `{"ac":[ ... ]}` shape both feeds return, with these fields per aircraft: `lat`, `lon`, `track`, `gs`, `flight`, `hex`, `alt_baro`. The proxy does the filtering and the TLS handshake, which is the most reliable setup on the ESP8266.
+
+### Local readsb / dump1090 receiver
+
+The Custom webhook source can also read a receiver's `aircraft.json` directly
+on your LAN over plain HTTP, without a proxy or an external API. For example,
+use `http://<receiver>:1090/data/aircraft.json` for an adsb.im feeder's tar1090
+service. The radar accepts the receiver's `aircraft` array as well as the
+public APIs' `ac` array, retaining only the plotted fields. The receiver serves
+its local aircraft list; the webhook's appended lat/lon/dist query parameters
+do not filter that static JSON file. Reception coverage determines which
+flights are available.
+
+## Parsing and failure handling
+
+Radar parses one aircraft at a time and keeps the nearest 24, so a busy receiver does not need to filter its list to fit a whole-response JSON document. Failed polls preserve cached aircraft, and Status reports HTTP/client results and JSON errors, including `NoMemory`. Reads wait through brief network gaps using the configured timeout, but a synchronous fetch can still delay the web interface.

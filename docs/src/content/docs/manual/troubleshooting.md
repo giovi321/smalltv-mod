@@ -41,22 +41,22 @@ The device gets the time from the internet, and it only checks it when something
 - If the device cannot reach the internet at all, it leaves the screen on rather than guess, and keeps retrying until it succeeds or the night window ends for the day. This is intentional: it never gets stuck dark.
 - Right after a restart, the screen may show full brightness for a few seconds inside the night window, until the next time check lands.
 
-## The radar scope is empty, or a ticker is blank, with no error shown
+## Radar reports low heap, or the scope or ticker stops updating
 
-This is the original ESP8266 model running short of memory. Both features check that enough is free before opening an HTTPS connection, and when there is not they skip the attempt rather than crash, so nothing appears on screen to explain it. Both want a 16,000-byte contiguous block for the TLS handshake.
+On the ESP8266, a low-memory preflight can prevent an HTTPS fetch from starting. The radar and cash.ch ticker path require a largest free block of at least 16,000 bytes; other HTTPS ticker sources check total free heap instead. These conservative checks can skip a fetch, but they do not prevent every failure or reset. An empty scope or blank ticker can also have other causes.
 
-Since 2.12.1 the Status tab has a **Radar** line naming the last poll's outcome; `skipped, low heap` is this case, spelled out. The largest free block is shown next to Free heap on the same page. When the block sits under 16,000, memory is the cause and no amount of changing the data source will help, because the device never gets as far as sending a request.
+Check the Status tab's **Radar** line and the largest block next to Free heap. `skipped, low heap` identifies the radar's TLS preflight refusal. Switching between direct HTTPS providers does not bypass that check. A local receiver or webhook over plain HTTP does bypass it, while still requiring memory for packets and parsing. A failed poll can leave older aircraft visible.
 
-Four things bring it back, in the order worth trying:
+For memory-related failures, these options can help:
 
 1. If you do not use Home Assistant screens, leave **Broker host** blank in the Home Assistant tab and restart the device. From v3.5.0 the standard image then never takes the memory for the screen store and the MQTT client, about 6.5 KB
 2. Install `smalltv-mod-firmware-lean.bin` from the [Releases page](https://github.com/giovi321/smalltv-mod/releases). Same code, with Home Assistant screens, the usage meter and theme clocks compiled out, which leaves about 8 KB more heap than the standard image with Home Assistant off. Upload it in the System tab like any other update; your settings carry over. See [Which release file to download](/smalltv-mod/reference/release-assets/)
 3. Improve the WiFi signal. A weak link means constant retransmissions, and the queues holding them come out of the same memory. A device sitting at -75 dBm has noticeably less heap free than the same device close to the access point
-4. Switch the radar to a **Custom webhook** over plain HTTP. The memory check only guards the HTTPS path, so a LAN proxy sidesteps it entirely. [Plane radar](/smalltv-mod/features/radar/) has the setup
+4. Switch the radar to a **Custom webhook** over plain HTTP. The TLS preflight only guards HTTPS, so a LAN proxy or local receiver avoids it. Parser memory checks still apply. [Plane radar](/smalltv-mod/features/radar/) has the setup
 
 A busy office or lab network makes this worse than a quiet home one. Broadcast and multicast traffic all gets buffered by the device, so the same firmware on the same hardware can work on one network and go quiet on another.
 
-The ESP32 models have several times the RAM and manage their TLS buffers dynamically, so none of this applies to them.
+ESP32 models have more RAM and a different TLS stack, so they do not share this ESP8266 BearSSL buffer limit. They can still report memory, network, timeout or input errors.
 
 ## A ticker stopped working after I turned on night mode
 

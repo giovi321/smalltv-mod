@@ -61,7 +61,7 @@ Two fields: the address of the daemon running on your PC, the small program that
 
 **Home location**: your latitude and longitude, in decimal degrees. This is the point the radar is centred on. Until these are set, the radar screen shows "Set home location" instead of a scope.
 
-**Range & data**: how far out the scope reaches, in kilometres or miles, how often it refreshes, and where it gets aircraft data from: directly from the free adsb.lol or adsb.fi services (no setup needed) or from your own webhook. All three are explained in [Plane radar](/smalltv-mod/features/radar/).
+**Range & data**: how far out the scope reaches, in kilometres or miles, how often it refreshes, and where it gets aircraft data from: directly from the free adsb.lol or adsb.fi services (no API key), or through Custom webhook using a LAN proxy or local receiver URL. Direct HTTPS has additional memory and TLS limits on ESP8266. All three are explained in [Plane radar](/smalltv-mod/features/radar/).
 
 **What to show**: the size of the markers and labels, a minimum altitude below which aircraft are hidden (useful for filtering out ground traffic at a nearby airport), and independent toggles for callsign/altitude labels, speed vectors, and the rim dots for traffic beyond the outer ring.
 

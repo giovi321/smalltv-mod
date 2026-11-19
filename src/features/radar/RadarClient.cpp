@@ -1,7 +1,12 @@
 #include "RadarClient.h"
 #include "Platform.h"
 #include <ArduinoJson.h>
+#include <StreamUtils.h>
+#include "RadarInputStream.h"
+#include "RadarJsonAllocator.h"
 #include <math.h>
+#include <new>
+#include <string.h>
 
 static Aircraft g_ac[MAX_AIRCRAFT];   // kept sorted nearest-first
 static uint8_t  g_count = 0;
@@ -9,26 +14,25 @@ static uint32_t g_lastOkMs = 0;
 static bool     g_error = false;
 static uint32_t g_nextPollMs = 0;
 
-// TLS receive-buffer size for the direct-feed handshake, chosen by probing the
-// server's Maximum Fragment Length support. MFLN at 512/1024 lets BearSSL use a
-// tiny buffer (a big heap win on the ESP8266); otherwise we fall back to 4 KB and
-// hope the records fit. Cloudflare-fronted hosts offer neither, which is what
-// took direct adsb.fi off the ESP8266 — adsb.lol or the webhook path instead.
+// ESP8266 TLS receive-buffer choice: probe the selected direct provider for
+// 512/1024-byte Maximum Fragment Length support, otherwise use 4096 bytes.
+// The fallback cannot hold every legal TLS record. Either direct feed can fail
+// if its records are larger, or if the remaining ordinary heap is insufficient.
+// Plain HTTP on a LAN avoids TLS allocations; it still needs parser/packet RAM.
 static uint16_t    g_tlsRx = 0;
 // Host g_tlsRx was probed against, compared by pointer: both candidates are the
 // same two string literals every time, so identity is enough.
 static const char* g_tlsProbedHost = nullptr;
 
-// TLS session resumption: the first handshake stores its parameters here and
-// later connects to the same feed resume without the full ECDHE exchange,
-// which is both the slow part and the allocation peak on this chip. cash.ch
-// has fetched this way for a long time; the radar polls far more often, so it
-// benefits more. Reset alongside the MFLN probe when the provider changes.
+// Offer saved TLS session parameters on later requests. If the server accepts
+// resumption, it can avoid a full handshake; acceptance is not guaranteed.
+// Reset the saved session when the direct-provider probe key changes.
 static TlsSession g_tlsSession;
 
 // Last-poll diagnostics (see RadarStage in the header).
 static RadarStage g_stage = RADAR_IDLE;
 static int        g_lastHttp = 0;
+static const char* g_parseError = "";  // ArduinoJson static error string; no allocation
 static uint16_t   g_seenAc = 0;
 static uint32_t   g_lastTryMs = 0;
 static String     g_lastUrl;
@@ -40,6 +44,7 @@ bool            radarError()      { return g_error; }
 
 RadarStage    radarStage()     { return g_stage; }
 int           radarLastHttp()  { return g_lastHttp; }
+const char*   radarParseError(){ return g_parseError; }
 uint16_t      radarTlsRx()     { return g_tlsRx; }
 uint16_t      radarSeenAc()    { return g_seenAc; }
 uint32_t      radarLastTryMs() { return g_lastTryMs; }
@@ -67,6 +72,7 @@ void radarInit(const Settings& s) {
   g_nextPollMs = millis();
   g_stage = RADAR_IDLE;
   g_lastHttp = 0;
+  g_parseError = "";
   g_seenAc = 0;
   g_lastTryMs = 0;
   g_lastUrl = "";
@@ -85,12 +91,12 @@ static void geo(float homeLat, float homeLon, float lat, float lon,
 }
 
 // Keep the array sorted ascending by distance, holding at most MAX_AIRCRAFT.
-static void insertNearest(const Aircraft& t) {
-  if (g_count == MAX_AIRCRAFT && t.distKm >= g_ac[g_count - 1].distKm) return;
-  uint8_t i = (g_count < MAX_AIRCRAFT) ? g_count : (uint8_t)(MAX_AIRCRAFT - 1);
-  while (i > 0 && g_ac[i - 1].distKm > t.distKm) { g_ac[i] = g_ac[i - 1]; i--; }
-  g_ac[i] = t;
-  if (g_count < MAX_AIRCRAFT) g_count++;
+static void insertNearest(Aircraft* list, uint8_t& count, const Aircraft& t) {
+  if (count == MAX_AIRCRAFT && t.distKm >= list[count - 1].distKm) return;
+  uint8_t i = (count < MAX_AIRCRAFT) ? count : (uint8_t)(MAX_AIRCRAFT - 1);
+  while (i > 0 && list[i - 1].distKm > t.distKm) { list[i] = list[i - 1]; i--; }
+  list[i] = t;
+  if (count < MAX_AIRCRAFT) count++;
 }
 
 static void trimTail(char* s) {
@@ -106,9 +112,11 @@ static const char* directPath(const Settings& s) {
   return (s.radar.source == RADAR_SRC_ADSBLOL) ? ADSB_LOL_PATH : ADSB_FI_PATH;
 }
 
-// ---- probe MFLN once so TLS can use the smallest safe buffer ---------------
-// Re-probed when the provider changes: the two hosts answer differently
-// (adsb.lol negotiates MFLN, adsb.fi behind Cloudflare does not).
+// ---- cache an MFLN probe for the selected direct-provider host ------------
+// Probe results can change with the provider's infrastructure. A failed probe
+// selects the 4096-byte fallback, not a full-record-size TLS buffer.
+// HTTPS webhooks currently share the adsb.fi probe/cache key: this function
+// receives the source selector, not the webhook URL's host.
 static void probeTls(const Settings& s) {
 #if defined(SMALLTV_FAMILY_ESP8266)
   const char* host = directHost(s);
@@ -151,72 +159,208 @@ static String buildWebhookUrl(const Settings& s) {
   return u;
 }
 
-// ---- parse the open-data / webhook "ac" array ------------------------------
-static bool parseAdsb(const Settings& s, Stream& stream) {
-  // Filter to just the fields we plot; applied to every element of "ac".
-  JsonDocument filter;
-  JsonObject fe = filter["ac"][0].to<JsonObject>();
-  fe["lat"] = true;
-  fe["lon"] = true;
-  fe["track"] = true;
-  fe["gs"] = true;
-  fe["flight"] = true;
-  fe["hex"] = true;
-  fe["alt_baro"] = true;
-
-  JsonDocument doc;
-  DeserializationError err =
-      deserializeJson(doc, stream, DeserializationOption::Filter(filter));
-  if (err) { g_stage = RADAR_PARSE_FAIL; return false; }
-
-  JsonArrayConst ac = doc["ac"].as<JsonArrayConst>();
-  if (ac.isNull()) { g_stage = RADAR_NO_AC; return false; }
-
-  g_seenAc = 0;
-  for (JsonObjectConst a : ac) { (void)a; g_seenAc++; }
-
-  g_count = 0;
-  for (JsonObjectConst a : ac) {
-    if (!a["lat"].is<float>() && !a["lat"].is<int>()) continue;
-    if (!a["lon"].is<float>() && !a["lon"].is<int>()) continue;
-
-    Aircraft t;
-    t.lat = a["lat"].as<float>();
-    t.lon = a["lon"].as<float>();
-    t.track = (a["track"].is<float>() || a["track"].is<int>()) ? a["track"].as<float>() : NAN;
-    t.gs    = (a["gs"].is<float>()    || a["gs"].is<int>())    ? a["gs"].as<float>()    : NAN;
-    t.altFt = a["alt_baro"].is<int>() ? a["alt_baro"].as<int>() : 0;  // "ground" => 0
-
-    // Optional: drop ground/low traffic below the configured altitude threshold.
-    if (s.radar.minAltFt > 0 && t.altFt < (int32_t)s.radar.minAltFt) continue;
-
-    const char* fl = a["flight"] | (a["hex"] | "");
-    strlcpy(t.callsign, fl, sizeof(t.callsign));
-    trimTail(t.callsign);
-
-    geo(radarLat(s), radarLon(s), t.lat, t.lon, t.distKm, t.bearingDeg);
-    insertNearest(t);
+// One-byte lookahead keeps top-level framing outside ArduinoJson. Numeric
+// metadata is presented as a complete scalar without consuming its delimiter.
+class RadarJsonInput {
+ public:
+  explicit RadarJsonInput(Stream& stream) : stream_(stream) {}
+  int peek() {
+    if (held_ == -2) {
+      char c;
+      held_ = stream_.readBytes(&c, 1) == 1 ? static_cast<uint8_t>(c) : -1;
+    }
+    return held_;
   }
+  int read() {
+    int c = peek();
+    if (number_ && (c == ',' || c == '}' || c == ']' || c == ' ' ||
+                    c == '\t' || c == '\r' || c == '\n')) return -1;
+    if (c >= 0) held_ = -2;
+    return c;
+  }
+  size_t readBytes(char* bytes, size_t size) {
+    size_t n = 0;
+    while (n < size) {
+      int c = read();
+      if (c < 0) break;
+      bytes[n++] = static_cast<char>(c);
+    }
+    return n;
+  }
+  int nonSpace() {
+    int c;
+    while ((c = peek()) == ' ' || c == '\t' || c == '\r' || c == '\n') read();
+    return c;
+  }
+  void numberMode(bool enabled) { number_ = enabled; }
+ private:
+  Stream& stream_;
+  int held_ = -2;
+  bool number_ = false;
+};
 
+static bool parseFailure(const char* error) {
+  g_parseError = error;
+  g_stage = RADAR_PARSE_FAIL;
+  return false;
+}
+
+static bool consumeJson(RadarJsonInput& input, char expected) {
+  int c = input.nonSpace();
+  if (c != expected) return parseFailure(c < 0 ? "IncompleteInput" : "InvalidInput");
+  input.read();
+  return true;
+}
+
+static bool skipJsonValue(RadarJsonInput& input, JsonDocument& doc) {
+  int c = input.nonSpace();
+  if (c < 0) return parseFailure("IncompleteInput");
+  // Skip composite/string metadata without retaining input-sized values.
+  // Parse primitive values normally, then return numeric lookahead to framing.
+  bool number = c == '-' || (c >= '0' && c <= '9');
+  input.numberMode(number);
+  DeserializationError err = (c == '{' || c == '[' || c == '"')
+      ? deserializeJson(doc, input, DeserializationOption::Filter(JsonVariantConst()),
+                        DeserializationOption::NestingLimit(9))
+      : deserializeJson(doc, input, DeserializationOption::NestingLimit(9));
+  input.numberMode(false);
+  if (err) return parseFailure(err.c_str());
+  return true;
+}
+
+static void collectAircraft(const Settings& s, JsonObjectConst a,
+                            Aircraft* pending, uint8_t& count) {
+  if (!a["lat"].is<float>() && !a["lat"].is<int>()) return;
+  if (!a["lon"].is<float>() && !a["lon"].is<int>()) return;
+  Aircraft t;
+  t.lat = a["lat"].as<float>();
+  t.lon = a["lon"].as<float>();
+  t.track = (a["track"].is<float>() || a["track"].is<int>()) ? a["track"].as<float>() : NAN;
+  t.gs = (a["gs"].is<float>() || a["gs"].is<int>()) ? a["gs"].as<float>() : NAN;
+  t.altFt = a["alt_baro"].is<int>() ? a["alt_baro"].as<int>() : 0;
+  if (s.radar.minAltFt > 0 && t.altFt < (int32_t)s.radar.minAltFt) return;
+  const char* flight = a["flight"] | (a["hex"] | "");
+  strlcpy(t.callsign, flight, sizeof(t.callsign));
+  trimTail(t.callsign);
+  geo(radarLat(s), radarLon(s), t.lat, t.lon, t.distKm, t.bearingDeg);
+  insertNearest(pending, count, t);
+}
+
+static bool parseAircraftArray(const Settings& s, RadarJsonInput& input,
+                               JsonDocument& doc, JsonDocument& filter,
+                               Aircraft* pending, uint8_t& count, uint16_t& seen) {
+  if (!consumeJson(input, '[')) return false;
+  count = 0; seen = 0;
+  if (input.nonSpace() == ']') { input.read(); return true; }
+  for (;;) {
+    if (input.nonSpace() != '{')
+      return parseFailure(input.nonSpace() < 0 ? "IncompleteInput" : "InvalidInput");
+    DeserializationError err = deserializeJson(doc, input,
+        DeserializationOption::Filter(filter), DeserializationOption::NestingLimit(8));
+    if (err) return parseFailure(err.c_str());
+    if (seen < UINT16_MAX) ++seen;
+    collectAircraft(s, doc.as<JsonObjectConst>(), pending, count);
+    int c = input.nonSpace();
+    if (c == ']') { input.read(); return true; }
+    if (!consumeJson(input, ',')) return false;
+  }
+}
+
+#if defined(SMALLTV_FAMILY_ESP8266)
+static size_t radarFreeHeap() { return ESP.getFreeHeap(); }
+static size_t radarMaxBlock() { return platformMaxFreeBlock(); }
+#endif
+
+static bool parseAdsb(const Settings& s, Stream& stream) {
+  // Bound one aircraft, the field filter, and fixed candidate storage together.
+  // No allocation grows with the aircraft count, on either ESP family.
+#if defined(SMALLTV_FAMILY_ESP8266)
+  RadarJsonAllocator allocator(4 * 1024, 4 * 1024, radarFreeHeap,
+                               malloc, realloc, free, radarMaxBlock);
+#else
+  RadarJsonAllocator allocator(4 * 1024);
+#endif
+  struct Pending { Aircraft values[MAX_AIRCRAFT]; };
+  void* memory = allocator.allocate(sizeof(Pending));
+  if (!memory) return parseFailure("NoMemory");
+  auto release = [&allocator](Pending* p) { p->~Pending(); allocator.deallocate(p); };
+  std::unique_ptr<Pending, decltype(release)> pending(new(memory) Pending, release);
+  JsonDocument filter(&allocator);
+  for (const char* key : {"lat", "lon", "track", "gs", "flight", "hex", "alt_baro"})
+    filter[key] = true;
+  if (filter.overflowed()) return parseFailure("NoMemory");
+  JsonDocument doc(&allocator);
+  RadarJsonInput input(stream);
+  bool sawAc = false, sawAircraft = false, primary = false, found = false;
+  uint8_t count = 0;
+  uint16_t seen = 0;
+  if (!consumeJson(input, '{')) return false;
+  if (input.nonSpace() == '}') { g_stage = RADAR_NO_AC; return false; }
+  for (;;) {
+    if (input.nonSpace() != '"')
+      return parseFailure(input.nonSpace() < 0 ? "IncompleteInput" : "InvalidInput");
+    DeserializationError err = deserializeJson(doc, input);
+    if (err) return parseFailure(err.c_str());
+    JsonString key = doc.as<JsonString>();
+    bool ac = key.size() == 2 && memcmp(key.c_str(), "ac", 2) == 0;
+    bool aircraft = key.size() == 8 && memcmp(key.c_str(), "aircraft", 8) == 0;
+    doc.clear();
+    if (!consumeJson(input, ':')) return false;
+    if ((ac && sawAc) || (aircraft && sawAircraft)) return parseFailure("InvalidInput");
+    if (ac) sawAc = true;
+    if (aircraft) sawAircraft = true;
+    if ((ac || (aircraft && !primary)) && input.nonSpace() == '[') {
+      if (!parseAircraftArray(s, input, doc, filter, pending->values, count, seen)) return false;
+      found = true;
+      if (ac) primary = true;  // API ac takes precedence, whichever key arrives first.
+    } else if (!skipJsonValue(input, doc)) return false;
+    int c = input.nonSpace();
+    if (c == '}') { input.read(); break; }
+    if (!consumeJson(input, ',')) return false;
+  }
+  if (!found) { g_stage = RADAR_NO_AC; return false; }
+  // Replace cached results only after the root object is complete. Invalid or
+  // incomplete arrays or trailing metadata leave the previous results intact.
+  memcpy(g_ac, pending->values, count * sizeof(Aircraft));
+  g_count = count;
+  g_seenAc = seen;
   g_lastOkMs = millis();
   g_error = false;
-  // A response that parsed but plotted nothing is a filter result, not a
-  // network fault; g_seenAc says whether the feed had traffic to begin with.
-  g_stage = (g_count > 0) ? RADAR_OK
-          : (g_seenAc > 0) ? RADAR_FILTERED_ALL : RADAR_NO_AC;
+  g_stage = count ? RADAR_OK : seen ? RADAR_FILTERED_ALL : RADAR_NO_AC;
   return true;
+}
+
+static bool hasChunkedCoding(const String& header) {
+  const char* token = header.c_str();
+  while (*token) {
+    while (*token == ',' || *token == ' ' || *token == '\t') ++token;
+    const char* end = token;
+    while (*end && *end != ',') ++end;
+    const char* trimmed = end;
+    while (trimmed > token && (trimmed[-1] == ' ' || trimmed[-1] == '\t')) --trimmed;
+    if (trimmed - token == 7) {
+      static const char coding[] = "chunked";
+      unsigned i = 0;
+      while (i < 7 && (token[i] | 0x20) == coding[i]) ++i;
+      if (i == 7) return true;
+    }
+    token = end;
+  }
+  return false;
 }
 
 // ---- one HTTP(S) GET + parse ----------------------------------------------
 static bool fetchUrl(const Settings& s, const String& url) {
+  g_parseError = "";
+  g_lastHttp = 0;
+  g_seenAc = 0;
   bool https = url.startsWith("https://");
 
   std::unique_ptr<NetClient> client;
   if (https) {
-    // The handshake needs one contiguous block, not total free heap: 16 KB is
-    // the same floor the cash.ch fetch uses for this identical handshake shape.
-    // (The old total-heap >= 18000 test passed on fragmented heaps that then
-    // failed the allocation, and failed healthy ones that would have worked.)
+    // Conservative preflight, using the same 16000-byte largest-block floor
+    // as the cash.ch path. Total free heap alone can hide fragmentation.
+    // This is a heuristic, not a measured allocation size or a success guarantee.
     if (platformMaxFreeBlock() < 16000) { g_stage = RADAR_LOW_HEAP; return false; }
     probeTls(s);
     client.reset(platformMakeSecureClient(g_tlsRx, &g_tlsSession));   // no cert validation (public read-only API)
@@ -225,15 +369,11 @@ static bool fetchUrl(const Settings& s, const String& url) {
   }
 
   HTTPClient http;
-  // HTTP/1.0: a 1.0 response cannot be chunked, and parseAdsb reads the raw
-  // stream. Cloudflare (fronting adsb.fi) answers 1.1 requests chunked, and the
-  // chunk-size framing then reaches ArduinoJson, which reads the first hex
-  // length as a bare number and reports a valid document with no "ac" in it —
-  // an empty scope with HTTP 200 and no error anywhere.
-  // adsb.lol is the exception: it refuses 1.0 with "426 Upgrade Required" and
-  // answers 1.1 with a Content-Length body, not chunked, at every range. So
-  // only adsb.lol gets a 1.1 request; adsb.fi and the webhook keep 1.0.
-  http.useHTTP10(url.indexOf(ADSB_LOL_HOST) < 0);
+  // adsb.lol rejects HTTP/1.0 with 426. Use HTTP/1.1 and decode chunked
+  // bodies below: getStream() exposes raw framing on both Arduino cores.
+  http.useHTTP10(false);
+  const char* headers[] = {"Transfer-Encoding"};
+  http.collectHeaders(headers, 1);
   http.setTimeout(s.httpTimeout);
   http.setReuse(false);
   if (!http.begin(*client, url)) { g_stage = RADAR_CONNECT_FAIL; return false; }
@@ -245,13 +385,20 @@ static bool fetchUrl(const Settings& s, const String& url) {
   g_lastHttp = code;
   if (code != HTTP_CODE_OK) {
     http.end();
-    // A negative code is an ESP8266HTTPClient internal error (connection
+    // A negative code is an HTTPClient internal error (connection
     // refused, read timeout, connection lost) rather than a server reply.
     g_stage = (code < 0) ? RADAR_CONNECT_FAIL : RADAR_HTTP_ERROR;
     return false;
   }
 
-  bool ok = parseAdsb(s, http.getStream());
+  RadarInputStream body(http.getStream(), s.httpTimeout);
+  bool ok;
+  if (hasChunkedCoding(http.header("Transfer-Encoding"))) {
+    ChunkDecodingStream decoded(body);
+    ok = parseAdsb(s, decoded);
+  } else {
+    ok = parseAdsb(s, body);
+  }
   http.end();
   return ok;
 }

@@ -14,25 +14,27 @@ uint32_t        radarLastOkMs();         // millis() of last good fetch (0 = nev
 bool            radarError();            // most recent fetch failed
 
 // ---- diagnostics, reported by /api/status ---------------------------------
-// Why a poll produced nothing. An empty scope on its own cannot tell you
-// whether the device asked and was refused, or never asked at all, so the last
-// outcome is recorded here rather than inferred from the screen.
+// Last poll outcome, including failures while older aircraft remain cached.
+// An empty display alone cannot distinguish a skipped request, a network or
+// parser failure, an empty feed, and entries without usable display data.
 enum RadarStage : uint8_t {
   RADAR_IDLE = 0,      // no poll has run yet
   RADAR_NO_HOME,       // lat/lon still 0,0, so there is nothing to centre on
   RADAR_LOW_HEAP,      // skipped: largest free block under the TLS floor
-  RADAR_CONNECT_FAIL,  // http.begin() refused the URL, or the socket never opened
+  RADAR_CONNECT_FAIL,  // begin() failed or GET returned a negative client error
   RADAR_HTTP_ERROR,    // server answered with something other than 200
-  RADAR_PARSE_FAIL,    // 200, but the JSON did not deserialize (truncated stream?)
-  RADAR_NO_AC,         // parsed fine, but the "ac" array was missing or empty
-  RADAR_FILTERED_ALL,  // parsed fine, aircraft present, all dropped by minAltFt
-  RADAR_OK,            // aircraft plotted
+  RADAR_PARSE_FAIL,    // HTTP 200, but JSON framing/parsing/allocation failed
+  RADAR_NO_AC,         // no supported ac/aircraft array, or selected array empty
+  RADAR_FILTERED_ALL,  // entries present, none with usable coordinates/altitude
+  RADAR_OK,            // aircraft retained; range/rim settings govern rendering
 };
 
 RadarStage  radarStage();                // outcome of the most recent poll
 const char* radarStageName();            // that outcome as a short string
-int         radarLastHttp();             // last HTTP status, 0 = never got one
-uint16_t    radarTlsRx();                // negotiated BearSSL rx buffer (0 = not probed)
-uint16_t    radarSeenAc();               // aircraft in the last parsed response
+int         radarLastHttp();             // last GET result: >0 HTTP, <0 client error, 0 none
+uint16_t    radarTlsRx();                // chosen ESP8266 TLS buffer; 0 before probe/on ESP32
+uint16_t    radarSeenAc();               // accepted array count, capped at 65535; reset on fetch
 uint32_t    radarLastTryMs();            // millis() of the last attempt
 const String& radarLastUrl();            // URL of the last attempt (which feed, what range)
+
+const char* radarParseError();           // JSON error, empty when no parse failed

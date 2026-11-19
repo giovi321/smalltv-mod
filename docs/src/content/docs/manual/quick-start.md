@@ -13,7 +13,7 @@ If the device still runs the manufacturer's own software (a weather clock, a pho
 - Your WiFi network name and password. The network must be **2.4 GHz**; the device cannot see 5 GHz networks. Most home routers broadcast both under the same name, which is fine.
 - A phone, tablet, or computer with a browser.
 
-You do not need a computer running anything, a server, an API key, or an internet subscription beyond your normal connection. The one exception is the Claude usage mode, which needs a program on your PC; the ticker and the radar work on their own.
+The ticker and direct radar feeds do not require a program on your PC or your own server. On ESP8266, direct radar HTTPS can fail because of memory or TLS record-size limits; a local receiver or LAN proxy is an alternative (see [Plane radar](/smalltv-mod/features/radar/)). Claude usage mode needs a program on your PC.
 
 ## 1. Plug it in
 

@@ -276,15 +276,15 @@ static void handleStatus() {
   smalltv::writeStatusTickers(out, stocksCount(), statusTicker);
 #endif
 #if WITH_RADAR
-  // An empty scope has several possible causes and the screen shows the same
-  // thing for all of them, so report the last poll's actual outcome.
+  // Report the last poll's outcome even when older aircraft remain cached.
   smalltv::StatusRadar r;
-  r.count = radarCount();          // aircraft currently plotted
+  r.count = radarCount();          // aircraft currently retained, possibly cached
   r.error = radarError();
   r.stage = radarStageName();      // why the last poll produced what it did
-  r.seenAc = radarSeenAc();        // aircraft in the last parsed response
+  r.seenAc = radarSeenAc();        // accepted array count; reset at fetch start
   r.http = radarLastHttp();        // <0 = HTTPClient internal error
-  r.tlsRx = radarTlsRx();          // negotiated BearSSL rx buffer
+  r.tlsRx = radarTlsRx();          // chosen ESP8266 TLS buffer, including fallback
+  r.parseError = radarParseError();
   if (radarLastTryMs()) { r.hasTried = true; r.triedAgo = (millis() - radarLastTryMs()) / 1000; }
   if (radarLastOkMs())  { r.hasOk = true;    r.okAgo    = (millis() - radarLastOkMs()) / 1000; }
   r.url = radarLastUrl().c_str();
