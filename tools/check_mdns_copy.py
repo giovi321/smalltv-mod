@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """CI gate: lib/ESP8266mDNS still matches the ESP8266 core it was copied from.
 
-lib/ESP8266mDNS is a copy of the core's LEAmDNS library with one change (see
-lib/ESP8266mDNS/README-SMALLTV.md). lib/ESP8266mDNS/UPSTREAM.json records the
+lib/ESP8266mDNS is a copy of the core's LEAmDNS library with two changes (see
+lib/ESP8266mDNS/README-SMALLTV.md): they touch two files, listed under
+"patched" in UPSTREAM.json. lib/ESP8266mDNS/UPSTREAM.json records the
 platform pin, the framework package version and the SHA-256 of every upstream
 file as the core ships it. This script fails when:
 

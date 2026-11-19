@@ -16,6 +16,6 @@
     "src/LEAmDNS_Transfer.cpp": "34735d3043fa9d325f7a3cf3802d9b9b1dec6e89302881b9ecd0791acba5d7a7",
     "src/LEAmDNS_lwIPdefs.h": "0bcc92a565669338dddcab9311f24c1674d4ec85d2e4ffe4ce843f8c8776a0d8"
   },
-  "patched": ["src/LEAmDNS_Control.cpp"],
+  "patched": ["src/LEAmDNS.h", "src/LEAmDNS_Control.cpp"],
   "added": ["README-SMALLTV.md", "library.json", "src/LEAmDNS_Stream.h"]
 }
