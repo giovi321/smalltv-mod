@@ -37,7 +37,7 @@ These force spec 2 (firmware 3.4.0+, not editable in SmallTV Studio yet):
 - `time.*` and `device.*` binding sources;
 - the `{H}`, `{MO}`, `{AMPM}`, `{WW}` (ISO 8601 week, 01-53), `{YY}` (two-digit year, 00-99) and `{device.*}` text tokens;
 - per-language text values (`{"en": …, "de": …}`);
-- a `frame` binding on an animation, with or without `group` (firmware after 3.8.0): the
+- a `frame` binding on an animation, with or without `group` (firmware 3.9.0 or later): the
   value picks the frame, or with `group` a group of frames that plays. See
   [Frame by value](https://giovi321.github.io/smalltv-mod/features/themes/#frame-by-value).
   `stheme.py preview` shows the picked frame, and a group playing, like the device.

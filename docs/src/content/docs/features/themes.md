@@ -717,7 +717,7 @@ in effect.
 
 ### Frame by value
 
-Frame by value needs the next firmware release after v3.8.0. An animation layer
+Frame by value needs firmware v3.9.0 or later. An animation layer
 can pick its frame from a value instead of playing in a
 loop. Bind its `frame`. This needs `"spec": 2`; a spec 1 theme is refused with
 `layers[0].bind.frame: needs "spec": 2`, which is also what keeps the theme off
