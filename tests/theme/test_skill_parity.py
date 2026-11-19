@@ -270,6 +270,10 @@ MANIFESTS = {
     # the manifest rules are the same at both specs, so both validators accept it.
     'data path index': manifest(data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'daily.temperature_2m_max.0'}])]),
     'data path index spec1': manifest(spec=1, data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'daily.temperature_2m_max.0'}])]),
+    # The ceiling (23) is a read-time rule, not a manifest rule: a path past it
+    # is accepted by both validators and reads "--" on the device.
+    'data path index 23': manifest(data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'hourly.temperature_2m.23'}])]),
+    'data path index 24': manifest(data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'hourly.temperature_2m.24'}])]),
     'data path empty part': manifest(data=[dict(SOURCE, fields=[{'id': 'x', 'path': 'daily..0'}])]),
     'bounce gap': layer(scroll={'width': 50, 'mode': 'bounce', 'speed': 10, 'gap': 3}),
     'size 97': layer(size=97),
@@ -328,7 +332,7 @@ MANIFESTS = {
 @needs_native
 class ManifestParityTests(unittest.TestCase):
     def test_validators_agree(self):
-        self.assertEqual(len(MANIFESTS), 85)
+        self.assertEqual(len(MANIFESTS), 87)
         with tempfile.TemporaryDirectory() as d:
             path = Path(d)/'theme.json'
             for name, theme in MANIFESTS.items():

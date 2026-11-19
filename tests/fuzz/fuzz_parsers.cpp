@@ -254,7 +254,7 @@ enum Target { PackageTarget, ManifestTarget, MetaTarget, ImportTarget, FontTarge
 void fuzzData(const Bytes& input, uint64_t seed) {
   static const char* const paths[] = {"daily.temperature_2m_max", "daily.temperature_2m_min", "daily.time", "current.temperature_2m",
                                       "a.b", "a.b.c", "a", "0", "a.0", "daily.0", "x..y", "current.weather_code",
-                                      "daily.temperature_2m_max.0", "daily.temperature_2m_min.1", "a.15", "a.16", "a.00", "a.-1", "a.0.1", "a.0.b.1"};
+                                      "daily.temperature_2m_max.0", "daily.temperature_2m_min.1", "a.23", "a.24", "a.00", "a.-1", "a.0.1", "a.0.b.1"};
   ThemeDataSource source;
   source.id = "d";
   source.listIndexes = (seed & 1) != 0;   // half the cases read list indexes (spec 2), half do not (spec 1)

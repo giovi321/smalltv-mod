@@ -776,17 +776,24 @@ static void testListIndexes() {
   }
   assert(readList(named, "list.2") == "9");
   assert(readList(named, "list.2", false) == "--");
-  // Limits: 0 to 15, one or two digits, no leading zero, nothing else.
-  std::string seventeen = "{\"a\":[";
-  for (int i = 0; i < 17; ++i) seventeen += (i ? "," : "") + std::to_string(100 + i);
-  seventeen += "]}";
-  assert(readList(seventeen, "a.0") == "100");
-  assert(readList(seventeen, "a.9") == "109");
-  assert(readList(seventeen, "a.10") == "110");
-  assert(readList(seventeen, "a.15") == "115");
-  for (const char* part : {"16", "99", "00", "01", "09", "016", "001", "-1", "1x", "x", ":", "?", " ", "12345",
+  // Limits: 0 to 23 (a 24-hour hourly list), one or two digits, no leading
+  // zero, nothing else.
+  std::string twentyfive = "{\"a\":[";
+  for (int i = 0; i < 25; ++i) twentyfive += (i ? "," : "") + std::to_string(100 + i);
+  twentyfive += "]}";
+  assert(readList(twentyfive, "a.0") == "100");
+  assert(readList(twentyfive, "a.9") == "109");
+  assert(readList(twentyfive, "a.10") == "110");
+  assert(readList(twentyfive, "a.15") == "115");
+  assert(readList(twentyfive, "a.16") == "116");
+  assert(readList(twentyfive, "a.19") == "119");
+  assert(readList(twentyfive, "a.20") == "120");
+  assert(readList(twentyfive, "a.23") == "123");
+  // 24 is in the list (a 25th element) and still refused: the ceiling, not the list, ends it.
+  assert(readList(twentyfive, "a.24") == "--");
+  for (const char* part : {"25", "99", "00", "01", "09", "016", "001", "-1", "1x", "x", ":", "?", " ", "12345",
                            "18446744073709551616", "18446744073709551617", "4294967296"})
-    assert(readList(seventeen, std::string("a.") + part) == "--");   // (the manifest refuses some of these; read as they are, they find nothing)
+    assert(readList(twentyfive, std::string("a.") + part) == "--");   // (the manifest refuses some of these; read as they are, they find nothing)
   // Nesting: lists in lists, objects in lists, lists in objects in lists.
   assert(readList(R"({"a":[[1,2],[3,4]]})", "a.0.1") == "2");
   assert(readList(R"({"a":[[1,2],[3,4]]})", "a.1.0") == "3");
