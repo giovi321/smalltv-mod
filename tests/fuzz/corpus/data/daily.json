@@ -1,0 +1,1 @@
+{"latitude":0.0,"longitude":0.0,"timezone":"Example/City","daily_units":{"time":"iso8601","temperature_2m_max":"C","temperature_2m_min":"C"},"daily":{"time":["2030-01-01","2030-01-02"],"weather_code":[3,61],"temperature_2m_max":[18.4,17.0],"temperature_2m_min":[9.1,8.2]}}

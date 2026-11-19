@@ -708,7 +708,8 @@ static void testFilter() {
   assert(extractThemeValues(R"({"a":5})",odd,oddValues,0) && oddValues.size()==4);
   assert(oddValues[0].value=="--" && oddValues[1].value=="--" && oddValues[2].value=="--" && oddValues[3].value=="5");
   // A part of a path is always an object's key (digits too); a path does not
-  // go into a list.
+  // go into a list. (That is a spec 1 source: the default. A spec 2 source,
+  // `listIndexes`, takes a number as a list index: testListIndexes below.)
   ThemeDataSource digits;digits.id="g";
   digits.fields.push_back(fieldOf("z","named.0"));
   digits.fields.push_back(fieldOf("o","named.1"));
@@ -717,6 +718,206 @@ static void testFilter() {
   assert(extractThemeValues(R"({"named":{"0":"zero","1":"one"},"list":[7,8,9],"x":[1]})",digits,digitValues,0));
   assert(digitValues[0].value=="zero" && digitValues[1].value=="one" && digitValues[2].value=="--");
   std::cout<<"theme data filter tests passed\n";
+}
+
+// ---- A number in a path picks a list element (spec 2) ----
+// The value one field reads from `body` through a spec 2 source and the
+// filtered parse; "<rejected>" when the reply is refused.
+static std::string readList(const std::string& body, const std::string& path, bool lists = true, size_t budget = 0) {
+  ThemeDataSource source;
+  source.id = "d";
+  source.listIndexes = lists;
+  source.fields.push_back(fieldOf("v", path));
+  std::vector<ThemeValue> values;
+  if (!extractThemeValues(body, source, values, budget)) return "<rejected>";
+  assert(values.size() == 1 && values[0].key == "d.v");
+  return values[0].value;
+}
+static void testListIndexes() {
+  // Shaped like Open-Meteo's daily block, with made-up numbers.
+  const std::string daily = R"({"latitude":0,"daily_units":{"temperature_2m_max":"C"},"daily":{"time":["2030-01-01","2030-01-02"],"weather_code":[3,61],"temperature_2m_max":[18.4,17.5],"temperature_2m_min":[9.1,8.2]}})";
+  assert(readList(daily, "daily.temperature_2m_max.0") == "18.4");
+  assert(readList(daily, "daily.temperature_2m_max.1") == "17.5");
+  assert(readList(daily, "daily.temperature_2m_min.0") == "9.1");
+  assert(readList(daily, "daily.temperature_2m_min.1") == "8.2");
+  assert(readList(daily, "daily.weather_code.1") == "61");
+  assert(readList(daily, "daily.time.0") == "2030-01-01");
+  assert(readList(daily, "daily.temperature_2m_max.2") == "--");   // past the end
+  assert(readList(daily, "daily.temperature_2m_max") == "--");     // a whole list is not a value
+  assert(readList(daily, "latitude.0") == "--");                   // an index on a number
+  assert(readList(daily, "daily.time.0.0") == "--");               // an index into a string: no characters
+  assert(readList(R"({"a":[null,true]})", "a.0") == "--");
+  assert(readList(R"({"a":[null,true]})", "a.1") == "true");
+  assert(readList(R"({"a":null})", "a.0") == "--");
+  // The same reply through a spec 1 source: a path does not go into a list.
+  assert(readList(daily, "daily.temperature_2m_max.0", false) == "--");
+  assert(readList(daily, "daily.weather_code.1", false) == "--");
+  // A second field that names the whole list keeps it in the filter, so the
+  // list IS in the parsed reply; a spec 1 read of an index must still find nothing.
+  {
+    ThemeDataSource keep;
+    keep.id = "k";
+    keep.listIndexes = false;
+    keep.fields.push_back(fieldOf("all", "a"));
+    keep.fields.push_back(fieldOf("one", "a.0"));
+    std::vector<ThemeValue> keepValues;
+    assert(extractThemeValues(R"({"a":[7,8]})", keep, keepValues, 0) && keepValues.size() == 2);
+    assert(keepValues[0].value == "--" && keepValues[1].value == "--");
+    keep.listIndexes = true;
+    keepValues.clear();
+    assert(extractThemeValues(R"({"a":[7,8]})", keep, keepValues, 0) && keepValues.size() == 2);
+    assert(keepValues[0].value == "--" && keepValues[1].value == "7");
+  }
+  // An object keeps its digit keys, at either spec; only a list takes an index.
+  const std::string named = R"({"named":{"0":"zero","7":"seven"},"list":[7,8,9]})";
+  for (bool lists : {false, true}) {
+    assert(readList(named, "named.0", lists) == "zero");
+    assert(readList(named, "named.7", lists) == "seven");
+  }
+  assert(readList(named, "list.2") == "9");
+  assert(readList(named, "list.2", false) == "--");
+  // Limits: 0 to 23 (a 24-hour hourly list), one or two digits, no leading
+  // zero, nothing else.
+  std::string twentyfive = "{\"a\":[";
+  for (int i = 0; i < 25; ++i) twentyfive += (i ? "," : "") + std::to_string(100 + i);
+  twentyfive += "]}";
+  assert(readList(twentyfive, "a.0") == "100");
+  assert(readList(twentyfive, "a.9") == "109");
+  assert(readList(twentyfive, "a.10") == "110");
+  assert(readList(twentyfive, "a.15") == "115");
+  assert(readList(twentyfive, "a.16") == "116");
+  assert(readList(twentyfive, "a.19") == "119");
+  assert(readList(twentyfive, "a.20") == "120");
+  assert(readList(twentyfive, "a.23") == "123");
+  // 24 is in the list (a 25th element) and still refused: the ceiling, not the list, ends it.
+  assert(readList(twentyfive, "a.24") == "--");
+  for (const char* part : {"25", "99", "00", "01", "09", "016", "001", "-1", "1x", "x", ":", "?", " ", "12345",
+                           "18446744073709551616", "18446744073709551617", "4294967296"})
+    assert(readList(twentyfive, std::string("a.") + part) == "--");   // (the manifest refuses some of these; read as they are, they find nothing)
+  // Nesting: lists in lists, objects in lists, lists in objects in lists.
+  assert(readList(R"({"a":[[1,2],[3,4]]})", "a.0.1") == "2");
+  assert(readList(R"({"a":[[1,2],[3,4]]})", "a.1.0") == "3");
+  assert(readList(R"({"a":[{"b":"x"},{"b":"y"}]})", "a.1.b") == "y");
+  assert(readList(R"({"a":[{"b":[5,6]}]})", "a.0.b.1") == "6");
+  // The root may be a list: the path starts with the index.
+  assert(readList(R"([4,5,6])", "1") == "5");
+  assert(readList(R"([{"x":7}])", "0.x") == "7");
+  // The existing rules hold with lists on.
+  assert(readList(R"({"s":"0123456789012345678901234567890123456789"})", "s") == "0123456789012345678901234567890");
+  assert(readList(R"({"on":true})", "on") == "true");
+  assert(readList(R"({"a":{"b":1}})", "a.c") == "--");
+  assert(readList(R"({"a":{"b":1}})", "a.b.c") == "--");
+  // A reply that is not JSON, or nests deeper than 8, is refused and adds nothing.
+  assert(readList("{\"a\":[1,", "a.0") == "<rejected>");
+  assert(readList("", "a.0") == "<rejected>");
+  assert(readList(R"({"a":[[[[[[[1]]]]]]]})", "a.0.0.0.0.0.0.0") == "1");            // the object and 7 lists: 8 levels
+  assert(readList(R"({"a":[[[[[[[[1]]]]]]]]})", "a.0.0.0.0.0.0.0.0") == "<rejected>");  // 9 levels
+  // The filter lets a list through when a path goes into it, and nothing more
+  // than the branch the paths name: the rest of the reply is dropped, as before.
+  ThemeDataSource source;
+  source.id = "d";
+  source.listIndexes = true;
+  source.fields.push_back(fieldOf("hi", "daily.temperature_2m_max.0"));
+  source.fields.push_back(fieldOf("lo", "daily.temperature_2m_min.1"));
+  source.fields.push_back(fieldOf("now", "current.temperature_2m"));
+  std::vector<ThemeValue> values{{"keep", "1"}};
+  const std::string both = R"({"junk":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],)"
+                           R"("current":{"temperature_2m":12.3,"other":"text"},)"
+                           R"("daily":{"time":["2030-01-01","2030-01-02"],"temperature_2m_max":[18.4,17.0],"temperature_2m_min":[9.1,8.2]}})";
+  assert(extractThemeValues(both, source, values, 0) && values.size() == 4);
+  assert(values[1] == (ThemeValue{"d.hi", "18.4"}) && values[2] == (ThemeValue{"d.lo", "8.2"}) && values[3] == (ThemeValue{"d.now", "12.3"}));
+  // The junk list is dropped: with a budget that holds the two small lists but
+  // not the junk list as well, the reply still parses. (The least budget is
+  // measured, because ArduinoJson's pool size depends on the build.)
+  size_t least = 0;
+  std::vector<ThemeValue> probe;
+  for (size_t budget = 16; budget <= 65536 && !least; budget += 16)
+    if (extractThemeValues(both, source, probe, budget)) least = budget;
+  assert(least >= 1024 && least <= 8192);
+  std::vector<ThemeValue> noJunk;
+  assert(extractThemeValues(R"({"current":{"temperature_2m":12.3},"daily":{"temperature_2m_max":[18.4,17.0],"temperature_2m_min":[9.1,8.2]}})", source, noJunk, 0));
+  size_t leastNoJunk = 0;
+  std::vector<ThemeValue> probe2;
+  for (size_t budget = 16; budget <= 65536 && !leastNoJunk; budget += 16)
+    if (extractThemeValues(R"({"current":{"temperature_2m":12.3},"daily":{"temperature_2m_max":[18.4,17.0],"temperature_2m_min":[9.1,8.2]}})", source, probe2, budget)) leastNoJunk = budget;
+  assert(least <= leastNoJunk + 32);
+  // A list a path goes into is kept whole (the filter cannot pick one element),
+  // so a list too long for the budget refuses the fetch and keeps the values.
+  ThemeDataSource longList;
+  longList.id = "l";
+  longList.listIndexes = true;
+  longList.fields.push_back(fieldOf("first", "a.0"));
+  const std::string big = R"({"a":)" + manyOnes(400) + "}";
+  std::vector<ThemeValue> kept{{"keep", "1"}};
+  assert(!extractThemeValues(big, longList, kept, least + 64) && kept.size() == 1 && kept[0].key == "keep");
+  assert(extractThemeValues(big, longList, kept, 0) && kept.size() == 2 && kept[1] == (ThemeValue{"l.first", "1"}));
+  // A spec 1 source keeps no list for the same path (it cannot read one), so
+  // the same reply fits the same budget there, and its field reads "--".
+  const size_t room = least + 64;   // a small reply and a little more, far less than a second pool
+  assert(readList(big, "a.0", true, room) == "<rejected>");
+  assert(readList(big, "a.0", false, room) == "--");
+  // Two fields on one branch, in either order, the index one and a plain one:
+  // the longer path does not undo the shorter one, nor the other way round.
+  ThemeDataSource shared;
+  shared.id = "s";
+  shared.listIndexes = true;
+  shared.fields.push_back(fieldOf("x", "o.x"));
+  shared.fields.push_back(fieldOf("first", "o.l.0"));
+  shared.fields.push_back(fieldOf("n", "o.n"));
+  std::vector<ThemeValue> sharedValues;
+  assert(extractThemeValues(R"({"o":{"x":"v","l":[5,6],"n":2},"z":1})", shared, sharedValues, 0));
+  assert(sharedValues[0].value == "v" && sharedValues[1].value == "5" && sharedValues[2].value == "2");
+  ThemeDataSource reversed;
+  reversed.id = "s";
+  reversed.listIndexes = true;
+  reversed.fields.push_back(fieldOf("first", "o.l.0"));
+  reversed.fields.push_back(fieldOf("x", "o.x"));
+  reversed.fields.push_back(fieldOf("n", "o.n"));
+  sharedValues.clear();
+  assert(extractThemeValues(R"({"o":{"x":"v","l":[5,6],"n":2},"z":1})", reversed, sharedValues, 0));
+  assert(sharedValues[0].value == "5" && sharedValues[1].value == "v" && sharedValues[2].value == "2");
+  // An index path next to a path that names the whole list: the whole list
+  // reads "--" (a list is not a value), the element reads its value.
+  ThemeDataSource wholeAndPart;
+  wholeAndPart.id = "w";
+  wholeAndPart.listIndexes = true;
+  wholeAndPart.fields.push_back(fieldOf("all", "a"));
+  wholeAndPart.fields.push_back(fieldOf("one", "a.1"));
+  std::vector<ThemeValue> wp;
+  assert(extractThemeValues(R"({"a":[5,6]})", wholeAndPart, wp, 0) && wp[0].value == "--" && wp[1].value == "6");
+  // A digit key on an object under a list-reading source is still a key, and
+  // an index under it still works (both in one reply, one path each).
+  ThemeDataSource mixed;
+  mixed.id = "m";
+  mixed.listIndexes = true;
+  mixed.fields.push_back(fieldOf("k", "named.0"));
+  mixed.fields.push_back(fieldOf("i", "list.0"));
+  std::vector<ThemeValue> mv;
+  assert(extractThemeValues(R"({"named":{"0":"zero"},"list":["first"]})", mixed, mv, 0) && mv[0].value == "zero" && mv[1].value == "first");
+  // A list index at the root of the filter: the reply is a list.
+  ThemeDataSource rootList;
+  rootList.id = "r";
+  rootList.listIndexes = true;
+  rootList.fields.push_back(fieldOf("b", "1"));
+  std::vector<ThemeValue> rv;
+  assert(extractThemeValues("[4,5,6]", rootList, rv, 0) && rv[0].value == "5");
+  // The reply through the reader the device uses, in one piece and dripped.
+  ThemeDataSource viaReader;
+  viaReader.id = "d";
+  viaReader.listIndexes = true;
+  viaReader.fields.push_back(fieldOf("hi", "daily.temperature_2m_max.0"));
+  viaReader.fields.push_back(fieldOf("lo", "daily.temperature_2m_min.1"));
+  const std::string small = R"({"daily":{"temperature_2m_max":[18.4,17.0],"temperature_2m_min":[9.1,8.2]}})";
+  for (uint32_t spacing : {0u, 2u}) {
+    Response r;
+    r.bytes = small;
+    r.spacing = spacing;
+    r.closeAtEnd = true;
+    std::vector<ThemeValue> got{{"keep", "1"}};
+    assert(readDataValues(r, int(small.size()), viaReader, got, Roomy) && got.size() == 3);
+    assert(got[1] == (ThemeValue{"d.hi", "18.4"}) && got[2] == (ThemeValue{"d.lo", "8.2"}));
+  }
+  std::cout << "theme data list index tests passed\n";
 }
 
 // ---- The fetch gate and the fetch status ----
@@ -788,6 +989,7 @@ int main(int argc, char** argv) {
   testDataAges(argc > 1 ? argv[1] : "src/features/theme/ThemeMode.cpp");
   testFetchRetry(argc > 1 ? argv[1] : "src/features/theme/ThemeMode.cpp");
   testFilter();
+  testListIndexes();
   testReplyStream();
 
   // On the ESP8266, available() lets the network stack run when it finds

@@ -200,6 +200,8 @@ struct ThemeDataSource {
   std::string id, url;
   uint32_t interval = 300;
   bool insecureTls = false;
+  // Spec 2 only: a number in a field path picks a list element.
+  bool listIndexes = false;
   std::vector<ThemeDataField> fields;
 };
 // One `<source>.<field>` value as fetched, always a string; the engine parses

@@ -1178,6 +1178,7 @@ __attribute__((noinline)) static bool parseHeader(JsonObjectConst root, const Ma
       size_t hostEnd = data.url.find('/', hostStart);
       if (hostStart == data.url.size() || (hostEnd == hostStart) || (data.url[hostStart] == '?' || data.url[hostStart] == '#')) return sf.fail("url", "URL must include a host");
       data.interval = static_cast<uint32_t>(interval);
+      data.listIndexes = t.spec >= 2;
       auto fields = source["fields"].as<JsonArrayConst>();
       if (fields.isNull() || fields.size() == 0 || fields.size() > MaxDataFields) return sf.fail("fields", "expected 1 to 8 fields");
       data.fields.reserve(fields.size());
@@ -1479,15 +1480,29 @@ static std::string dataValue(JsonVariantConst value) {
   if (n >= sizeof(encoded) - 1) return "--";
   return std::string(encoded);
 }
-// Follows a dotted path through objects; null when a part is missing or the
-// value at that step is not an object.
-static JsonVariantConst dataPath(JsonVariantConst root, const std::string& path) {
+// A path part that picks a list element: one or two digits, no leading zero,
+// 0 to 23 (a 24-hour hourly list). (A digit key on an object stays a key; see dataPath.)
+static bool listIndex(const std::string& part, size_t& index) {
+  if (part.empty() || part.size() > 2 || (part.size() > 1 && part[0] == '0')) return false;
+  index = 0;
+  for (char c : part) {
+    if (c < '0' || c > '9') return false;
+    index = index * 10 + (c - '0');
+  }
+  return index <= 23;
+}
+// Follows a dotted path through objects, and through lists when `lists` is set
+// (spec 2); null when a part is missing or the value at that step is neither.
+static JsonVariantConst dataPath(JsonVariantConst root, const std::string& path, bool lists) {
   size_t start = 0;
   while (start < path.size()) {
     size_t dot = path.find('.', start);
     std::string part = path.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
-    if (part.empty() || !root.is<JsonObjectConst>()) return JsonVariantConst();
-    root = root[part.c_str()];
+    size_t index = 0;
+    if (part.empty()) return JsonVariantConst();
+    if (root.is<JsonObjectConst>()) root = root[part.c_str()];
+    else if (lists && root.is<JsonArrayConst>() && listIndex(part, index)) root = root[index];
+    else return JsonVariantConst();
     if (dot == std::string::npos) break;
     start = dot + 1;
   }
@@ -1497,12 +1512,19 @@ namespace {
 // Builds the filter for a source: a tree with `true` where a field's path ends.
 // (A path with an empty part finds nothing in dataPath; here it only adds a key
 // that nothing has.)
-static void addFieldFilter(JsonVariant node, const std::string& path) {
+static void addFieldFilter(JsonVariant node, const std::string& path, bool lists) {
   size_t start = 0;
   for (;;) {
     if (node.is<bool>() && node.as<bool>()) return;   // everything under here is kept already
     const size_t dot = path.find('.', start);
     const std::string part = path.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
+    size_t index = 0;
+    // A filter cannot pick one list element, and a digit may be an object key:
+    // keep all of what is here and let dataPath choose.
+    if (lists && listIndex(part, index)) {
+      node.set(true);
+      return;
+    }
     JsonObject object = node.is<JsonObject>() ? node.as<JsonObject>() : node.to<JsonObject>();
     // Bound to the member itself (a JsonVariant assigned from another would
     // copy its value instead).
@@ -1561,13 +1583,13 @@ class RootWatch {
 // stack (4 KB on the ESP8266; a called function's frame stacks on top of its
 // caller's whole frame, so work split into siblings costs less than nested).
 __attribute__((noinline)) bool buildFilter(JsonDocument& filter, const ThemeDataSource& source) {
-  for (const auto& field : source.fields) addFieldFilter(filter.as<JsonVariant>(), field.path);
+  for (const auto& field : source.fields) addFieldFilter(filter.as<JsonVariant>(), field.path, source.listIndexes);
   return !filter.overflowed();
 }
 __attribute__((noinline)) void appendValues(const JsonDocument& doc, const ThemeDataSource& source, std::vector<ThemeValue>& values) {
   values.reserve(values.size() + source.fields.size());
   for (const auto& field : source.fields)
-    values.push_back({source.id + "." + field.id, dataValue(dataPath(doc.as<JsonVariantConst>(), field.path))});
+    values.push_back({source.id + "." + field.id, dataValue(dataPath(doc.as<JsonVariantConst>(), field.path, source.listIndexes))});
 }
 // The filter, the parse and the values, for any reply that ArduinoJson can read.
 bool extractFiltered(DataReply& reply, const ThemeDataSource& source, std::vector<ThemeValue>& values, size_t budget) {

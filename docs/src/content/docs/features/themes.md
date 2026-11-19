@@ -281,8 +281,26 @@ JSON string that holds a number (`"12.5"`) is rounded too, since the text is
 what counts.
 `decimals` needs firmware v3.8.0 or later and a
 `"spec": 2` theme; a `"spec": 1` theme that uses it is refused with
-`data[n].fields[m].decimals: needs "spec": 2`. URLs must use `http://` or
-`https://`. Because
+`data[n].fields[m].decimals: needs "spec": 2`.
+
+In a `"spec": 2` theme a path part that is only digits also picks an element
+when the value at that step is a list: `daily.temperature_2m_max.0` is the first
+entry of that list (today's highest temperature in an Open-Meteo reply), `.1`
+the second. The index goes from 0 to 23 (enough for a 24-hour hourly list) and
+has no leading zero. On an object the same digits stay an ordinary key, so
+`named.0` keeps its meaning. Everything else reads `--`: an index past the end,
+an index on a number, a string or `null`, a part such as `01`, `24` or `-1`, and
+a path that ends on a whole list or object. A spec 1 theme still reads object
+keys only. A list that a path goes into is parsed whole, so it has to fit the
+parse limit (2 KiB on the ESP8266, 8 KiB on the ESP32; this is not the limit on
+the size of the reply); ask the service for few entries (Open-Meteo:
+`forecast_days=2` or `forecast_hours=24`). The filter cannot tell a list from an
+object, so a digit part in a spec 2 theme keeps the whole parent in the parse,
+and a path such as `stats.3` into a large object keyed `"0"` to `"40"` can pass
+the parse limit and refuse the fetch. Firmware up to v3.9.0
+shows `--` for such a field.
+
+URLs must use `http://` or `https://`. Because
 this path cannot validate server certificates, an HTTPS source must explicitly
 set `"insecureTls": true`; omitting it rejects the package instead of silently
 accepting unauthenticated TLS. Data fetching is owned by theme mode and does not
@@ -1030,6 +1048,7 @@ preview it with the `--data` workflow documented above.
 | Theme name / author / version | 96 / 96 / 32 bytes |
 | Text template | 1–128 printable ASCII bytes |
 | Localized text | Up to 6 languages, 1–128 printable ASCII bytes each, `en` required; 1,024 bytes of non-English text per theme; spec 2 only |
+| Data path list index | Spec 2 only; 0 to 23, no leading zero |
 | Coordinates | −240 through 479, clipped to the canvas |
 | Rectangle/image/frame dimensions | 1–240 pixels |
 | Circle radius | 1–240 pixels |
