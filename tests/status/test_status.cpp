@@ -425,7 +425,7 @@ int main() {
     std::stringstream file;
     file << in.rdbuf();
     const std::string code = file.str();
-    const size_t crash = code.find("smalltv::writeStatusCrash(out, k);");
+    const size_t crash = code.find("smalltv::writeStatusCrash(out, cr);");
     const size_t fetch = code.find("statusFetch(out);");
     const size_t tickers = code.find("smalltv::writeStatusTickers(");
     assert(crash != std::string::npos && fetch != std::string::npos && tickers != std::string::npos && crash < fetch && fetch < tickers);
