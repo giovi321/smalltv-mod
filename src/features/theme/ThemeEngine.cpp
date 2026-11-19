@@ -1481,7 +1481,7 @@ static std::string dataValue(JsonVariantConst value) {
   return std::string(encoded);
 }
 // A path part that picks a list element: one or two digits, no leading zero,
-// 0 to 15. (A digit key on an object stays a key; see dataPath.)
+// 0 to 23 (a 24-hour hourly list). (A digit key on an object stays a key; see dataPath.)
 static bool listIndex(const std::string& part, size_t& index) {
   if (part.empty() || part.size() > 2 || (part.size() > 1 && part[0] == '0')) return false;
   index = 0;
@@ -1489,7 +1489,7 @@ static bool listIndex(const std::string& part, size_t& index) {
     if (c < '0' || c > '9') return false;
     index = index * 10 + (c - '0');
   }
-  return index <= 15;
+  return index <= 23;
 }
 // Follows a dotted path through objects, and through lists when `lists` is set
 // (spec 2); null when a part is missing or the value at that step is neither.
