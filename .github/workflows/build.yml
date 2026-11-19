@@ -186,7 +186,10 @@ jobs:
       # The /api/status reply: same bytes as before, written in pieces.
       # 32-bit memory test, so it needs g++-multilib (installed above).
       - name: Test status reply
-        run: sh tests/status/run.sh
+        run: |
+          sh tests/status/run.sh
+          # A check on WebPortal.cpp: the reply is framed by the request's HTTP version.
+          node tests/status/test_wiring.js
 
       # Home Assistant takes its memory (screen store, MQTT client) once at
       # boot, only when a broker host is set, and stays off with a reason when

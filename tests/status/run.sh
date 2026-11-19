@@ -12,9 +12,8 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -DFW_NO_GITHUB_UPDATE -Isrc -I"$JSON_INC
 /tmp/smalltv-status-tests-noupdate
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc -I"$JSON_INCLUDE" tests/status/test_status_stall.cpp -o /tmp/smalltv-status-stall-tests
 /tmp/smalltv-status-stall-tests
-# The handler's wiring (WebPortal.cpp), which only the device runs: the chunk
-# framing follows the request's HTTP version. A check on the sources; needs node.
-node tests/status/test_wiring.js
+# The handler's wiring (WebPortal.cpp) is a node script, run beside this one in
+# CI (build.yml): node tests/status/test_wiring.js
 # 32-bit, so allocation sizes match the ESP8266; the wraps let the test count
 # ArduinoJson's malloc calls as well as operator new.
 c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -Isrc -I"$JSON_INCLUDE" -Wl,--wrap=malloc,--wrap=free,--wrap=realloc tests/status/test_status_memory.cpp -o /tmp/smalltv-status-memory-tests
