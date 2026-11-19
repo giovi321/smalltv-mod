@@ -20,9 +20,11 @@ UPSTREAM = {
     "src/a.cpp": b"// upstream a\r\nint a;\n",
     "src/b.h": b"// upstream b\n",
     "src/patched.cpp": b"// upstream patched\n",
+    "src/patched2.h": b"// upstream header\n",
     "library.properties": b"name=X\n",
 }
 PATCHED_NOW = b"// upstream patched\n// our fix\n"
+PATCHED2_NOW = b"// upstream header\n// our declarations\n"
 OURS = {"README-SMALLTV.md": b"readme\n", "src/Stream.h": b"// ours\n"}
 
 
@@ -53,6 +55,7 @@ class Tree:
             write(os.path.join(self.lib, rel), data)
             write(os.path.join(self.pkg, "libraries", "ESP8266mDNS", rel), data)
         write(os.path.join(self.lib, "src/patched.cpp"), PATCHED_NOW)
+        write(os.path.join(self.lib, "src/patched2.h"), PATCHED2_NOW)
         for rel, data in OURS.items():
             write(os.path.join(self.lib, rel), data)
         write(os.path.join(self.pkg, "package.json"),
@@ -63,7 +66,7 @@ class Tree:
             "platform": PLATFORM,
             "framework_version": FRAMEWORK,
             "files": {k: sha(v) for k, v in UPSTREAM.items()},
-            "patched": ["src/patched.cpp"],
+            "patched": ["src/patched.cpp", "src/patched2.h"],
             "added": sorted(OURS),
         }
         write(os.path.join(self.lib, "UPSTREAM.json"),
@@ -227,6 +230,36 @@ class CheckTest(unittest.TestCase):
         os.remove(os.path.join(self.t.lib, "src/patched.cpp"))
         self.assertTrue(self.t.run())
 
+    # Two files are patched (the .cpp and its header): each may differ in the
+    # copy, each must be there, and the installed core's version of each must
+    # still be the recorded original.
+    def test_second_patched_file_may_differ_in_copy(self):
+        write(os.path.join(self.t.lib, "src/patched2.h"), b"// another header fix\n")
+        self.assertEqual(self.t.run(), [])
+
+    def test_second_patched_file_in_copy_missing_fails(self):
+        os.remove(os.path.join(self.t.lib, "src/patched2.h"))
+        probs = self.t.run()
+        self.assertTrue(any("patched2.h" in p for p in probs), probs)
+
+    def test_installed_second_patched_file_changed_fails(self):
+        write(os.path.join(self.t.pkg, "libraries/ESP8266mDNS/src/patched2.h"), b"new\n")
+        probs = self.t.run()
+        self.assertTrue(any("patched2.h" in p for p in probs), probs)
+
+    def test_unlisted_patch_in_a_third_file_fails(self):
+        # Only the listed files may differ; the message names both.
+        write(os.path.join(self.t.lib, "src/b.h"), b"// edited\n")
+        probs = self.t.run()
+        self.assertTrue(any("src/b.h" in p and "patched.cpp" in p
+                            and "patched2.h" in p for p in probs), probs)
+
+    def test_header_patch_not_listed_fails(self):
+        # The header differs but the manifest lists only the .cpp as patched.
+        self.t.edit_manifest(lambda m: m.update(patched=["src/patched.cpp"]))
+        probs = self.t.run()
+        self.assertTrue(any("patched2.h" in p for p in probs), probs)
+
     def test_added_file_missing_fails(self):
         os.remove(os.path.join(self.t.lib, "src/Stream.h"))
         probs = self.t.run()
@@ -250,6 +283,33 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(chk.main(argv), 0)
         write(os.path.join(self.t.lib, "src/b.h"), b"edited\n")
         self.assertEqual(chk.main(argv), 1)
+
+
+class RealTreeTest(unittest.TestCase):
+    """The repository's own copy and manifest (no package needed)."""
+
+    ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
+
+    def manifest(self):
+        with open(os.path.join(self.ROOT, "lib", "ESP8266mDNS",
+                               "UPSTREAM.json")) as f:
+            return json.load(f)
+
+    def test_manifest_lists_both_patched_files(self):
+        # _parseResponse (#101) and _parseQuery live in the .cpp; the known
+        # answer gate declares its helpers in the header.
+        self.assertEqual(sorted(self.manifest()["patched"]),
+                         ["src/LEAmDNS.h", "src/LEAmDNS_Control.cpp"])
+
+    def test_patched_files_really_differ_from_upstream(self):
+        m = self.manifest()
+        for rel in m["patched"]:
+            path = os.path.join(self.ROOT, "lib", "ESP8266mDNS", rel)
+            self.assertNotEqual(sha(open(path, "rb").read()), m["files"][rel],
+                                "%s is listed as patched but equals upstream" % rel)
+
+    def test_real_copy_matches_its_manifest(self):
+        self.assertEqual(chk.check(self.ROOT, None, False), [])
 
 
 if __name__ == "__main__":
