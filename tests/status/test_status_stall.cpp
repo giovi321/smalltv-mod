@@ -8,6 +8,7 @@
 #include "StatusJson.h"
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 using namespace smalltv;
@@ -140,8 +141,57 @@ static void checkEmptyWrite() {
   assert(client.received == "2\r\nab\r\n");
 }
 
+// An HTTP/1.0 client. For a reply of unknown length the web server sends no
+// Transfer-Encoding to such a client (both cores chunk only for HTTP/1.1 and
+// above) and the body simply ends when the connection closes. So the sink
+// then writes the plain bytes, with no chunk framing: `curl --http1.0` must
+// get JSON that parses, not "80\r\n{...".
+template <size_t Piece> static void checkUnframed() {
+  StringSink plain;
+  assert(reply<Piece>(plain));
+  const std::string body = plain.text;
+
+  FakeClient good(1000000);
+  ChunkedSink<FakeClient> sink(good, false);
+  assert(reply<Piece>(sink));
+  if (good.received != body) {
+    std::fprintf(stderr, "piece %zu unframed: bytes differ\n want %s\n got  %s\n", Piece, body.c_str(),
+                 good.received.c_str());
+    std::exit(1);
+  }
+  assert(good.received.find("\r\n") == std::string::npos);   // no chunk framing at all
+  JsonDocument doc;
+  if (deserializeJson(doc, good.received)) {
+    std::fprintf(stderr, "piece %zu unframed: the body does not parse as JSON\n", Piece);
+    std::exit(1);
+  }
+  assert(doc["fw"] == "smalltv-mod");
+  assert(good.abandoned == 0 && !good.wasShort);
+
+  // The stall rule is the same: a short write ends all writing, one abandon.
+  for (size_t room = 0; room < body.size(); room++) {
+    FakeClient stalled(room);
+    ChunkedSink<FakeClient> to(stalled, false);
+    if (reply<Piece>(to)) {
+      std::fprintf(stderr, "piece %zu unframed room %zu: a refused reply counted as sent\n", Piece, room);
+      std::exit(1);
+    }
+    if (stalled.callsAfterShort != 0 || stalled.abandoned != 1 || stalled.received != body.substr(0, room)) {
+      std::fprintf(stderr, "piece %zu unframed room %zu: %zu writes after the short one, abandoned %zu\n", Piece,
+                   room, stalled.callsAfterShort, stalled.abandoned);
+      std::exit(1);
+    }
+  }
+  FakeClient exact(body.size());
+  ChunkedSink<FakeClient> to(exact, false);
+  assert(reply<Piece>(to));
+  assert(exact.abandoned == 0 && !exact.wasShort);
+}
+
 int main() {
   checkEmptyWrite();
+  checkUnframed<128>();
+  checkUnframed<17>();
   checkPiece<10>();    // size line "a": the digit ten
   checkPiece<160>();   // size line "a0": the digit ten behind another
   checkPiece<128>();
