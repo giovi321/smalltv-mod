@@ -286,14 +286,19 @@ what counts.
 In a `"spec": 2` theme a path part that is only digits also picks an element
 when the value at that step is a list: `daily.temperature_2m_max.0` is the first
 entry of that list (today's highest temperature in an Open-Meteo reply), `.1`
-the second. The index goes from 0 to 15 and has no leading zero. On an object
-the same digits stay an ordinary key, so `named.0` keeps its meaning. Everything
-else reads `--`: an index past the end, an index on a number, a string or
-`null`, a part such as `01`, `16` or `-1`, and a path that ends on a whole list
-or object. A spec 1 theme still reads object keys only. A list that a path goes
-into is parsed whole, so it has to fit the 2 KiB parse limit of a data reply;
-ask the service for few entries (Open-Meteo: `forecast_days=2`). Firmware older
-than the next release shows `--` for such a field.
+the second. The index goes from 0 to 23 (enough for a 24-hour hourly list) and
+has no leading zero. On an object the same digits stay an ordinary key, so
+`named.0` keeps its meaning. Everything else reads `--`: an index past the end,
+an index on a number, a string or `null`, a part such as `01`, `24` or `-1`, and
+a path that ends on a whole list or object. A spec 1 theme still reads object
+keys only. A list that a path goes into is parsed whole, so it has to fit the
+parse limit (2 KiB on the ESP8266, 8 KiB on the ESP32; this is not the limit on
+the size of the reply); ask the service for few entries (Open-Meteo:
+`forecast_days=2` or `forecast_hours=24`). The filter cannot tell a list from an
+object, so a digit part in a spec 2 theme keeps the whole parent in the parse,
+and a path such as `stats.3` into a large object keyed `"0"` to `"40"` can pass
+the parse limit and refuse the fetch. Firmware older than the next release
+shows `--` for such a field.
 
 URLs must use `http://` or `https://`. Because
 this path cannot validate server certificates, an HTTPS source must explicitly
@@ -1043,7 +1048,7 @@ preview it with the `--data` workflow documented above.
 | Theme name / author / version | 96 / 96 / 32 bytes |
 | Text template | 1–128 printable ASCII bytes |
 | Localized text | Up to 6 languages, 1–128 printable ASCII bytes each, `en` required; 1,024 bytes of non-English text per theme; spec 2 only |
-| Data path list index | Spec 2 only; 0 to 15, no leading zero |
+| Data path list index | Spec 2 only; 0 to 23, no leading zero |
 | Coordinates | −240 through 479, clipped to the canvas |
 | Rectangle/image/frame dimensions | 1–240 pixels |
 | Circle radius | 1–240 pixels |

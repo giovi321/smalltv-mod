@@ -19,10 +19,11 @@ Use only when the clock shows live values. The TV polls each URL itself.
 - Plain GET only: no headers, no auth tokens, no POST. Response ≤ 2 KiB. One request at a
   time, 3 s deadline. `interval` 10–86400 s.
 - `path` is a dotted path through objects (`main.temp`, `current.weather_code`). In a spec 2
-  theme a number picks a list element (`daily.temperature_2m_max.0`; 0 to 15, no leading
+  theme a number picks a list element (`daily.temperature_2m_max.0`; 0 to 23, no leading
   zero; needs firmware after 3.8.0). A spec 1 theme cannot index lists. A list a path goes
-  into is parsed whole and must fit the 2 KiB reply limit: ask for few entries
-  (`forecast_days=2`).
+  into is parsed whole and must fit the parse limit (2 KiB on the ESP8266): ask for few
+  entries (`forecast_days=2`, `forecast_hours=24`). A digit part also keeps the whole parent
+  of an object, so `stats.3` into a large object can pass the limit and refuse the fetch.
 - Values become strings: strings as-is but cut to 31 characters; numbers and booleans as
   their JSON text (`18`, `7.9`, `true`); missing/null/objects → `--`. Only printable ASCII
   renders properly (no `°`).
