@@ -37,7 +37,7 @@ The ESP8266 shares one 80 KB DRAM arena between static allocations and the heap,
 
 Lean compiles out Home Assistant, the usage meter and theme clocks. Since 3.5.0 the Home Assistant screen store (5,792 bytes) and the MQTT client with its 768-byte receive buffer are no longer static in either image: `haBoot()` (`src/features/ha/HaBoot.cpp`) takes them from the heap at boot, and only when a broker host is set. A standard device with the host blank therefore keeps that memory too, without the lean image.
 
-That headroom decides whether two fetch paths run at all. `features/radar/RadarClient.cpp` and `features/ticker/StockClient.cpp` both skip their fetch unless a 16,000-byte contiguous block is available, which is what the BearSSL handshake actually allocates. Both refuse quietly rather than crash, so a device below the threshold shows an empty scope or a blank ticker with no error. On a busy LAN, or over a weak link where retransmissions keep the WiFi queues full, the standard build can sit under both.
+That headroom affects whether HTTPS fetches start. The radar and the cash.ch ticker path require a largest free block of at least 16,000 bytes as a conservative preflight; other HTTPS ticker sources use a different total-free-heap check. These thresholds are not measured allocation sizes or guarantees against every reset. The radar reports `skipped, low heap` in Status and can keep older aircraft visible. Plain HTTP radar requests bypass the TLS preflight but still need packet and parser memory. Network traffic and retained packet buffers can reduce available heap.
 
 Read the current figures from `/api/status`: `heap` is free bytes and `maxblk` is the largest contiguous block.
 

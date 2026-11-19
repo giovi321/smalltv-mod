@@ -225,7 +225,7 @@ static std::vector<Case> cases() {
   full.radar.url = "https://api.adsb.lol/v2/point/48.1/11.5/25?x=\"1\"";
   all.push_back(full);
 
-  // A lean build: no ticker, no radar. The keys are not there at all.
+  // Feature-disabled fixture: ticker/radar keys are absent (not the lean preset).
   Case lean("lean", false, false);
   lean.d.wg.compiledIn = true;   // the tunnel's own fields, none of them optional ones
   all.push_back(lean);
@@ -332,6 +332,14 @@ int main() {
     assert(big.pieces == (want.size() + 127) / 128);
     assert(small.pieces == (want.size() + 4) / 5);
     checked++;
+  }
+  {  // Parser diagnostics survive even five-byte output chunks.
+    StatusRadar r;
+    r.stage = "parse failed"; r.parseError = "IncompleteInput";
+    StringSink sink;
+    PieceWriter<5> out(sink); writeStatusRadar(out, r); out.flush();
+    assert(sink.text.find("\"parseError\":\"IncompleteInput\"") != std::string::npos);
+    assert(sink.text.find("tlsError") == std::string::npos);
   }
   {  // lastCrash: after the 3.2.1 keys, registers left out when empty
     StatusCrash k;

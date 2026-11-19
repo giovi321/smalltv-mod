@@ -652,9 +652,9 @@ function cashPick(k){var rows=document.querySelectorAll('#symTable tr');var tr=n
 function radarSrcChanged(){if(!$('radarSource'))return;var v=$('radarSource').value;
  $('radarWebhookRow').style.display=(v==='webhook')?'block':'none';
  $('radarSrcHint').innerHTML=
-  (v==='adsblol')?'The device fetches <b>adsb.lol</b> directly over HTTPS (no key, ~1 req/s). Recommended on the ESP8266: adsb.lol negotiates a small TLS record size, so the handshake fits in RAM.'
- :(v==='adsbfi') ?'The device fetches <b>adsb.fi</b> directly over HTTPS (no key, ~1 req/s). Fine on the ESP32, but adsb.fi now sits behind Cloudflare and sends TLS records too large for the ESP8266 — pick adsb.lol or the webhook there.'
- :'The device requests <code>?lat=..&amp;lon=..&amp;dist=..</code> from your LAN proxy, which pre-filters the feed to a small JSON. Most reliable on the ESP8266.';}
+  (v==='adsblol')?'The device fetches <b>adsb.lol</b> directly over HTTPS (no API key). On ESP8266, TLS record size and low heap can prevent updates. A local receiver or LAN webhook over plain HTTP avoids TLS.'
+ :(v==='adsbfi') ?'The device fetches <b>adsb.fi</b> directly over HTTPS (no API key). On ESP8266, TLS record size and low heap can prevent updates. ESP32 has more memory but can still report request errors.'
+ :'Use a LAN proxy or a local receiver aircraft.json URL. The device appends <code>lat</code>, <code>lon</code> and <code>dist</code> query parameters; static receiver files ignore them. Plain HTTP avoids TLS memory use on ESP8266.';}
 
 // password begin (the Password card; tested by tests/auth/test_webui.js)
 function authProblem(){
@@ -899,10 +899,11 @@ function kv(k,v){return '<div class="kv"><span class="muted">'+k+'</span><b>'+v+
 function radarLine(r){
  if(!r)return '';
  var t=r.stage||'idle';
- if(r.count)t=r.count+' aircraft';
+ if(r.count)t=r.stage==='ok'?r.count+' aircraft':t+', cached '+r.count+' aircraft';
  else if(r.stage==='ok'||r.stage==='all filtered out')t=r.stage+' ('+(r.seenAc||0)+' in feed)';
  if(r.http)t+=', HTTP '+r.http;
  if(r.tlsRx)t+=', TLS rx '+r.tlsRx+' B';
+ if(r.parseError)t+=', JSON '+r.parseError;
  if(r.triedAgo!=null)t+=', tried '+r.triedAgo+'s ago';
  if(r.okAgo!=null)t+=', last ok '+r.okAgo+'s ago';
  else if(r.stage!=='idle')t+=', never succeeded';
