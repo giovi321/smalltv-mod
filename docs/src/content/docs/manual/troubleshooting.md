@@ -86,6 +86,12 @@ You do not need the old password to add a new network. Open the WiFi tab, scan, 
 
 If the device cannot reach any saved network at all (say, after a full house move), it falls back to its own SETUP MODE hotspot automatically, and you start over from [Quick start](/smalltv-mod/manual/quick-start/).
 
+## The settings page asks for the password again
+
+With a password set, only one browser, phone or script can stay logged in at a time. The web server library keeps a single login challenge for the whole web server, and every new login prompt replaces it, so when a second client opens the page or calls the API, the first one is asked for the password again. Two clients that log in at the same moment can keep pushing each other out.
+
+Use one client at a time while a password is set. A script that calls the API on a schedule (for example with `curl --digest`) counts as a client too. The cause is in the board cores: the ESP8266 core (esp8266/Arduino#9349), and the ESP32 core until its fix (espressif/arduino-esp32#12947) reaches the version these builds use. It goes away with a core update.
+
 ## The WireGuard tunnel will not come up
 
 The ESP32-C2 and the SmallTV Pro carry the client, and so does an NM-TV-154 flashed with the `-esp32-wg` image; the ESP8266 boards and a plain-image NM-TV-154 have no WireGuard card in the settings page at all. If the card is missing on an NM-TV-154, check the variant next to the version in the System tab: it reads `esp32` on the image without the tunnel and `esp32-wg` on the one with it. The line at the top of the card names the problem, so read that first.
