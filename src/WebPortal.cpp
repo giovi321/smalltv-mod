@@ -38,7 +38,17 @@ extern const char* appResetReason();   // last reset reason (diagnostics)
 extern void appApplyBrightness();   // main.cpp: re-resolve effective brightness now
 extern int  appBacklightSteps();    // main.cpp: backlight level now, 0..255
 
-static WebServerClass server(80);
+// The web server, with one more question answered: is the request in hand
+// HTTP/1.0? Neither core has a public way to ask (the version is a protected
+// member, `_currentVersion`, 0 for "1.0"). A reply of unknown length is sent
+// chunked only to a client of HTTP/1.1 or above (the cores' _prepareHeader), so
+// handleStatus needs to know which of the two it is writing.
+class PortalServer : public WebServerClass {
+ public:
+  explicit PortalServer(int port) : WebServerClass(port) {}
+  bool requestIsHttp10() const { return _currentVersion == 0; }
+};
+static PortalServer     server(80);
 static Settings*        S = nullptr;
 static bool             g_reboot = false;
 static uint32_t         g_rebootAt = 0;
@@ -273,7 +283,9 @@ static void handleStatus() {
   server.client().setTimeout(StatusSendTimeoutMs);
 #endif
   StatusClient client;
-  smalltv::ChunkedSink<StatusClient> sink(client);
+  // An HTTP/1.0 client gets no chunked reply from the web server, so the
+  // pieces go out unframed there (JsonStream.h, ChunkedSink).
+  smalltv::ChunkedSink<StatusClient> sink(client, !server.requestIsHttp10());
   smalltv::PieceWriter<128> out(sink);
   smalltv::writeStatusHead(out, d);
   PlatformCrashRecord cr;   // last crash, kept in RTC memory until cleared or power-cycled
@@ -313,8 +325,9 @@ static void handleStatus() {
 #endif
   smalltv::writeStatusEnd(out);
   // A piece the client did not take ended the reply and gave the connection
-  // up; otherwise the web server writes the last chunk.
-  if (smalltv::endReply(out, sink)) server.sendContent("", 0);
+  // up; otherwise the web server writes the last chunk (a chunked reply only:
+  // an HTTP/1.0 reply just ends when the connection closes).
+  if (smalltv::endReply(out, sink) && !server.requestIsHttp10()) server.sendContent("", 0);
 }
 
 // Fingerprint of everything network-identity related: the WiFi list and the

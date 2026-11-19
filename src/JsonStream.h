@@ -78,11 +78,16 @@ template <size_t Piece> bool endReply(PieceWriter<Piece>& out, Sink& to) {
 // The last chunk ("0\r\n\r\n") is not written here: the web server sends it
 // (sendContent("", 0)), and it still sends it by itself after the handler if
 // the reply is chunked and nobody did.
+// `framed` is false for an HTTP/1.0 client: for a reply of unknown length both
+// web server cores send no Transfer-Encoding to it (they chunk only from
+// HTTP/1.1), the body just ends when the connection closes, and the pieces
+// then go out as they are, with no framing. The stall rule is the same.
 template <class Client> class ChunkedSink : public Sink {
  public:
-  explicit ChunkedSink(Client& client) : client_(client) {}
+  explicit ChunkedSink(Client& client, bool framed = true) : client_(client), framed_(framed) {}
   bool write(const char* data, size_t count) override {
     if (!count) return true;   // an empty chunk would end the reply
+    if (!framed_) return put(data, count);
     char head[2 * sizeof(size_t) + 2];
     size_t at = sizeof(head);
     head[--at] = '\n';
@@ -99,6 +104,7 @@ template <class Client> class ChunkedSink : public Sink {
     return client_.write(reinterpret_cast<const uint8_t*>(data), count) == count;
   }
   Client& client_;
+  bool framed_;
 };
 namespace jsonout {
 // Fixed text, given as PSTR().
