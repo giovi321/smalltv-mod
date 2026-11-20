@@ -31,6 +31,7 @@ If the `.local` address does not open in your browser, try the plain IP address 
 - Press **Refresh data now** in the Ticker tab to force an immediate retry rather than waiting for that countdown.
 - If it is a cash.ch source symbol, it needs the exact listing key format, not a plain ticker; use the **cash.ch symbol finder** in the Ticker tab to generate it rather than typing one by hand.
 - If every symbol shows the error at once, the device likely lost its connection; check the Status tab for whether it still shows as connected, and see the WiFi section below.
+- If every Yahoo symbol fails while the device stays connected, the fetches may be skipped for memory: a secure connection only starts when the device can keep a reserve free for its WiFi code, so it skips the fetch rather than restart. `GET /api/status` then shows `tlsGate`, with the free heap and largest block at the last check and how many fetches were skipped since boot. A theme in the carousel is unloaded for the fetch and loads again when its page comes back.
 
 ## The device shows the wrong time, or night mode isn't dimming the screen
 

@@ -1,4 +1,5 @@
 #include "UsageClient.h"
+#include "TlsGate.h"
 #include "Platform.h"
 #include <ArduinoJson.h>
 #include <math.h>
@@ -96,7 +97,7 @@ static bool fetchUsage(const Settings& s) {
 
   std::unique_ptr<NetClient> client;
   if (https) {
-    if (ESP.getFreeHeap() < 20000) return false;   // too little heap for TLS (incl. the 9 KB thunk); skip, don't crash
+    if (!tlsHeapReady(2048)) return false;   // total + largest block + Wi-Fi SDK reserve (TlsGate.h); skip, don't crash
     client.reset(platformMakeSecureClient(2048));   // LAN / self-hosted endpoint
   } else {
     client.reset(new WiFiClient());

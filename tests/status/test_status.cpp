@@ -374,6 +374,28 @@ int main() {
     assert(code.find("__attribute__((noinline)) static void statusFetch(") != std::string::npos);
     assert(code.find("smalltv::writeStatusFetch(out, stats.refused, stats.last);") != std::string::npos);
   }
+  {  // TLS gate: nothing before the first check, then what it saw and the skips
+    StringSink none;
+    { PieceWriter<128> out(none); writeStatusTls(out, 0, 0, 0); out.flush(); }
+    assert(none.text.empty());
+    StringSink s;
+    { PieceWriter<5> out(s); writeStatusTls(out, 14736, 12544, 16); out.flush(); }
+    assert(s.text == ",\"tlsGate\":{\"free\":14736,\"block\":12544,\"skipped\":16}");
+    StringSink top;
+    { PieceWriter<128> out(top); writeStatusTls(out, 4294967295u, 4294967295u, 65535); out.flush(); }
+    assert(top.text == ",\"tlsGate\":{\"free\":4294967295,\"block\":4294967295,\"skipped\":65535}");
+    // After the theme fetch keys, before the tickers, in a sibling of handleStatus.
+    std::ifstream in("src/WebPortal.cpp");
+    assert(in.good());
+    std::stringstream file;
+    file << in.rdbuf();
+    const std::string code = file.str();
+    const size_t fetch = code.find("statusFetch(out);");
+    const size_t tls = code.find("  statusTls(out);");
+    const size_t tickers = code.find("smalltv::writeStatusTickers(");
+    assert(fetch != std::string::npos && tls != std::string::npos && tickers != std::string::npos && fetch < tls && tls < tickers);
+    assert(code.find("__attribute__((noinline)) static void statusTls(") != std::string::npos);
+  }
   std::printf("status reply tests passed (%d replies, byte for byte)\n", checked);
   return 0;
 }
