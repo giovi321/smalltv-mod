@@ -1,5 +1,6 @@
 #include "RadarClient.h"
 #include "Platform.h"
+#include "WaitingStream.h"
 #include <ArduinoJson.h>
 #include <math.h>
 
@@ -251,7 +252,8 @@ static bool fetchUrl(const Settings& s, const String& url) {
     return false;
   }
 
-  bool ok = parseAdsb(s, http.getStream());
+  WaitingStream body(http.getStream(), s.httpTimeout);   // see WaitingStream.h
+  bool ok = parseAdsb(s, body);
   http.end();
   return ok;
 }
