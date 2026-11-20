@@ -99,7 +99,10 @@ static String buildWebhookUrl(const Settings& s, const char* symbol) {
 // Map the chart timeframe to a sensible Yahoo candle interval (mirrors the
 // reference n8n workflow so the sparkline has a useful number of points).
 static const char* yahooInterval(const String& r) {
-  if (r == "1d")  return "5m";
+  // 15m, not 5m: a 24 h crypto day at 5m is 288 closes held in the JSON
+  // document while the TLS client is still open; 96 is plenty for the
+  // default 48-point sparkline. Stocks get 26 instead of 78 points.
+  if (r == "1d")  return "15m";
   if (r == "5d")  return "30m";
   if (r == "1mo" || r == "3mo" || r == "6mo" || r == "ytd") return "1d";
   if (r == "1y"  || r == "2y")  return "1wk";
