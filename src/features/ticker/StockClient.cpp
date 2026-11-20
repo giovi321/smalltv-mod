@@ -447,6 +447,29 @@ enum ParseKind : uint8_t { PARSE_WEBHOOK, PARSE_YAHOO, PARSE_CASH_QUOTE, PARSE_C
 // cash.ch is the only host we let negotiate ECDHE, and only the first handshake
 // pays for it: this session resumes the rest for ~23 h.
 static TlsSession g_cashSession;
+// Yahoo sends session tickets too: later fetches resume instead of repeating
+// the RSA key exchange.
+static TlsSession g_yahooSession;
+
+// Yahoo's receive buffer. Yahoo honours TLS max_fragment_length with the
+// static-RSA suites, so 512 B is enough (1.5 KB less heap per handshake than
+// 2048). Probed like OtaUpdate.cpp's probeMfln(): a host that does not accept
+// 512 keeps the old 2048. A yes is kept for the boot; a no is asked again up
+// to three times, since a probe can also fail on a dropped connection. The
+// ESP32 ignores the size.
+static uint16_t yahooRxBuf() {
+#if defined(SMALLTV_FAMILY_ESP8266)
+  static bool mfln = false;
+  static uint8_t probes = 0;
+  if (!mfln && probes < 3) {
+    probes++;
+    mfln = BearSSL::WiFiClientSecure::probeMaxFragmentLength(YAHOO_CHART_HOST1, 443, 512);
+  }
+  return mfln ? 512 : 2048;
+#else
+  return 2048;
+#endif
+}
 
 static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, StockData& d) {
   bool https = url.startsWith("https://");
@@ -468,11 +491,13 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
     } else {
       // raw.githubusercontent.com sends a ~4 KB cert record and won't negotiate
       // MFLN, so it needs a bigger receive buffer than Yahoo's small records.
-      uint16_t rx = (kind == PARSE_GITHUB) ? GH_QUOTES_RXBUF : 2048;
+      uint16_t rx = (kind == PARSE_GITHUB) ? GH_QUOTES_RXBUF
+                  : (kind == PARSE_YAHOO)  ? yahooRxBuf() : 2048;
       // Total and largest block, with room left for the Wi-Fi SDK (TlsGate.h).
       // Short: skipped like any failed fetch, retried on the backoff.
       if (!tlsHeapReady(rx)) return false;
-      client.reset(platformMakeSecureClient(rx, nullptr, 512, /*cheapCiphers=*/true));
+      client.reset(platformMakeSecureClient(rx, (kind == PARSE_YAHOO) ? &g_yahooSession : nullptr,
+                                            512, /*cheapCiphers=*/true));
     }
   } else {
     client.reset(new WiFiClient());
