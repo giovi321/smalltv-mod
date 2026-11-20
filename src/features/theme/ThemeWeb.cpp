@@ -353,14 +353,31 @@ __attribute__((noinline)) void writeIndex(const Listing& list) {
   publishIndex(written);
 }
 // The body of the current reply, piece by piece, with a pause after each
-// (CONTRIBUTING: a loop over input-sized data yields).
+// (CONTRIBUTING: a loop over input-sized data yields). Written to the client
+// itself: with a Content-Length that is all sendContent() does on both cores,
+// but sendContent() does not say when a write came up short. A short write
+// (the client gone, or not reading until the send timeout) refuses the
+// piece, and the rest of the reply is dropped.
 struct ReplySink : smalltv::Sink {
   bool write(const char* data, size_t count) override {
-    server->sendContent(data, count);
+    const bool sent = server->client().write(reinterpret_cast<const uint8_t*>(data), count) == count;
     yield();
-    return true;
+    return sent;
+  }
+  // stop() would only queue a FIN: the unsent and unacked data of a client
+  // that does not read stays on the heap until lwIP gives up (minutes), and
+  // the next request answered with headers but no body (device test, 2026-11-01).
+  // abort() frees the connection at once and sends a reset (ESP8266 core
+  // 3.1.2; the ESP32 core has no abort(), so stop() there).
+  void abandon() override {
+#if defined(SMALLTV_ESP8266)
+    server->client().abort();
+#else
+    server->client().stop();
+#endif
   }
 };
+constexpr uint32_t ListSendTimeoutMs = 1500;
 struct CountSink : smalltv::Sink {
   size_t bytes = 0;
   bool write(const char*, size_t count) override {
@@ -378,6 +395,12 @@ __attribute__((noinline)) void sendList(const Listing& list, const String& error
   server->setContentLength(count.bytes);
   server->send(200, "application/json", "");
   ReplySink sink;
+#if defined(SMALLTV_ESP8266)
+  // 128 bytes that no client takes for this long: the client is gone (the
+  // wait restarts each time some bytes are taken). The core's 5 s per piece
+  // held up every other request that long.
+  server->client().setTimeout(ListSendTimeoutMs);
+#endif
   smalltv::writeThemeList<128>(settings->themeId.c_str(), error.c_str(), storage, list, sink);
 }
 // GET /api/themes: every installed package's metadata and validity, without

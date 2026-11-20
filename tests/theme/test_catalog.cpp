@@ -120,7 +120,9 @@ int main() {
   // same fields as one document through serializeJson(), escapes included.
   struct Pieces : Sink {
     std::vector<std::string> got;
+    int abandoned=0;
     bool write(const char* p,size_t n) override {got.emplace_back(p,n);return true;}
+    void abandon() override {++abandoned;}
     std::string joined() const {std::string s;for(const std::string& g:got)s+=g;return s;}
   };
   {
@@ -137,14 +139,34 @@ int main() {
       o["bytes"]=t.bytes;o["valid"]=t.valid;o["error"]=error;
     }
     std::string whole;serializeJson(doc,whole);
-    Pieces p16,p128;writeThemeList<16>("theme-3",odd.c_str(),786432,themes,p16);writeThemeList<128>("theme-3",odd.c_str(),786432,themes,p128);
+    Pieces p16,p128;
+    assert(writeThemeList<16>("theme-3",odd.c_str(),786432,themes,p16));
+    assert(writeThemeList<128>("theme-3",odd.c_str(),786432,themes,p128));
     const std::pair<Pieces*,size_t> runs[]={{&p16,16},{&p128,128}};
     for(const auto& t:runs){
       assert(t.first->joined()==whole);
       assert(t.first->got.size()==(whole.size()+t.second-1)/t.second);
       for(size_t i=0;i+1<t.first->got.size();++i)assert(t.first->got[i].size()==t.second);
     }
-    BlockList<ListedTheme> none;Pieces empty;writeThemeList<16>("","",0,none,empty);
+    // A client that stops taking the reply (a failed or short write): the
+    // writer sends nothing after the first piece it refuses and says so, so a
+    // stalled client costs one send timeout, not one per piece left.
+    struct Refuses : Pieces {
+      size_t from,calls=0;
+      explicit Refuses(size_t refused):from(refused){}
+      bool write(const char* p,size_t n) override {Pieces::write(p,n);return ++calls<from;}
+    };
+    Refuses second(2),last(p16.got.size()),never(p16.got.size()+1);
+    assert(!writeThemeList<16>("theme-3",odd.c_str(),786432,themes,second)&&second.calls==2);
+    assert(!writeThemeList<16>("theme-3",odd.c_str(),786432,themes,last)&&last.calls==p16.got.size());
+    assert(writeThemeList<16>("theme-3",odd.c_str(),786432,themes,never)&&never.joined()==whole);
+    // The refused connection is given up at once (abandon(), which the web
+    // reply turns into a TCP reset): exactly once, after the refused piece and
+    // nothing else, and never for a reply that went through. A closed-but-
+    // lingering connection kept its unsent data on the heap (device test).
+    assert(second.abandoned==1&&last.abandoned==1);
+    assert(never.abandoned==0&&p16.abandoned==0&&p128.abandoned==0);
+    BlockList<ListedTheme> none;Pieces empty;assert(writeThemeList<16>("","",0,none,empty));
     assert(empty.joined()=="{\"selected\":\"\",\"error\":\"\",\"freeBytes\":0,\"themes\":[]}");
   }
   // A ListedTheme keeps its five fields apart, also when set from its own

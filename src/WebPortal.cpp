@@ -38,7 +38,17 @@ extern const char* appResetReason();   // last reset reason (diagnostics)
 extern void appApplyBrightness();   // main.cpp: re-resolve effective brightness now
 extern int  appBacklightSteps();    // main.cpp: backlight level now, 0..255
 
-static WebServerClass server(80);
+// The web server, with one more question answered: is the request in hand
+// HTTP/1.0? Neither core has a public way to ask (the version is a protected
+// member, `_currentVersion`, 0 for "1.0"). A reply of unknown length is sent
+// chunked only to a client of HTTP/1.1 or above (the cores' _prepareHeader), so
+// handleStatus needs to know which of the two it is writing.
+class PortalServer : public WebServerClass {
+ public:
+  explicit PortalServer(int port) : WebServerClass(port) {}
+  bool requestIsHttp10() const { return _currentVersion == 0; }
+};
+static PortalServer     server(80);
 static Settings*        S = nullptr;
 static bool             g_reboot = false;
 static uint32_t         g_rebootAt = 0;
@@ -161,15 +171,32 @@ static void handleGetConfig() {
   sendJson(doc);
 }
 
-// The pieces of the status reply, to the client as they come, with a pause
-// after each (CONTRIBUTING: a loop over input-sized data yields).
-struct StatusSink : smalltv::Sink {
-  bool write(const char* data, size_t count) override {
-    server.sendContent(data, count);
+// The client of the status reply, for smalltv::ChunkedSink (JsonStream.h): the
+// pieces go straight to it, with a pause after each write (CONTRIBUTING: a
+// loop over input-sized data yields). sendContent() does the same bytes but
+// does not say when a write came up short, so a client that stopped reading
+// was never noticed and every piece waited for the send timeout.
+struct StatusClient {
+  size_t write(const uint8_t* data, size_t count) {
+    const size_t taken = server.client().write(data, count);
     yield();
-    return true;
+    return taken;
+  }
+  // stop() would only queue a FIN and leave the unsent data on the heap for
+  // minutes; abort() frees the connection at once (ESP8266 core 3.1.2; the
+  // ESP32 core has no abort()). See ReplySink in ThemeWeb.cpp.
+  void abandon() {
+#if defined(SMALLTV_ESP8266)
+    server.client().abort();
+#else
+    server.client().stop();
+#endif
   }
 };
+// 128 bytes that no client takes for this long: the client is gone (the wait
+// restarts each time some bytes are taken). The core's 5 s per write held up
+// every other request that long.
+constexpr uint32_t StatusSendTimeoutMs = 1500;
 
 #if WITH_TICKER
 static smalltv::StatusTicker statusTicker(size_t i) {
@@ -252,7 +279,13 @@ static void handleStatus() {
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
-  StatusSink sink;
+#if defined(SMALLTV_ESP8266)
+  server.client().setTimeout(StatusSendTimeoutMs);
+#endif
+  StatusClient client;
+  // An HTTP/1.0 client gets no chunked reply from the web server, so the
+  // pieces go out unframed there (JsonStream.h, ChunkedSink).
+  smalltv::ChunkedSink<StatusClient> sink(client, !server.requestIsHttp10());
   smalltv::PieceWriter<128> out(sink);
   smalltv::writeStatusHead(out, d);
   PlatformCrashRecord cr;   // last crash, kept in RTC memory until cleared or power-cycled
@@ -291,7 +324,10 @@ static void handleStatus() {
   smalltv::writeStatusRadar(out, r);
 #endif
   smalltv::writeStatusEnd(out);
-  server.sendContent("", 0);   // the last chunk
+  // A piece the client did not take ended the reply and gave the connection
+  // up; otherwise the web server writes the last chunk (a chunked reply only:
+  // an HTTP/1.0 reply just ends when the connection closes).
+  if (smalltv::endReply(out, sink) && !server.requestIsHttp10()) server.sendContent("", 0);
 }
 
 // Fingerprint of everything network-identity related: the WiFi list and the
