@@ -93,6 +93,7 @@ static std::string reference(const Case& c) {
   if (d.sun[0]) o["sun"] = std::string(d.sun);
   o["bl"] = d.bl;
   if (d.ha[0]) o["ha"] = d.ha;
+  if (d.themeError[0]) o["themeError"] = d.themeError;   // after "ha", left out when empty
   fillWg(o["wg"].to<JsonObject>(), d.wg);
   if (c.tickersCompiled) {
     JsonArray arr = o["tickers"].to<JsonArray>();
@@ -206,6 +207,7 @@ static std::vector<Case> cases() {
   full.d.sun = "06:58-16:42";
   full.d.bl = 255;
   full.d.ha = "memory";
+  full.d.themeError = "not enough memory to run this theme";
   full.d.wg.compiledIn = true;
   full.d.wg.enabled = full.d.wg.up = true;
   full.d.wg.stage = 3;
@@ -292,10 +294,10 @@ int main() {
     if (std::string(c.name) == "idle") {
       if (want != saved) { std::fprintf(stderr, "reference no longer matches the saved reply:\n%s\n%s\n", want.c_str(), saved); return 1; }
     }
-    // Where the sun fields sit is fixed: after clockFresh, before wg.
+    // Where the sun fields sit is fixed: after clockFresh, before wg. themeError comes after ha.
     if (std::string(c.name) == "full" &&
-        want.find("\"clockFresh\":false,\"sun\":\"06:58-16:42\",\"bl\":255,\"ha\":\"memory\",\"wg\":{") == std::string::npos) {
-      std::fprintf(stderr, "sun, bl and ha are not between clockFresh and wg:\n%s\n", want.c_str());
+        want.find("\"clockFresh\":false,\"sun\":\"06:58-16:42\",\"bl\":255,\"ha\":\"memory\",\"themeError\":\"not enough memory to run this theme\",\"wg\":{") == std::string::npos) {
+      std::fprintf(stderr, "sun, bl, ha and themeError are not between clockFresh and wg:\n%s\n", want.c_str());
       return 1;
     }
     if (std::string(c.name) == "no-sun-lit" && (want.find("\"sun\"") != std::string::npos ||

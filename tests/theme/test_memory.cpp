@@ -17,6 +17,11 @@
 #include <iterator>
 #include <malloc.h>
 #include <new>
+// The Wi-Fi reserve is for the ESP8266 only (the header is empty elsewhere);
+// this test models that board.
+#define SMALLTV_FAMILY_ESP8266 1
+#include "../../src/WifiReserve.h"
+#undef SMALLTV_FAMILY_ESP8266
 using namespace smalltv;
 
 static size_t live = 0, peak = 0, largest = 0, calls = 0;   // calls: allocations made while counting
@@ -81,6 +86,18 @@ constexpr size_t LargestBlockBudget = 1024;
 // requests and for mDNS and WiFi. With 3.8 KiB free, a web request starved
 // both and crashed the device. The 5 KiB is a judgement, not a measured limit.
 constexpr size_t RunningBudget = 3840;
+// What a loaded theme leaves free on the device, from the host's "running"
+// bytes (issue #132). Measured on a plain v3.9.0 image: for nine test packages
+// (26x12 up to 32x60 text layers) the free heap after the load plus the host's
+// "running" bytes (built with -malign-double, like the device) came to between
+// 14,680 and 15,536 B. So a theme leaves about 15 KB minus its running bytes.
+// Low and high bound that range, with a little room. This is a model for the
+// tie below, not a device guarantee.
+constexpr size_t DeviceFreeLow = 14600;
+constexpr size_t DeviceFreeHigh = 15600;
+// run.sh builds this test without -malign-double (T56), so its "running" is
+// up to 0.6 KB under the device's: the examples are charged that much more.
+constexpr size_t AlignDoubleSlack = 600;
 
 struct NoDisplay : Display {
   uint8_t glyphColumn(uint8_t, uint8_t) const override { return 0x7f; }
@@ -1111,6 +1128,20 @@ int main(int argc, char** argv) {
   testShortTranslations();
   const char* examples[] = {"examples/themes/pixel-room.stheme", "examples/themes/live-status.stheme",
                             "examples/themes/terminal-ops.stheme"};
+  // --below-reserve <package>...: each package leaves LESS than the Wi-Fi
+  // reserve free on the device (the 32x65 package that crashed a plain 3.8.0
+  // device; the 32x20 one that was the first to hold under 5 KB). With the
+  // high end of the model, so a refusal is certain, not only likely.
+  if (argc > 2 && strcmp(argv[1], "--below-reserve") == 0) {
+    for (int i = 2; i < argc; ++i) {
+      Usage u = load(argv[i]);
+      const long left = long(DeviceFreeHigh) - long(u.running);
+      printf("%-36s running %5zu B  leaves at most %6ld B  reserve %u B\n", argv[i], u.running, left, unsigned(WifiReserveFreeHeap));
+      assert(left < long(WifiReserveFreeHeap));
+    }
+    std::cout << "below-reserve tests passed\n";
+    return 0;
+  }
   bool report = argc > 1;
   for (int i = 1; i < argc; ++i) {
     Usage u = load(argv[i]);
@@ -1126,6 +1157,12 @@ int main(int argc, char** argv) {
     assert(u.peak <= LoadPeakBudget);
     assert(u.largest <= LargestBlockBudget);
     assert(u.running <= RunningBudget);
+    // A bundled theme must leave at least the Wi-Fi reserve, or the load
+    // margin would refuse it on the device.
+    const long left = long(DeviceFreeLow) - long(u.running) - long(AlignDoubleSlack);
+    if (left < long(WifiReserveFreeHeap))
+      fprintf(stderr, "%s: leaves about %ld B free, the reserve is %u B\n", path, left, unsigned(WifiReserveFreeHeap));
+    assert(left >= long(WifiReserveFreeHeap));
   }
   std::cout << "theme memory tests passed\n";
 }

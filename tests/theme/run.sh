@@ -54,6 +54,9 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCL
 /tmp/smalltv-theme-example-check examples/themes/bebas-clock.stheme
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_catalog.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-catalog-tests
 /tmp/smalltv-theme-catalog-tests
+# The memory margin after a load: the pure check and the wiring of the device code.
+c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme tests/theme/test_margin.cpp -o /tmp/smalltv-margin-tests
+/tmp/smalltv-margin-tests
 # 32-bit, so allocation sizes match the ESP8266; the wraps let the test count
 # ArduinoJson's malloc calls as well as operator new.
 c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" -Wl,--wrap=malloc,--wrap=free,--wrap=realloc tests/theme/test_memory.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-memory-tests
@@ -62,3 +65,8 @@ c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON
 # one more layer costs stays in its bound, and the load peak is printed.
 c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -DTHEME_MAX_LAYERS=40 -DEXPECTED_MAX_LAYERS=40 -Isrc/features/theme -I"$THEME_JSON_INCLUDE" -Wl,--wrap=malloc,--wrap=free,--wrap=realloc tests/theme/test_memory.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-memory-40-tests
 /tmp/smalltv-theme-memory-40-tests
+# The Wi-Fi reserve: the test packages that crashed (32 x 65) and that first
+# held under 5 KB (32 x 20) must leave less than the reserve, so they are refused.
+python3 tools/make_oom_theme.py /tmp/smalltv-oom-32x65.stheme 32 65
+python3 tools/make_oom_theme.py /tmp/smalltv-oom-32x20.stheme 32 20
+/tmp/smalltv-theme-memory-tests --below-reserve /tmp/smalltv-oom-32x65.stheme /tmp/smalltv-oom-32x20.stheme
