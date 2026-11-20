@@ -3,6 +3,7 @@
 #include "Gfx.h"
 #include "UsageClient.h"
 #include "Mascot.h"
+#include <new>
 
 UsageMode g_usageMode;
 
@@ -18,7 +19,11 @@ UsageMode g_usageMode;
 // Mascot diff state for the flicker-free full-screen idle animation.
 static bool            s_mascotPrimed  = false;
 static const uint16_t* s_mascotPalette = nullptr;
-static uint8_t         s_prevCells[MASCOT_GRID * MASCOT_GRID];
+// The last frame's cells, for the cell-by-cell diff. Taken the first time the
+// mascot is drawn and given back when the usage page is switched off, so an
+// image with it compiled in but unused does not pay for it (#134). Without it
+// every frame is a full redraw.
+static uint8_t*        s_prevCells     = nullptr;
 
 // Copy a mascot palette into a local RAM array using *byte* reads. pgm_read_byte
 // is safe from both RAM and flash; a 16-bit load straight from flash (irom) faults
@@ -266,18 +271,22 @@ static void drawMascot(const uint8_t* cells, const uint16_t* palette, bool resta
 
   // Full redraw on (re)entry or whenever the palette changes (animation switch);
   // otherwise only repaint the cells that changed since the last frame.
-  bool full = restart || !s_mascotPrimed || palette != s_mascotPalette;
+  if (!s_prevCells) {
+    s_prevCells = new (std::nothrow) uint8_t[MASCOT_GRID * MASCOT_GRID];
+    s_mascotPrimed = false;
+  }
+  bool full = restart || !s_mascotPrimed || palette != s_mascotPalette || !s_prevCells;
   if (full) gfx->fillScreen(C_BLACK);
 
   for (int i = 0; i < MASCOT_GRID * MASCOT_GRID; i++) {
     uint8_t code = pgm_read_byte(&cells[i]);
     if (!full && code == s_prevCells[i]) continue;
-    s_prevCells[i] = code;
+    if (s_prevCells) s_prevCells[i] = code;
     uint16_t color = (code < MASCOT_PALETTE_SIZE) ? pal[code] : 0;
     int gx = i % MASCOT_GRID, gy = i / MASCOT_GRID;
     gfx->fillRect(x0 + gx * CP, y0 + gy * CP, CP, CP, color);
   }
-  s_mascotPrimed  = true;
+  s_mascotPrimed  = s_prevCells != nullptr;
   s_mascotPalette = palette;
 }
 
@@ -320,6 +329,13 @@ void UsageMode::begin(const Settings& s) {
 }
 
 void UsageMode::invalidate(const Settings& s) {
+  // Switched off (neither the mode nor ticked in the carousel): give the
+  // mascot's diff buffer back. It is taken again when the mascot next shows.
+  if (!(s.mode == MODE_USAGE || (s.mode == MODE_CAROUSEL && s.carouselUsage))) {
+    delete[] s_prevCells;
+    s_prevCells = nullptr;
+    s_mascotPrimed = false;
+  }
   needRender_ = true;
   showingMascot_ = false;
   usageRenderedOk_ = 0xFFFFFFFF;
