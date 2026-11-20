@@ -3,8 +3,22 @@
 #include "WaitingStream.h"
 #include <ArduinoJson.h>
 #include <math.h>
+#include <new>
 
-static Aircraft g_ac[MAX_AIRCRAFT];   // kept sorted nearest-first
+// What the radar holds only while it is in use (its mode, or ticked in the
+// carousel): the aircraft list and the TLS session, about 1 KB. On the heap
+// so an image with the radar compiled in but switched off does not pay for it
+// (#134: that heap is what the ticker's HTTPS fetch is short of).
+struct RadarHeap {
+  Aircraft   ac[MAX_AIRCRAFT];   // kept sorted nearest-first
+  // TLS session resumption: the first handshake stores its parameters here and
+  // later connects to the same feed resume without the full ECDHE exchange,
+  // which is both the slow part and the allocation peak on this chip. cash.ch
+  // has fetched this way for a long time; the radar polls far more often, so it
+  // benefits more. Reset alongside the MFLN probe when the provider changes.
+  TlsSession session;
+};
+static RadarHeap* g_heap = nullptr;
 static uint8_t  g_count = 0;
 static uint32_t g_lastOkMs = 0;
 static bool     g_error = false;
@@ -20,13 +34,6 @@ static uint16_t    g_tlsRx = 0;
 // same two string literals every time, so identity is enough.
 static const char* g_tlsProbedHost = nullptr;
 
-// TLS session resumption: the first handshake stores its parameters here and
-// later connects to the same feed resume without the full ECDHE exchange,
-// which is both the slow part and the allocation peak on this chip. cash.ch
-// has fetched this way for a long time; the radar polls far more often, so it
-// benefits more. Reset alongside the MFLN probe when the provider changes.
-static TlsSession g_tlsSession;
-
 // Last-poll diagnostics (see RadarStage in the header).
 static RadarStage g_stage = RADAR_IDLE;
 static int        g_lastHttp = 0;
@@ -35,7 +42,7 @@ static uint32_t   g_lastTryMs = 0;
 static String     g_lastUrl;
 
 uint8_t         radarCount()      { return g_count; }
-const Aircraft& aircraftAt(uint8_t i) { return g_ac[i]; }
+const Aircraft& aircraftAt(uint8_t i) { return g_heap->ac[i]; }   // i < radarCount(): 0 without g_heap
 uint32_t        radarLastOkMs()   { return g_lastOkMs; }
 bool            radarError()      { return g_error; }
 
@@ -60,8 +67,29 @@ const char* radarStageName() {
   }
 }
 
+// The radar is in use when it is the mode, or ticked in the carousel.
+static bool radarWanted(const Settings& s) {
+  return s.mode == MODE_RADAR || (s.mode == MODE_CAROUSEL && s.carouselRadar);
+}
+
+// Takes the heap part when there is none. False when it does not fit.
+static bool radarHeapTake() {
+  if (!g_heap) g_heap = new (std::nothrow) RadarHeap();
+  return g_heap != nullptr;
+}
+
+static void radarHeapGive() {
+  delete g_heap;
+  g_heap = nullptr;
+  g_tlsRx = 0;                 // the session went with it: probe again
+  g_tlsProbedHost = nullptr;
+}
+
 void radarInit(const Settings& s) {
-  (void)s;
+  // At boot and on every settings save: taken while the boot heap is still
+  // whole, given back as soon as the radar is switched off.
+  if (radarWanted(s)) radarHeapTake();
+  else                radarHeapGive();
   g_count = 0;
   g_error = false;
   g_lastOkMs = 0;
@@ -87,10 +115,11 @@ static void geo(float homeLat, float homeLon, float lat, float lon,
 
 // Keep the array sorted ascending by distance, holding at most MAX_AIRCRAFT.
 static void insertNearest(const Aircraft& t) {
-  if (g_count == MAX_AIRCRAFT && t.distKm >= g_ac[g_count - 1].distKm) return;
+  Aircraft* ac = g_heap->ac;
+  if (g_count == MAX_AIRCRAFT && t.distKm >= ac[g_count - 1].distKm) return;
   uint8_t i = (g_count < MAX_AIRCRAFT) ? g_count : (uint8_t)(MAX_AIRCRAFT - 1);
-  while (i > 0 && g_ac[i - 1].distKm > t.distKm) { g_ac[i] = g_ac[i - 1]; i--; }
-  g_ac[i] = t;
+  while (i > 0 && ac[i - 1].distKm > t.distKm) { ac[i] = ac[i - 1]; i--; }
+  ac[i] = t;
   if (g_count < MAX_AIRCRAFT) g_count++;
 }
 
@@ -115,7 +144,7 @@ static void probeTls(const Settings& s) {
   const char* host = directHost(s);
   if (g_tlsRx && g_tlsProbedHost == host) return;
   g_tlsProbedHost = host;
-  g_tlsSession = TlsSession();   // stored params are per-host; drop them with it
+  g_heap->session = TlsSession();   // stored params are per-host; drop them with it
   if (BearSSL::WiFiClientSecure::probeMaxFragmentLength(host, 443, 512))       g_tlsRx = 512;
   else if (BearSSL::WiFiClientSecure::probeMaxFragmentLength(host, 443, 1024)) g_tlsRx = 1024;
   else                                                                         g_tlsRx = 4096;
@@ -220,7 +249,7 @@ static bool fetchUrl(const Settings& s, const String& url) {
     // failed the allocation, and failed healthy ones that would have worked.)
     if (platformMaxFreeBlock() < 16000) { g_stage = RADAR_LOW_HEAP; return false; }
     probeTls(s);
-    client.reset(platformMakeSecureClient(g_tlsRx, &g_tlsSession));   // no cert validation (public read-only API)
+    client.reset(platformMakeSecureClient(g_tlsRx, &g_heap->session));   // no cert validation (public read-only API)
   } else {
     client.reset(new WiFiClient());
   }
@@ -265,6 +294,10 @@ void radarService(const Settings& s) {
 
   if ((int32_t)(millis() - g_nextPollMs) < 0) return;
   g_nextPollMs = millis() + (uint32_t)s.radar.pollSec * 1000UL;
+
+  // Not taken at the save that switched the radar on (no room then): again
+  // now, and the poll is skipped like any short heap while it does not fit.
+  if (!radarHeapTake()) { g_stage = RADAR_LOW_HEAP; g_error = true; return; }
 
   bool useWebhook = (s.radar.source == RADAR_SRC_WEBHOOK) && (s.radar.webhookUrl.length() >= 8);
   String url = useWebhook ? buildWebhookUrl(s) : buildDirectUrl(s);
