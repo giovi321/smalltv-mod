@@ -28,6 +28,7 @@
 #if WITH_THEME
 #include "features/theme/ThemeDataClient.h"
 #include "features/theme/ThemeWeb.h"
+#include "features/theme/ThemeMode.h"
 #endif
 #include "SettingsTransaction.h"
 #if WITH_HA
@@ -287,6 +288,12 @@ static void handleStatus() {
   // switched on or off since boot (a restart does it). Left out otherwise.
   const char* haNote = haProblem(haWanted(*S));
   d.ha = haNote ? haNote : "";
+#endif
+#if WITH_THEME
+  // Set when a theme was refused for lack of memory (ThemeMargin.h); the text
+  // stays until the next select, install or removal of that theme.
+  const String& themeRefusal = g_themeMode.refusal();
+  d.themeError = themeRefusal.c_str();
 #endif
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);

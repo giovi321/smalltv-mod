@@ -261,6 +261,7 @@ void finishUpload() {
     resetUpload();
     return;
   }
+  g_themeMode.forgetRefusal();   // a package of the same ID replaced after a removal is a new try
   smalltv::InstalledTheme entry;
   entry.id = theme.id;
   entry.name = theme.name;
@@ -491,6 +492,8 @@ void selectTheme() {
   }
   String oldId = settings->themeId;
   uint8_t oldMode = settings->mode;
+  // A refusal for lack of memory (ThemeMargin.h) puts these back.
+  g_themeMode.rememberPrevious(oldMode, oldId);
   settings->themeId = id;
   settings->mode = MODE_THEME;
   if (!saveSettings(*settings)) {
@@ -500,6 +503,7 @@ void selectTheme() {
     return;
   }
   clockReapply(*settings);
+  g_themeMode.forgetRefusal();   // a new pick may try again, even the refused theme
   appInvalidate();
   reply(200, id);
 }
@@ -542,6 +546,7 @@ void deleteTheme() {
     reply(404, "Theme not found or could not be removed");
     return;
   }
+  g_themeMode.forgetRefusal();
   updateIndex(id, nullptr);
   reply(200, id);
 }

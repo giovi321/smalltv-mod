@@ -4,6 +4,7 @@
 #include "Mode.h"
 #include "ThemePackage.h"
 #include "ThemeData.h"
+#include "ThemeMargin.h"
 #include <LittleFS.h>
 #include <memory>
 #include <vector>
@@ -33,13 +34,22 @@ class ThemeMode : public DisplayMode {
     engine_.invalidate();
     messageDrawn_ = false;
   }
-  const String& error() const { return error_; }
+  // The load error, or when there is none the text of a refusal for lack of
+  // memory (GET /api/themes shows it).
+  const String& error() const { return error_.length() ? error_ : refusal_; }
   // What parsing a package needs: its peak heap (tests/theme/test_memory.cpp
   // holds the examples to 5 KB) plus about 1 KB that the network code may
   // claim meanwhile, and blocks of up to 1 KB (the same test's
   // largest-request limit) with some slack.
   static constexpr uint32_t ParseFreeHeap = 6144;
   static constexpr uint32_t ParseLargestBlock = 1536;
+  // What a running theme must leave free once it has loaded and drawn its
+  // first frame (ThemeMargin.h): the free heap of the shared Wi-Fi reserve
+  // (WifiReserve.h) and ParseLargestBlock as the largest block. The #132
+  // measurement showed that the free heap separates clean runs from crashes
+  // and that the largest block does not (a clean run went down to 1,568 B,
+  // a crash had 1,880 B). The block limit is the parser's own, agreed on
+  // #132; it covers heap that is free but split in small pieces.
   // Frees the loaded theme when the heap is short of what a web request needs,
   // so the request does not run out of memory next to it; on the ESP8266 a
   // theme and a second package parse do not fit together (issue #30). With
@@ -56,9 +66,35 @@ class ThemeMode : public DisplayMode {
   static constexpr uint32_t RequestFreeHeap = 8192;
   static constexpr uint32_t RequestLargestBlock = 3072;
   void freeForRequest() override { release(RequestFreeHeap, RequestLargestBlock); }
+  // The refusal for lack of memory (ThemeMargin.h), "" when there is none. It
+  // lives in RAM only: not in the settings, and it survives unload() because
+  // the settings fix that follows a refusal changes the selection.
+  const String& refusal() const { return refusal_; }
+  // The mode and theme the select request replaced, kept until the theme is
+  // loaded: a refusal puts them back (ThemeRefusal.h).
+  void rememberPrevious(uint8_t mode, const String& id) {
+    hasPrev_ = true;
+    prevMode_ = mode;
+    prevId_ = id;
+  }
+  // A new select, install or delete of the refused theme lets it try again.
+  void forgetRefusal() {
+    refusal_ = "";
+    refusedId_ = "";
+  }
  private:
   void unload();
   void refreshData();
+#if defined(SMALLTV_FAMILY_ESP8266)
+  bool checkMargin();   // true: the theme was refused and dropped
+  void refuseForMemory();
+  smalltv::MarginWatch marginWatch_;
+  bool fetchWatched_ = false;   // the first fetched values of this load restarted the watch
+#endif
+  bool hasPrev_ = false;
+  uint8_t prevMode_ = 0;
+  String prevId_;
+  String refusal_, refusedId_;
   smalltv::Engine engine_;
   std::unique_ptr<ThemeFile> file_;
   std::unique_ptr<smalltv::Package> package_;
