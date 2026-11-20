@@ -6,6 +6,7 @@
 #include <LittleFS.h>
 #include "webui.h"
 #include "StatusJson.h"
+#include "TlsGate.h"
 #include "Net.h"
 #include "Gfx.h"
 #include "OtaUpdate.h"
@@ -240,6 +241,11 @@ __attribute__((noinline)) static void statusFetch(smalltv::PieceWriter<128>& out
   smalltv::writeStatusFetch(out, stats.refused, stats.last);
 }
 #endif
+// The TLS gate keys (TlsGate.h); a sibling for the same reason as statusFetch.
+__attribute__((noinline)) static void statusTls(smalltv::PieceWriter<128>& out) {
+  const TlsGateStats& g = tlsGateStats();
+  smalltv::writeStatusTls(out, g.free, g.block, g.skipped);
+}
 static void handleStatus() {
   if (!requireAuth()) return;
   const String ssid = netSSID(), ip = netIP();
@@ -298,6 +304,7 @@ static void handleStatus() {
 #if WITH_THEME
   statusFetch(out);
 #endif
+  statusTls(out);
 #if WITH_TICKER
   smalltv::writeStatusTickers(out, stocksCount(), statusTicker);
 #endif

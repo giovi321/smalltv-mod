@@ -237,6 +237,19 @@ template <class Out> void writeStatusFetch(Out& out, uint16_t refused, uint8_t l
   jsonout::raw(out, last == 1 ? PSTR(",\"fetchLast\":\"ok\"") : last == 2 ? PSTR(",\"fetchLast\":\"refused\"") : PSTR(",\"fetchLast\":\"failed\""));
 }
 
+// `,"tlsGate":{"free":N,"block":N,"skipped":N}`: what the TLS heap check
+// (TlsGate.h) saw at the last handshake it was asked about, and how many it
+// skipped since boot. Nothing before the first check (`free` 0). Added after
+// the 3.9.0 keys.
+template <class Out> void writeStatusTls(Out& out, uint32_t free, uint32_t block, uint16_t skipped) {
+  if (!free) return;
+  using statusout::member;
+  member(out, PSTR(",\"tlsGate\":{\"free\":"), free);
+  member(out, PSTR(",\"block\":"), block);
+  member(out, PSTR(",\"skipped\":"), skipped);
+  jsonout::raw(out, PSTR("}"));
+}
+
 // `,"tickers":[...]`, row i from rowAt(i).
 template <class Out, class Row> void writeStatusTickers(Out& out, size_t count, Row&& rowAt) {
   using statusout::member;
