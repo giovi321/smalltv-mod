@@ -1132,6 +1132,23 @@ fetched before its interval is up. The manifest is read straight from the packag
 layer at a time, and no list in the engine needs one large block of memory;
 on the ESP8266 that is what makes this fit beside the web server.
 
+**A theme that leaves too little memory is refused (ESP8266 only).** Once a
+theme has loaded and drawn its first frame, the firmware checks the free heap
+and the largest free block. Under the shared Wi-Fi reserve (`WifiReserveFreeHeap` and
+`WifiReserveLargestBlock` in `WifiReserve.h`, with the numbers they come from)
+the Wi-Fi code of the SDK can run out of memory and crash the device, so the
+theme is dropped instead: the screen goes back to the previous mode, the
+settings no longer name the theme (no later boot tries it again), and
+`/api/status` carries `themeError` ("not enough memory to run this theme"),
+which the Status tab shows as a "Theme" line. The device does not restart. The
+check runs for a few seconds after a load, and again once when the first
+fetched values change the texts; a theme that is running is never dropped later
+because a request used some heap. Choosing the theme again, installing or
+removing it clears the message. `tools/make_oom_theme.py` writes test packages
+of any size, with an optional data source. Its default, 32 layers of 65
+characters, is the size that crashed a plain device before this check, and is
+refused with it.
+
 The engine holds a bounded entry index and layer state in RAM. Compositing uses
 row buffers, not a 115,200-byte framebuffer. Static scenes produce no display
 writes after the first draw. Clock text is compared when wall time changes;
