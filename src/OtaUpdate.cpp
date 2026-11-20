@@ -1,6 +1,5 @@
 #include "OtaUpdate.h"
 #include "Platform.h"
-#include "WaitingStream.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include "config.h"
@@ -21,6 +20,7 @@ bool   otaRequestBootUpdate(const char*) { return false; }
 void   otaBootUpdate(const Settings&) {}
 String otaTakeBootResult() { return String(); }
 #else
+#include "WaitingStream.h"   // the download code only (see the fork build test)
 
 #if defined(SMALLTV_FAMILY_ESP32)
 #include <HTTPUpdate.h>
