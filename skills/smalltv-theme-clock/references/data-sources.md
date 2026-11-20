@@ -20,7 +20,7 @@ Use only when the clock shows live values. The TV polls each URL itself.
   time, 3 s deadline. `interval` 10–86400 s.
 - `path` is a dotted path through objects (`main.temp`, `current.weather_code`). In a spec 2
   theme a number picks a list element (`daily.temperature_2m_max.0`; 0 to 23, no leading
-  zero; needs firmware after 3.9.0). A spec 1 theme cannot index lists. A list a path goes
+  zero; needs firmware 3.10.0 or later). A spec 1 theme cannot index lists. A list a path goes
   into is parsed whole and must fit the parse limit (2 KiB on the ESP8266): ask for few
   entries (`forecast_days=2`, `forecast_hours=24`). A digit part also keeps the whole parent
   of an object, so `stats.3` into a large object can pass the limit and refuse the fetch.

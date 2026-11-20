@@ -297,7 +297,7 @@ the size of the reply); ask the service for few entries (Open-Meteo:
 `forecast_days=2` or `forecast_hours=24`). The filter cannot tell a list from an
 object, so a digit part in a spec 2 theme keeps the whole parent in the parse,
 and a path such as `stats.3` into a large object keyed `"0"` to `"40"` can pass
-the parse limit and refuse the fetch. Firmware up to v3.9.0
+the parse limit and refuse the fetch. List indexes need firmware v3.10.0 or later; firmware up to v3.9.0
 shows `--` for such a field.
 
 URLs must use `http://` or `https://`. Because
