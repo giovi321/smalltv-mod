@@ -1,4 +1,5 @@
 #include "OtaUpdate.h"
+#include "TlsGate.h"
 #include "Platform.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -43,7 +44,8 @@ static long verNum(const char* v) {
 
 OtaLatest otaCheckLatest(const Settings& s) {
   OtaLatest r;
-  if (ESP.getFreeHeap() < 20000) { r.error = F("low heap"); return r; }
+  // 4096: the largest receive buffer probeMfln() may pick (TlsGate.h).
+  if (!tlsHeapReady(4096)) { r.error = F("low heap"); return r; }
 
   String url = F("https://");
   url += F(GH_API_HOST);
