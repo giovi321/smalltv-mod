@@ -1,11 +1,15 @@
 #include "StockClient.h"
 #include "Platform.h"
 #include "WaitingStream.h"
+#include "TlsGate.h"
 #include <ArduinoJson.h>
 #include <math.h>
 
 static StockData g_stocks[MAX_SYMBOLS];
 static uint8_t   g_count = 0;
+
+// main.cpp: frees a carousel theme kept loaded, when the heap is short.
+extern void appReleaseForTls(uint32_t needFree, uint32_t needBlock);
 
 static bool     g_refreshing = false;
 static uint8_t  g_fetchIdx = 0;
@@ -459,13 +463,16 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
     //  - Yahoo / GitHub / webhook: forced to the cheap static-RSA suites, so
     //    those handshakes stay as light as the old BASIC build.
     if (cash) {
+      appReleaseForTls(16000, 16000);   // a carousel theme kept loaded holds this heap (#134)
       if (platformMaxFreeBlock() < 16000) return false;   // largest contiguous block, not total
       client.reset(platformMakeSecureClient(512, &g_cashSession, 512, /*cheapCiphers=*/false));
     } else {
       // raw.githubusercontent.com sends a ~4 KB cert record and won't negotiate
       // MFLN, so it needs a bigger receive buffer than Yahoo's small records.
       uint16_t rx = (kind == PARSE_GITHUB) ? GH_QUOTES_RXBUF : 2048;
-      if (ESP.getFreeHeap() < (uint32_t)rx + 12000) return false;
+      // Total and largest block, with room left for the Wi-Fi SDK (TlsGate.h).
+      // Short: skipped like any failed fetch, retried on the backoff.
+      if (!tlsHeapReady(rx)) return false;
       client.reset(platformMakeSecureClient(rx, nullptr, 512, /*cheapCiphers=*/true));
     }
   } else {

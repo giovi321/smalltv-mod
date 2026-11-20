@@ -312,6 +312,18 @@ void appRelease() {
   for (size_t i = 0; i < kModeCount; i++) kModes[i]->freeForRequest();
 }
 
+// Called by the TLS gate (TlsGate.cpp) right before a handshake. The carousel
+// keeps a theme loaded while another page is on screen, and that heap is what
+// the handshake and the Wi-Fi SDK need (#134). Frees it only when short; the
+// theme reloads with its data state when its page comes back.
+void appReleaseForTls(uint32_t needFree, uint32_t needBlock) {
+#if WITH_THEME
+  g_themeMode.release(needFree, needBlock);
+#else
+  (void)needFree; (void)needBlock;
+#endif
+}
+
 static void bootProgress(const char* msg) {
   gfxBoot("SmallTV", msg);
 }
