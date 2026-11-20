@@ -56,6 +56,7 @@ struct StatusTicker {
   const char* symbol = "";
   bool valid = false, error = false;
   uint32_t retryIn = 0;         // written when `error`
+  bool lowHeap = false;         // the error is a TLS heap skip: `reason` follows
   float price = 0;              // written when `valid`
   bool hasChange = false;       // changePct and basis follow price
   float changePct = 0;
@@ -260,6 +261,7 @@ template <class Out, class Row> void writeStatusTickers(Out& out, size_t count, 
     member(out, PSTR(",\"valid\":"), t.valid);
     member(out, PSTR(",\"error\":"), t.error);
     if (t.error) member(out, PSTR(",\"retryIn\":"), t.retryIn);
+    if (t.error && t.lowHeap) jsonout::raw(out, PSTR(",\"reason\":\"not enough memory for HTTPS\""));
     if (t.valid) {
       member(out, PSTR(",\"price\":"), t.price);
       if (t.hasChange) {

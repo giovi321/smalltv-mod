@@ -212,6 +212,7 @@ static smalltv::StatusTicker statusTicker(size_t i) {
   t.valid = d.valid;
   t.error = d.error;
   if (d.error) t.retryIn = stockRetryInSec(i);   // seconds to the next attempt
+  t.lowHeap = d.lowHeap;
   if (d.valid) {
     t.price = d.price;
     float chg, pct;

@@ -940,10 +940,10 @@ function showStatus(s){
  if(tb){var h='';(s.tickers||[]).forEach(function(t){
   var c=t.error?'var(--red)':(t.valid?'var(--acc)':'var(--mut)');
   var pc=t.changePct!=null?(t.changePct>=0?'+':'')+t.changePct.toFixed(2)+'%':'';
-  var st=t.valid?(t.price+'  '+pc):(t.error?'error':'...');
+  var st=t.valid?(t.price+'  '+pc):(t.error?(t.reason||'error'):'...');
   // A failed ticker keeps its last good price on screen, so say when the next
   // attempt is due rather than leaving the row looking simply broken.
-  if(t.error&&t.retryIn!=null)st+=' <span class="muted">(retry '+t.retryIn+'s)</span>';
+  if(t.error&&t.retryIn!=null)st+=' <span class="muted">('+(t.valid&&t.reason?t.reason+', ':'')+'retry '+t.retryIn+'s)</span>';
   h+='<div class="kv"><b style="color:'+c+'">'+t.symbol+'</b><span>'+st+'</span></div>';});
  tb.innerHTML=h||'<span class="muted">No tickers configured</span>';}
 }

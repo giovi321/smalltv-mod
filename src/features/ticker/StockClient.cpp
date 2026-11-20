@@ -478,6 +478,7 @@ static uint16_t yahooRxBuf() {
 static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, StockData& d) {
   bool https = url.startsWith("https://");
   bool cash = (kind == PARSE_CASH_QUOTE || kind == PARSE_CASH_CHART);
+  d.lowHeap = false;
 
   std::unique_ptr<NetClient> client;
   if (https) {
@@ -490,7 +491,7 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
     //    those handshakes stay as light as the old BASIC build.
     if (cash) {
       appReleaseForTls(16000, 16000);   // a carousel theme kept loaded holds this heap (#134)
-      if (platformMaxFreeBlock() < 16000) return false;   // largest contiguous block, not total
+      if (platformMaxFreeBlock() < 16000) { d.lowHeap = true; return false; }   // largest contiguous block, not total
       client.reset(platformMakeSecureClient(512, &g_cashSession, 512, /*cheapCiphers=*/false));
     } else {
       // raw.githubusercontent.com sends a ~4 KB cert record and won't negotiate
@@ -498,8 +499,9 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
       uint16_t rx = (kind == PARSE_GITHUB) ? GH_QUOTES_RXBUF
                   : (kind == PARSE_YAHOO)  ? yahooRxBuf() : 2048;
       // Total and largest block, with room left for the Wi-Fi SDK (TlsGate.h).
-      // Short: skipped like any failed fetch, retried on the backoff.
-      if (!tlsHeapReady(rx)) return false;
+      // Short: skipped like any failed fetch, retried on the backoff, and
+      // shown as "not enough memory for HTTPS" rather than a fetch error.
+      if (!tlsHeapReady(rx)) { d.lowHeap = true; return false; }
       client.reset(platformMakeSecureClient(rx, (kind == PARSE_YAHOO) ? &g_yahooSession : nullptr,
                                             512, /*cheapCiphers=*/true));
     }

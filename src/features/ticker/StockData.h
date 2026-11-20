@@ -22,6 +22,7 @@ struct StockData {
 
   bool     valid;     // has been successfully populated at least once
   bool     error;     // most recent fetch failed
+  bool     lowHeap;   // ... because the TLS heap check skipped it (TlsGate.h)
   bool     userNamed; // user supplied a custom name (don't override from source)
   uint32_t lastOkMs;  // millis() of last good update
 
@@ -42,6 +43,7 @@ struct StockData {
     sparkCount = 0;
     valid = false;
     error = false;
+    lowHeap = false;
     userNamed = false;
     lastOkMs = 0;
     nextTryMs = 0;

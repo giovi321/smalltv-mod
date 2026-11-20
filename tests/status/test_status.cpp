@@ -102,6 +102,7 @@ static std::string reference(const Case& c) {
       t["valid"] = d.valid;
       t["error"] = d.error;
       if (d.error) t["retryIn"] = d.retryIn;
+      if (d.error && d.lowHeap) t["reason"] = "not enough memory for HTTPS";
       if (d.valid) {
         t["price"] = d.price;
         if (d.hasChange) {
@@ -217,7 +218,10 @@ static std::vector<Case> cases() {
   StatusTicker bad{};  bad.symbol = "NOPE"; bad.error = true; bad.retryIn = 45;
   StatusTicker both{}; both.symbol = "KEPT"; both.valid = true; both.error = true; both.retryIn = 0; both.price = 12.0f; both.hasChange = true; both.changePct = 0.0f;
   StatusTicker wait{}; wait.symbol = "SOON";
-  full.tickers = {aapl, btc, nochg, bad, both, wait};
+  StatusTicker heap{}; heap.symbol = "XMR-USD"; heap.error = true; heap.lowHeap = true; heap.retryIn = 24;
+  StatusTicker stale{}; stale.symbol = "OLD"; stale.valid = true; stale.price = 3.5f; stale.error = true; stale.lowHeap = true; stale.retryIn = 12;
+  StatusTicker okHeap{}; okHeap.symbol = "FINE"; okHeap.valid = true; okHeap.price = 1.0f; okHeap.lowHeap = true;   // no error: no reason
+  full.tickers = {aapl, btc, nochg, bad, both, wait, heap, stale, okHeap};
   full.radar.count = 12;
   full.radar.error = true;
   full.radar.stage = "all filtered out";
