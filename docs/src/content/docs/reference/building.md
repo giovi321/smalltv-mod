@@ -87,6 +87,8 @@ The manual firmware upload in the System tab is not affected.
 
 `smalltv_noupdate` is a ready-made env for the second flag: it extends `smalltv` and adds `-D FW_NO_GITHUB_UPDATE`. CI builds it on every run, so the option keeps compiling, and `tests/buildflags/check_images.py` checks that its image holds none of the download code. It is not a release image and has no release asset. For your own fork, copy the pattern: an env that extends `smalltv` and interpolates `${env:smalltv.build_flags}` before adding the flags.
 
+**A third flag, `-D THEME_MAX_LAYERS=<n>`, raises the theme layer limit** (default 32, allowed 1 to 255). Without it the image is the same as before. Release images allow 32 layers, and a package with more layers does not load on them. See [A higher layer limit](/smalltv-mod/features/themes/#a-higher-layer-limit-build-flag) for the cost per layer and for `SMALLTV_THEME_MAX_LAYERS`, which tells the packer the limit of your build.
+
 ## The smalltv_loader env
 
 `smalltv_loader` (source `src/loader.cpp`) builds a minimal ESP8266 image: WiFi plus a web OTA endpoint at `/update`, nothing else. Its only job is the two-step [SmallTV-ultra install](/smalltv-mod/getting-started/flashing/#smalltv-ultra-stock-updater-says-not-enough-space), where the stock Ultra layout rejects the full image. The loader is small enough to fit that stock slot, and it uses this firmware's own 4m1m flash layout (`eagle.flash.4m1m.ld`), so its own `/update` slot is large enough to then accept the full `smalltv-mod-firmware.bin`.
