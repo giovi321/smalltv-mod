@@ -20,8 +20,10 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -127,6 +129,69 @@ class OneValue(unittest.TestCase):
         with Env('many'):
             with self.assertRaises(ValueError):
                 stheme.validate(theme(1))
+
+
+class HostBuildOfTheValidator(unittest.TestCase):
+    """The native tool is built from the firmware's own sources with the limit as a
+    define, and each limit has its own cached build. The compiler is faked and the
+    folder is empty, so no cached build from an earlier run can stand in for the
+    check (a cached build of the right limit once hid a missing define)."""
+    def build(self, *limits):
+        """Builds for each limit in one empty folder: [(file name, compiler arguments)]."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/'tools').mkdir()
+            (root/'src/features/theme').mkdir(parents=True)
+            for name in ('tools/theme_native.cpp', 'src/features/theme/ThemeEngine.cpp', 'src/features/theme/ThemePackage.cpp'):
+                (root/name).write_text('//')
+            (root/'aj').mkdir()
+            (root/'aj/ArduinoJson.h').write_text('//')
+            (root/'gfx/font').mkdir(parents=True)
+            (root/'gfx/font/glcdfont.h').write_text('//')
+            calls = []
+
+            def fake_run(args, **kwargs):
+                if '--version' in args:
+                    return types.SimpleNamespace(stdout=b'fake 1.0', returncode=0)
+                calls.append(list(args))
+                Path(args[args.index('-o')+1]).write_bytes(b'x')
+                return types.SimpleNamespace(returncode=0, stderr='')
+            fake = types.SimpleNamespace(run=fake_run, CalledProcessError=subprocess.CalledProcessError)
+            with mock.patch.object(native, 'ROOT', root), mock.patch.object(native, 'subprocess', fake), \
+                    mock.patch.dict(os.environ, {'SMALLTV_ARDUINOJSON_INCLUDE': str(root/'aj'),
+                                                 'SMALLTV_GFX_INCLUDE': str(root/'gfx')}):
+                targets = [native.build_executable.__wrapped__(limit) for limit in limits]
+            self.assertEqual(len(calls), len(limits), 'the compiler ran once for each limit')
+            return [(target.name, args) for target, args in zip(targets, calls)]
+
+    def test_the_limit_is_a_define_of_the_host_build(self):
+        for limit in (32, 40):
+            with self.subTest(limit=limit):
+                self.assertIn(f'-DTHEME_MAX_LAYERS={limit}', self.build(limit)[0][1])
+
+    def test_each_limit_has_its_own_cached_build(self):
+        # Two limits in one folder: the second must not be served by the first's file.
+        (name32, _), (name40, _) = self.build(32, 40)
+        self.assertNotEqual(name32, name40)
+
+
+class PackerOwnCheck(unittest.TestCase):
+    """tools/theme_pack.py checks the layer count itself, after the validator has
+    passed it. The validator speaks first for a real theme, so its message hides
+    the packer's own: with the validator out of the way the packer must still
+    refuse, and name the limit."""
+    def refusal(self, limit, count):
+        import theme_pack
+        with Env(limit), tempfile.TemporaryDirectory() as d, mock.patch.object(theme_pack, 'validate_manifest', lambda path: None):
+            (Path(d)/'theme.json').write_text(json.dumps(theme(count)))
+            with self.assertRaises(ValueError) as caught:
+                firmware_build(Path(d))
+            return str(caught.exception)
+
+    def test_names_the_limit(self):
+        self.assertEqual(self.refusal(None, 33), 'Expected at most 32 layers')
+        self.assertEqual(self.refusal(40, 41), 'Expected at most 40 layers')
+        self.assertEqual(self.refusal(10, 11), 'Expected at most 10 layers')
 
 
 @needs_native
