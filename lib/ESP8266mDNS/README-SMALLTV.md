@@ -1,4 +1,4 @@
-# ESP8266mDNS, copy with one change
+# ESP8266mDNS, copy with two changes
 
 This folder is a copy of the `ESP8266mDNS` library (LEAmDNS) from the
 ESP8266 Arduino core **3.1.2** (`libraries/ESP8266mDNS`). It is MIT licensed;
@@ -15,8 +15,11 @@ env of another platform lacks that line.
 
 ## What changed, and why
 
-Only `src/LEAmDNS_Control.cpp` (`MDNSResponder::_parseResponse`) and one new
-header, `src/LEAmDNS_Stream.h`.
+Two changes, in `src/LEAmDNS_Control.cpp` (`MDNSResponder::_parseResponse`
+and `MDNSResponder::_parseQuery`), one new header, `src/LEAmDNS_Stream.h`, and
+the declarations the second change needs in `src/LEAmDNS.h`.
+
+### 1. A response is handled one record at a time (`_parseResponse`)
 
 The original reads **every** answer record of an incoming response into a
 list, handles the list, and frees it after the whole packet. Each record is one
@@ -54,6 +57,42 @@ stop the loop is a failed read of a record (`_readRRAnswer`), as in the core.
 `LEAmDNS_Stream.h` holds the loop as a small template without any Arduino
 include, so a host test (`tests/mdns/`) can run it with fake records.
 
+### 2. A known answer in a query is read only when it is used (`_parseQuery`)
+
+**This change is by bdraco**: it is
+[esphome-libs/arduino-esp8266#9](https://github.com/esphome-libs/arduino-esp8266/pull/9)
+(merged 2026-11-10; ESPHome's copy of this core, release `3.1.2-esphome.4`),
+applied to this copy as it is, with the MIT license headers kept. The host test
+in `tests/mdns/test_known_answers.cpp` follows his test cases
+(`tests/host/mdns/KnownAnswers`) too. The commit message carries the same
+credit.
+
+A query can list answers the asker already has ("known answers"). A browse
+for a service type lists every device of that type. The original reads each
+known answer into a new object of about 540 bytes, also when the query is not
+for us, and frees them after the packet. With many devices that is a big peak,
+and a failed `new` resets the chip, as for a response (change 1).
+
+The change adds `_readKnownAnswer`, `_knownPTRTargetIsOurs` and
+`_udpReadDomainIs` (declared in `src/LEAmDNS.h`). `_parseQuery` calls
+`_readKnownAnswer` for each known answer. It reads the answer whole only when
+the loop that follows would use it: the answer matches a reply we planned, it
+has enough TTL left, and a service PTR names our service; or a tiebreak is
+pending. Any other answer is skipped after its header and costs no heap. A used
+one is read again by the original `_readRRAnswer`. The replies are the same as
+before; bdraco's test checks that for the same cases.
+
+Keep the conditions of `_readKnownAnswer` in step with the known answer loop
+in `_parseQuery` (a comment in the code says so): a condition added to the
+loop but not to `_readKnownAnswer` makes the loop miss answers it needs.
+
+While a tiebreak is pending (a probe of our own name or service), every
+answer that is not of type or class ANY is read whole, as before.
+
+`_parseResponse` (a response, change 1) is a separate path from `_parseQuery`:
+the core issue esp8266/Arduino#9343 is about it, and it is not touched by
+this change.
+
 ## Everything else
 
 Identical to core 3.1.2. To compare, diff against
@@ -68,14 +107,16 @@ after the firmware build (the build downloads the package) and fails when:
 
 - `platformio.ini` pins another espressif8266 platform, or none;
 - an env of another platform (ESP32) does not list `ESP8266mDNS` in `lib_ignore`;
-- a file of this copy other than `src/LEAmDNS_Control.cpp` differs from its
+- a file of this copy other than the two listed as `patched` in
+  `UPSTREAM.json` (`src/LEAmDNS.h`, `src/LEAmDNS_Control.cpp`) differs from its
   recorded hash, is missing, or is not listed in `UPSTREAM.json`;
 - the installed `framework-arduinoespressif8266` has another version, or any of
   its `libraries/ESP8266mDNS` files differs from the recorded hash
-  (`LEAmDNS_Control.cpp` included: the record holds the original hash).
+  (the two patched files included: the record holds the original hash).
 
 Line endings are ignored. When it fails after a platform bump: diff the new
-core's `libraries/ESP8266mDNS` against this folder, re-apply the change to
-`_parseResponse` (or drop the copy if the core fixed it), then update the
+core's `libraries/ESP8266mDNS` against this folder, re-apply the changes to
+`_parseResponse` and `_parseQuery` (or drop the copy, or one change, if the
+core fixed it), then update the
 version and hashes in `UPSTREAM.json`. The check's own tests are
 `tests/mdns/test_check_copy.py`.

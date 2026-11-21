@@ -1185,6 +1185,10 @@ namespace MDNSImplementation
         /* RECEIVING */
         bool _parseMessage(void);
         bool _parseQuery(const stcMDNS_MsgHeader& p_Header);
+        bool _readKnownAnswer(const stcMDNSSendParameter& p_SendParameter,
+                              stcMDNS_RRAnswer*&          p_rpRRAnswer);
+        bool _knownPTRTargetIsOurs(const stcMDNSService& p_Service, uint8_t p_u8ReplyMask,
+                                   size_t p_stRData);
 
         bool _parseResponse(const stcMDNS_MsgHeader& p_Header);
         bool _processAnswers(const stcMDNS_RRAnswer* p_pPTRAnswers);
@@ -1270,6 +1274,7 @@ namespace MDNSImplementation
 
         /* UDP */
         bool _udpReadBuffer(unsigned char* p_pBuffer, size_t p_stLength);
+        bool _udpReadDomainIs(const stcMDNS_RRDomain& p_Domain);
         bool _udpRead8(uint8_t& p_ru8Value);
         bool _udpRead16(uint16_t& p_ru16Value);
         bool _udpRead32(uint32_t& p_ru32Value);
