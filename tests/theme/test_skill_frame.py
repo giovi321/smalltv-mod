@@ -294,6 +294,15 @@ class PauseTests(unittest.TestCase):
             shown = self.preview(manifest)
             self.assertEqual([self.seen(shown, ms) for ms in (0, 1500, 2000, 2500)], [0, 3, 0, 1])
 
+    def test_a_null_pause_is_no_pause(self):
+        # `"pause": null` passes both validators like an absent key, so the
+        # preview must treat it as 0 and not fail on `None * fps`.
+        manifest = paused(4, 2, None)
+        manifest['layers'][0]['pause'] = None
+        self.assertEqual(errors(manifest), [])
+        shown = self.preview(manifest)
+        self.assertEqual([self.seen(shown, ms) for ms in (0, 1500, 2000, 2500)], [0, 3, 0, 1])
+
     def test_a_frame_past_the_last_is_never_drawn_even_if_a_picture_exists(self):
         # The pause must hide the layer by itself, not rely on a missing file:
         # give the first two paused frames a picture, and they still stay hidden.
