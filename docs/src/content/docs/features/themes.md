@@ -664,8 +664,12 @@ seconds and then stop, without empty frames that would each cost an entry in the
 package. `pause` is not allowed on an animation whose frame is
 [picked by a value](#frame-by-value), with or without `group`: such a layer has
 no "after the last frame". `"pause": 0` is allowed there and means no pause.
-`pause` needs the next firmware release after v3.9.0. Older firmware refuses the
-package with `layers[0].pause: unknown field`.
+This `pause` is not the `pause` inside a text layer's [`scroll`](#scrolling-text)
+object: that one is a hold time of 0–10,000 ms, and belongs to scrolling text
+only.
+
+`pause` needs firmware v3.11.0 or later; v3.10.0 and earlier refuse the package
+with `layers[0].pause: unknown field`.
 
 All shown fields except `pause` are required. Source frames are `000.png`, `001.png`, etc.; their
 dimensions must exactly match `width` and `height`. Each animation has its own
