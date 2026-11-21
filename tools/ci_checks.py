@@ -5,11 +5,14 @@
           the free space drops below a threshold.
   assets  Check that every UPDATE_ASSET string in src/config.h is a file name
           that the workflow stages into dist/.
+  ycbcr   Check that Arduino_GFX's YCbCr tables are in flash, not DRAM, in
+          the ESP8266 images (tools/patch_gfx_ycbcr.py).
 
 Run from the repo root:
 
   python3 tools/ci_checks.py size
   python3 tools/ci_checks.py assets
+  python3 tools/ci_checks.py ycbcr
 
 Where the numbers come from (nothing is hardcoded per env):
   - The env list and each env's partition table or linker script come from
@@ -171,6 +174,56 @@ def cmd_assets(args):
     return 1 if bad else 0
 
 
+# Arduino_GFX's YCbCr tables (tools/patch_gfx_ycbcr.py). They are file-static,
+# so the ELF names them _ZL<length><name>.
+YCBCR_TABLES = ("Y2I16", "CR2R16", "CR2G16", "CB2G16", "CB2B16",
+                "CLIPR", "CLIPG", "CLIPB", "CLIPRBE", "CLIPGBE", "CLIPBBE")
+YCBCR_ENVS = "smalltv,smalltv_lean,smalltv_noupdate"
+# ESP8266 memory map: DRAM is 0x3FFE8000-0x3FFFFFFF, the flash-mapped code and
+# PROGMEM data (irom0) start at 0x40200000.
+ESP8266_FLASH_BASE = 0x40200000
+
+
+def cmd_ycbcr(args):
+    pio_home = args.pio_home or os.environ.get("PLATFORMIO_CORE_DIR") \
+        or os.path.join(os.path.expanduser("~"), ".platformio")
+    nm = args.nm or os.path.join(pio_home, "packages", "toolchain-xtensa",
+                                 "bin", "xtensa-lx106-elf-nm")
+    sym = re.compile(r"^([0-9a-fA-F]+) ([0-9a-fA-F]+) \w _ZL\d+(%s)$"
+                     % "|".join(YCBCR_TABLES))
+    bad = []
+    for name in args.envs.split(","):
+        elf = os.path.join(args.build_dir, name, "firmware.elf")
+        if not os.path.isfile(elf):
+            bad.append("%s: %s is missing (build the env first)" % (name, elf))
+            continue
+        out = subprocess.run([nm, "-S", elf], check=True,
+                             capture_output=True, text=True).stdout
+        found = []
+        for line in out.splitlines():
+            m = sym.match(line.strip())
+            if m:
+                found.append((m.group(3), int(m.group(1), 16), int(m.group(2), 16)))
+        if not found:
+            # Nothing to look at means the check is blind (a library change
+            # renamed or dropped the tables), not that all is well.
+            bad.append("%s: no YCbCr table symbol in the ELF; the check cannot "
+                       "see the tables. Look at tools/patch_gfx_ycbcr.py." % name)
+            continue
+        in_dram = [(t, a, s) for t, a, s in found if a < ESP8266_FLASH_BASE]
+        flash = sum(s for t, a, s in found if a >= ESP8266_FLASH_BASE)
+        dram = sum(s for t, a, s in in_dram)
+        print("%-18s %2d tables, %5d B in flash, %5d B in DRAM"
+              % (name, len(found), flash, dram))
+        for t, a, s in in_dram:
+            bad.append("%s: %s (%d B) is in DRAM at 0x%08x; the Arduino_GFX "
+                       "patch (tools/patch_gfx_ycbcr.py) did not apply"
+                       % (name, t, s, a))
+    for b in bad:
+        print("::error::ycbcr check: " + b)
+    return 1 if bad else 0
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -189,6 +242,13 @@ def main():
     a.add_argument("--config-h", default="src/config.h")
     a.add_argument("--workflow", default=".github/workflows/build.yml")
     a.set_defaults(fn=cmd_assets)
+
+    y = sub.add_parser("ycbcr", help="Arduino_GFX YCbCr tables in flash, not DRAM")
+    y.add_argument("--build-dir", default=".pio/build")
+    y.add_argument("--envs", default=YCBCR_ENVS, help="comma separated ESP8266 envs")
+    y.add_argument("--pio-home", help="PlatformIO core dir (default ~/.platformio)")
+    y.add_argument("--nm", help="xtensa-lx106-elf-nm (default: from the PlatformIO toolchain)")
+    y.set_defaults(fn=cmd_ycbcr)
 
     args = p.parse_args()
     sys.exit(args.fn(args))

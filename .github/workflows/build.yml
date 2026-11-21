@@ -110,6 +110,16 @@ jobs:
       # Prints both sizes. The image is not published: no staging line below.
       - name: Check the no-update image has no download code
         run: python3 tests/buildflags/check_images.py
+      # Arduino_GFX keeps its YCbCr tables (6,804 B) in DRAM on the ESP8266;
+      # tools/patch_gfx_ycbcr.py, a pre: script of those envs, moves them to
+      # flash. Every table symbol in the ESP8266 ELFs has to be in flash, so a
+      # library bump or a dropped script cannot bring them back to DRAM
+      # unnoticed. The test checks the patch script and that the patched
+      # header reads every table value and pixel the same as the original.
+      - name: Check the YCbCr tables are in flash
+        run: |
+          python3 tools/ci_checks.py ycbcr
+          sh tests/gfx/run.sh
 
       # tests/theme/run.sh also builds the memory test with -m32, so it
       # measures with the ESP8266's 32-bit pointers and sizes.
