@@ -163,6 +163,43 @@ int main() {
     assert(w.heap() == 65535 && w.block() == 1);
   }
 
+  // The heap walk behind the largest block runs with interrupts off, so it is
+  // taken once in CRASH_BLOCK_EVERY ticks (1 s); the free heap is a counter
+  // read and is taken on every tick (100 ms).
+  {
+    assert(CRASH_BLOCK_EVERY == 10);
+    CrashLowWater w;
+    w.reset();
+    // the quiet ticks ask for no walk at all
+    for (unsigned i = 0; i < CRASH_QUIET_TICKS; i++) { assert(!w.blockDue()); w.sampleHeap(100); }
+    assert(!w.any());
+    // the first tick after them walks at once, so the block is known as soon as the heap is
+    assert(w.blockDue());
+    w.sample(5000, 4000);
+    assert(w.heap() == 5000 && w.block() == 4000);
+    // then heap only, for CRASH_BLOCK_EVERY - 1 ticks; the heap low is seen on each, the block stays
+    for (unsigned i = 1; i < CRASH_BLOCK_EVERY; i++) {
+      assert(!w.blockDue());
+      w.sampleHeap(5000 - 100 * i);
+      assert(w.heap() == 5000 - 100 * i && w.block() == 4000);
+    }
+    assert(w.blockDue());           // the tenth
+    w.sample(4500, 900);
+    assert(w.heap() == 4100 && w.block() == 900);
+    assert(!w.blockDue());
+    w.sampleHeap(70000);            // a big heap is not a low, and no walk is due yet
+    assert(w.heap() == 4100 && w.block() == 900);
+    w.reset();                      // a reset starts the quiet ticks and the schedule again
+    assert(!w.any() && !w.blockDue());
+    // how many walks in 1000 ticks: none in the quiet 20, then every 10th
+    w.reset();
+    unsigned walks = 0;
+    for (unsigned i = 0; i < 1000; i++) {
+      if (w.blockDue()) { walks++; w.sample(2000, 1000); } else w.sampleHeap(2000);
+    }
+    assert(walks == (1000 - CRASH_QUIET_TICKS + CRASH_BLOCK_EVERY - 1) / CRASH_BLOCK_EVERY);   // 98
+  }
+
   std::cout << "crash record tests passed\n";
   return 0;
 }

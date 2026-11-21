@@ -60,6 +60,15 @@ int main() {
   // Nothing in the callback may allocate.
   CHECK(at(cb, "String") == std::string::npos && at(cb, "new ") == std::string::npos && at(cb, "malloc") == std::string::npos);
 
+  // The timer tick walks the heap only when the sampler asks (once a second);
+  // the free heap is read on every tick.
+  const std::string tick = body(plat, "static void lowsTick(void*) {");
+  CHECK(!tick.empty());
+  CHECK(at(tick, "s_lows.blockDue()") != std::string::npos);
+  CHECK(at(tick, "s_lows.blockDue()") < at(tick, "ESP.getMaxFreeBlockSize()"));
+  CHECK(at(tick, "s_lows.sampleHeap(ESP.getFreeHeap())") != std::string::npos);
+  CHECK(at(tick, "ESP.getMaxFreeBlockSize()", at(tick, "ESP.getMaxFreeBlockSize()") + 10) == std::string::npos);
+
   // The sampler runs from the boot call; the lows restart at boot and through
   // the platform call (which the clear handler makes, below).
   const std::string begin = body(plat, "void platformCrashRecordBegin() {\n");   // not the ESP32 stub, which has {} on one line

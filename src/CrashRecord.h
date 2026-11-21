@@ -35,6 +35,11 @@ static const uint32_t CRASH_RTC_WORD = 76;
 // Samples left out after a reset of the low-water marks (100 ms each), at
 // boot or after a crash clear: the first ticks are the start-up's own dip.
 static const unsigned CRASH_QUIET_TICKS = 20;
+// The heap walk behind the largest block runs with interrupts off, so it is
+// taken once in this many 100 ms ticks (once a second). A dip of the largest
+// block that lasts less than that can be missed; the free heap is a counter
+// read and is taken on every tick.
+static const unsigned CRASH_BLOCK_EVERY = 10;
 
 struct CrashRtc {
   uint32_t magic;
@@ -157,12 +162,24 @@ static inline unsigned crashCollectTrace(const uint32_t* words, unsigned count, 
 // 100 ms timer. The first CRASH_QUIET_TICKS after a reset are left out.
 class CrashLowWater {
  public:
-  void reset() { heap_ = block_ = 0xFFFF; quiet_ = CRASH_QUIET_TICKS; }
+  void reset() { heap_ = block_ = 0xFFFF; quiet_ = CRASH_QUIET_TICKS; sinceBlock_ = CRASH_BLOCK_EVERY; }
+  // True when this tick should walk the heap for the largest block: never in
+  // the quiet ticks, then on the first tick and on every CRASH_BLOCK_EVERY-th.
+  bool blockDue() const { return !quiet_ && sinceBlock_ >= CRASH_BLOCK_EVERY; }
+  // A tick that walked the heap: both values.
   void sample(uint32_t heap, uint32_t block) {
     if (quiet_) { --quiet_; return; }
+    sinceBlock_ = 1;
     const uint32_t h = crashClamp16(heap), b = crashClamp16(block);
     if (h < heap_) heap_ = uint16_t(h);
     if (b < block_) block_ = uint16_t(b);
+  }
+  // A tick that did not: the free heap only (a counter read).
+  void sampleHeap(uint32_t heap) {
+    if (quiet_) { --quiet_; return; }
+    if (sinceBlock_ < CRASH_BLOCK_EVERY) ++sinceBlock_;
+    const uint32_t h = crashClamp16(heap);
+    if (h < heap_) heap_ = uint16_t(h);
   }
   // False until a sample was taken since the last reset.
   bool any() const { return heap_ != 0xFFFF || block_ != 0xFFFF; }
@@ -171,6 +188,7 @@ class CrashLowWater {
  private:
   uint16_t heap_ = 0xFFFF, block_ = 0xFFFF;
   uint8_t quiet_ = 0;
+  uint8_t sinceBlock_ = CRASH_BLOCK_EVERY;
 };
 
 // Copy a firmware string out of RTC memory. The record passed its checksum but

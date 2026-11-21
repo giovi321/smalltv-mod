@@ -70,7 +70,10 @@ extern int umm_last_fail_alloc_size;
 // low the heap had been, not only what it was at the last moment.
 static CrashLowWater s_lows;
 static os_timer_t s_lowsTimer;
-static void lowsTick(void*) { s_lows.sample(ESP.getFreeHeap(), ESP.getMaxFreeBlockSize()); }
+static void lowsTick(void*) {
+  if (s_lows.blockDue()) s_lows.sample(ESP.getFreeHeap(), ESP.getMaxFreeBlockSize());
+  else s_lows.sampleHeap(ESP.getFreeHeap());
+}
 void platformCrashLowsReset() { s_lows.reset(); }
 
 static bool crashLoad(CrashRtc& r) {
