@@ -8,6 +8,10 @@ RadarMode g_radarMode;
 
 #define C_MAGENTA gfxTint(0x00F81F)   // speed vector (not in the shared palette)
 
+static uint16_t tintRadarColor(uint32_t rgb) {
+  return gfxTint(RGB565(rgb >> 16, rgb >> 8, rgb & 0xFF));
+}
+
 // Radar geometry (square 240x240 panel; the circle leaves the corners empty).
 static const int CX = TFT_WIDTH / 2;
 static const int CY = TFT_HEIGHT / 2;
@@ -72,12 +76,16 @@ static void drawRadar(const Settings& s) {
   const int lblDX = scaleR(9, k);
   gfx->fillScreen(C_BLACK);
 
-  // Range rings + crosshair + N marker.
-  gfx->drawCircle(CX, CY, RR, C_DGRAY);
-  gfx->drawCircle(CX, CY, RR / 2, C_DGRAY);
-  gfx->drawFastVLine(CX, CY - RR, 2 * RR, C_DGRAY);
-  gfx->drawFastHLine(CX - RR, CY, 2 * RR, C_DGRAY);
-  gfxDrawCentered("N", CY - RR + 2, txt, C_GRAY);   // just inside the top of the ring
+  // Independent radar colors; the grid remains one pixel wide.
+  const uint16_t markerColor = tintRadarColor(s.radar.markerColor);
+  const uint16_t gridColor = tintRadarColor(s.radar.lineColor);
+  const uint16_t textColor = tintRadarColor(s.radar.textColor);
+  const uint16_t airportColor = tintRadarColor(s.radar.airportColor);
+  gfx->drawCircle(CX, CY, RR, gridColor);
+  gfx->drawCircle(CX, CY, RR / 2, gridColor);
+  gfx->drawFastVLine(CX, CY - RR, 2 * RR, gridColor);
+  gfx->drawFastHLine(CX - RR, CY, 2 * RR, gridColor);
+  gfxDrawCentered("N", CY - RR + 2, txt, textColor);   // just inside the top of the ring
 
   // Home-area airports (projected like aircraft).
   int ad = scaleR(5, k);
@@ -87,14 +95,14 @@ static void drawRadar(const Settings& s) {
     if (d > range) continue;
     int x, y;
     polar(d / range * RR, b, x, y);
-    // diamond marker
-    gfx->drawLine(x, y - ad, x + ad, y, C_BLUE);
-    gfx->drawLine(x + ad, y, x, y + ad, C_BLUE);
-    gfx->drawLine(x, y + ad, x - ad, y, C_BLUE);
-    gfx->drawLine(x - ad, y, x, y - ad, C_BLUE);
+    // Airport diamonds and names share one color.
+    gfx->drawLine(x, y - ad, x + ad, y, airportColor);
+    gfx->drawLine(x + ad, y, x, y + ad, airportColor);
+    gfx->drawLine(x, y + ad, x - ad, y, airportColor);
+    gfx->drawLine(x - ad, y, x, y - ad, airportColor);
     if (s.radar.airports[i].icao[0]) {
       gfx->setTextSize(txt);
-      gfx->setTextColor(C_BLUE);
+      gfx->setTextColor(airportColor);
       gfx->setCursor(x + ad + 3, y - ad - 1);
       gfx->print(s.radar.airports[i].icao);
     }
@@ -111,7 +119,7 @@ static void drawRadar(const Settings& s) {
       if (!s.radar.showRimDots) continue;
       int x, y;
       polar(RR, a.bearingDeg, x, y);
-      gfx->fillCircle(x, y, scaleR(3, k), C_RED);
+      gfx->fillCircle(x, y, scaleR(3, k), markerColor);
       continue;
     }
 
@@ -126,8 +134,8 @@ static void drawRadar(const Settings& s) {
       gfx->drawLine(x, y, ex, ey, C_MAGENTA);
     }
 
-    if (!isnan(a.track)) planeTri(gfx, x, y, a.track, k, C_RED);
-    else                 gfx->fillCircle(x, y, scaleR(4, k), C_RED);
+    if (!isnan(a.track)) planeTri(gfx, x, y, a.track, k, markerColor);
+    else                 gfx->fillCircle(x, y, scaleR(4, k), markerColor);
 
     if (s.radar.showLabels && a.callsign[0]) {
       int lw = (int)strlen(a.callsign) * 6 * txt;
@@ -145,7 +153,7 @@ static void drawRadar(const Settings& s) {
       if (!clash) {                          // skip labels that would collide
         if (nLbl < MAX_AIRCRAFT) lbl[nLbl++] = box;
         gfx->setTextSize(txt);
-        gfx->setTextColor(C_GRAY);
+        gfx->setTextColor(textColor);
         gfx->setCursor(box.x, box.y);
         gfx->print(a.callsign);
         if (a.altFt > 0) {
@@ -167,14 +175,14 @@ static void drawRadar(const Settings& s) {
   if (s.radar.unitsMi) snprintf(hdr, sizeof(hdr), "%d mi", (int)lroundf(s.radar.rangeKm * 0.621371f));
   else                 snprintf(hdr, sizeof(hdr), "%d km", s.radar.rangeKm);
   gfx->setTextSize(txt);
-  gfx->setTextColor(C_GRAY);
+  gfx->setTextColor(textColor);
   gfx->setCursor(3, 3);
   gfx->print(hdr);
 
   char cnt[10];
   snprintf(cnt, sizeof(cnt), "%d ac", n);
   gfx->setTextSize(txt);
-  gfx->setTextColor(C_GRAY);
+  gfx->setTextColor(textColor);
   gfx->setCursor(TFT_WIDTH - gfxTextW(cnt, txt) - 3, 3);
   gfx->print(cnt);
 
