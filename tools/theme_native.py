@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import tempfile
@@ -27,8 +28,21 @@ def dependency(variable, folder, header):
                      f'or set {variable} to the library source directory.')
 
 
-@lru_cache(maxsize=1)
+def max_layers():
+    """The layer limit of the firmware the theme is for: 32, the release images',
+    unless SMALLTV_THEME_MAX_LAYERS names a build's -DTHEME_MAX_LAYERS (1 to 255)."""
+    value = os.environ.get('SMALLTV_THEME_MAX_LAYERS', '32')
+    if not re.fullmatch(r'[0-9]{1,4}', value) or not 1 <= int(value) <= 255:
+        raise ValueError('SMALLTV_THEME_MAX_LAYERS must be a number from 1 to 255')
+    return int(value)
+
+
 def executable():
+    return build_executable(max_layers())
+
+
+@lru_cache(maxsize=4)
+def build_executable(layers):
     arduino_json = dependency('SMALLTV_ARDUINOJSON_INCLUDE', 'ArduinoJson', 'ArduinoJson.h')
     gfx = dependency('SMALLTV_GFX_INCLUDE', 'GFX Library for Arduino', 'font/glcdfont.h')
     sources = [ROOT/'tools/theme_native.cpp', ROOT/'src/features/theme/ThemeEngine.cpp',
@@ -42,6 +56,7 @@ def executable():
     except (OSError, subprocess.CalledProcessError) as error:
         raise ValueError('A desktop C++11 compiler is required (c++/g++/clang++; or set CXX).') from error
     digest = hashlib.sha256(version)
+    digest.update(f'layers={layers}'.encode())
     for path in dependencies:
         digest.update(str(path).encode())
         digest.update(path.read_bytes())
@@ -52,7 +67,7 @@ def executable():
         return target
     with tempfile.TemporaryDirectory(dir=cache) as scratch:
         output = Path(scratch)/'theme-native'
-        args = [*compiler, '-std=c++11', '-O2', '-Wall', '-Wextra', '-Werror',
+        args = [*compiler, '-std=c++11', '-O2', '-Wall', '-Wextra', '-Werror', f'-DTHEME_MAX_LAYERS={layers}',
                 '-I'+str(ROOT/'src/features/theme'), '-I'+str(arduino_json), '-I'+str(gfx),
                 *map(str, sources), '-o', str(output)]
         result = subprocess.run(args, capture_output=True, text=True)
