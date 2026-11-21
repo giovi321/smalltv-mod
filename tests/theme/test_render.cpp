@@ -105,7 +105,11 @@ static void testRoundedRectRendering() {
 // own asset handle (render() keeps one handle per layer on the stack, sized by
 // MaxLayers); one more layer than that is refused. Built with the default limit
 // and with -DTHEME_MAX_LAYERS=40 (tests/theme/run.sh).
+#ifndef EXPECTED_MAX_LAYERS
+#define EXPECTED_MAX_LAYERS 32
+#endif
 static void testLayerCapRendering() {
+  assert(MaxLayers==size_t(EXPECTED_MAX_LAYERS));
   Theme theme;theme.background=0x0000;
   Layer image;image.type=LayerType::Image;image.y=0;image.width=3;image.height=1;
   for(size_t i=0;i<MaxLayers;++i){
