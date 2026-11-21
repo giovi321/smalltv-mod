@@ -28,9 +28,9 @@ static const unsigned CRASH_TRACE_WORDS = 8;
 // them (the SDK adds 64). Taken: the OTA hand-off to eboot 0..31 (anything
 // written there between Update.end() and the reboot makes eboot boot the old
 // image). The user memory ends at word 127 (512 bytes: the core's
-// rtcUserMemoryWrite() refuses more). The record is 25 words: 76..100. Its
-// place differs from the 3.5.0 record's (word 96) so that an older record is
-// never overwritten or read as this one.
+// rtcUserMemoryWrite() refuses more). The record is 25 words: 76..100. The
+// 3.5.0 record sat at word 96 with another magic ("CRSH"); this one's magic
+// differs, so an older record is never read as this one.
 static const uint32_t CRASH_RTC_WORD = 76;
 // Samples left out after a reset of the low-water marks (100 ms each), at
 // boot or after a crash clear: the first ticks are the start-up's own dip.
@@ -158,8 +158,8 @@ static inline unsigned crashCollectTrace(const uint32_t* words, unsigned count, 
   return n;
 }
 
-// The lowest free heap and largest block since boot or the last crash clear, fed from a
-// 100 ms timer. The first CRASH_QUIET_TICKS after a reset are left out.
+// The lowest free heap and largest block since boot or the last crash clear,
+// fed from a 100 ms timer (the block once in CRASH_BLOCK_EVERY ticks). The first CRASH_QUIET_TICKS after a reset are left out.
 class CrashLowWater {
  public:
   void reset() { heap_ = block_ = 0xFFFF; quiet_ = CRASH_QUIET_TICKS; sinceBlock_ = CRASH_BLOCK_EVERY; }

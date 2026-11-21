@@ -67,7 +67,9 @@ extern int umm_last_fail_alloc_size;
 
 // Lowest free heap and largest block since boot or the last crash clear, from a
 // 100 ms timer: the callback writes them into the record, so a crash says how
-// low the heap had been, not only what it was at the last moment.
+// low the heap had been, not only what it was at the last moment. The free
+// heap is read every tick (a counter read). The largest block needs a heap
+// walk with interrupts off, so it is read once a second (CRASH_BLOCK_EVERY).
 static CrashLowWater s_lows;
 static os_timer_t s_lowsTimer;
 static void lowsTick(void*) {
