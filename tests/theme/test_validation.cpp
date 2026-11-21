@@ -354,7 +354,8 @@ int main() {
     for (const char* bad : {"60001", "-1", "1.5", "\"500\""}) {
       assert(!parseTheme(withPause("true", bad), theme, error) && error.find("layers[0].pause:") == 0);
     }
-    assert(!parseTheme(withPause("false", "500"), theme, error) && error.find("layers[0].pause:") == 0);
+    // The reason text is the same one the skill's validator gives (the parity test compares them).
+    assert(!parseTheme(withPause("false", "500"), theme, error) && error == "layers[0].pause: only for looping animations");
     assert(parseTheme(withPause("false", "0"), theme, error));   // asks for nothing
     std::string image = R"({"spec":1,"theme":{"id":"p","name":"P","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},)"
       R"("layers":[{"id":"sun","type":"image","x":0,"y":0,"source":"sun","pause":500}]})";
