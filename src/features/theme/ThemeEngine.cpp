@@ -801,6 +801,8 @@ static const char reservedId[] PROGMEM = "time and device are the names of built
 static const char fontNeedsSpec2[] PROGMEM = "needs \"spec\": 2";
 static const char sizeWithFont[] PROGMEM = "not allowed with a font, which sets the size";
 static const char tooManyFonts[] PROGMEM = "expected at most 4 fonts per theme";
+static const char pauseNeedsLoop[] PROGMEM = "only for looping animations";
+static const char pauseFrameBound[] PROGMEM = "not for a frame-bound animation";
 static std::string fromFlash(const char* text) {
   std::string out(strlen_P(text), '\0');
   memcpy_P(&out[0], text, out.size());
@@ -1414,7 +1416,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
       // frames (rounded up) so the frame clock below steps through them.
       int pause = 0;
       if (!f.number("pause", 0, 60000, pause, false)) return false;
-      if (pause && !l.loop) return f.fail("pause", "only for looping animations");
+      if (pause && !l.loop) return f.fail("pause", fromFlash(pauseNeedsLoop));
       l.pauseFrames = (pause * fps + 999) / 1000;
     }
     // assetPath() appends a per-frame suffix; the *compiled* path (what
@@ -1470,7 +1472,7 @@ __attribute__((noinline)) static bool parseLayer(JsonObjectConst o, Theme& t, Bl
   if (f.has("show") && !parseShow(o, t, layerPath, error)) return false;
   // A frame picked by a value never runs past its last frame, and a group has
   // no "after the last frame" of its own, so there is nothing to pause.
-  if (l.frameBound && l.pauseFrames) return f.fail("pause", "not for a frame-bound animation");
+  if (l.frameBound && l.pauseFrames) return f.fail("pause", fromFlash(pauseFrameBound));
   return true;
 }
 // A fetched value as text: strings are cut to 31 bytes, numbers and booleans
