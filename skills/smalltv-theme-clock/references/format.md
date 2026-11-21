@@ -42,6 +42,10 @@ These force spec 2 (firmware 3.4.0+, not editable in SmallTV Studio yet):
   [Frame by value](https://giovi321.github.io/smalltv-mod/features/themes/#frame-by-value).
   `stheme.py preview` shows the picked frame, and a group playing, like the device.
 
+An animation may also set `pause` (0-60,000 ms, looping animations only; firmware 3.11.0
+or later, any spec): it is hidden that long after its last frame, then starts again. It is not
+allowed together with a `frame` binding. `stheme.py preview` hides the layer like the device.
+
 Everything else builds as spec 1. Spec 1 always shows English month and day names; set
 `"spec": 2` explicitly when the user wants them in the device language.
 

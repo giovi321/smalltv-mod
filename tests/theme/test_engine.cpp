@@ -426,6 +426,42 @@ int main() {
     assert(twoShows("5", "99") && !twoShows("9", "5"));
   }
 
+  // `pause`: a looping animation is hidden for that long after its last
+  // frame, rounded up to whole frames, then starts again at frame 0. Hiding
+  // and showing it repaints its area; other layers are not affected.
+  {
+    const char* pausedJson = R"({"spec":1,"theme":{"id":"p","name":"P","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},)"
+      R"("layers":[{"id":"rain","type":"animation","x":10,"y":20,"width":30,"height":40,"source":"rain","frames":4,"fps":2,"loop":true,"pause":900},)"
+      R"({"id":"cat","type":"animation","x":100,"y":100,"width":8,"height":8,"source":"cat","frames":4,"fps":2,"loop":true}]})";
+    assert(parseTheme(pausedJson, theme, error));
+    assert(theme.layers[0].pauseFrames == 2 && theme.layers[1].pauseFrames == 0);
+    Engine p; p.setTheme(theme, 0); p.update(0, nullptr);
+    auto rainShown = [&] { return !p.states()[0].bounds.empty(); };
+    p.update(1500, nullptr); assert(p.states()[0].frame == 3 && rainShown());
+    auto hiding = p.update(2000, nullptr);
+    assert(!rainShown());
+    bool rainRepainted = false;
+    for (const Rect& r : hiding) if (r.x == 10 && r.y == 20 && r.w == 30 && r.h == 40) rainRepainted = true;
+    assert(rainRepainted);
+    assert(p.update(2600, nullptr).size() == 1 && !rainShown());  // only the cat moved
+    auto showing = p.update(3000, nullptr);
+    assert(rainShown() && p.states()[0].frame == 0);
+    rainRepainted = false;
+    for (const Rect& r : showing) if (r.x == 10 && r.y == 20 && r.w == 30 && r.h == 40) rainRepainted = true;
+    assert(rainRepainted);
+    assert(p.states()[1].frame == 2 && !p.states()[1].bounds.empty());  // the cat never paused
+  }
+  // The longest loop: 240 frames at 15 fps and 60,000 ms of pause is 1,140 frames
+  // (76 s); the last of them is hidden, then frame 0 is back.
+  {
+    const char* longJson = R"({"spec":1,"theme":{"id":"p","name":"P","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},)"
+      R"("layers":[{"id":"a","type":"animation","x":0,"y":0,"width":8,"height":8,"source":"a","frames":240,"fps":15,"loop":true,"pause":60000}]})";
+    assert(parseTheme(longJson, theme, error) && theme.layers[0].pauseFrames == 900);
+    Engine p; p.setTheme(theme, 0); p.update(0, nullptr);
+    p.update(75999, nullptr); assert(p.states()[0].frame == 1139 && p.states()[0].bounds.empty());
+    p.update(76000, nullptr); assert(p.states()[0].frame == 0 && !p.states()[0].bounds.empty());
+  }
+
   const char* bindingJson = R"({"spec":1,"theme":{"id":"binding","name":"Binding","author":"Me","version":"1"},"display":{"width":240,"height":240,"background":"#000000"},"data":[{"id":"sensor","url":"http://example.test/value.json","interval":60,"fields":[{"id":"value","path":"value"}]}],"layers":[{"id":"bar","type":"shape","shape":"rectangle","x":20,"y":120,"width":10,"height":18,"cornerRadius":8,"fill":"#00ff00","bind":{"width":{"source":"sensor.value","input":[0,50],"output":[0,100]},"fill":{"source":"sensor.value","stops":[{"at":0,"value":"#00ff00"},{"at":50,"value":"#ffff00"}]}}}]})";
 
   // A field's `decimals` (spec 2) rounds its number where it is shown as text,

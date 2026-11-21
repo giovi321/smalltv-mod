@@ -226,5 +226,100 @@ class FrameBindingTests(unittest.TestCase):
         self.assertEqual(shown.frame(3500, night), 1)
 
 
+def paused(frames, fps, pause, loop=True, bind=None, spec=1):
+    """A looping animation with `pause` (spec 1: it needs no spec 2)."""
+    manifest = theme(frames, bind, spec=spec, loop=loop, fps=fps)
+    layer = manifest['layers'][0]
+    if bind is None:
+        del layer['bind']
+        del manifest['data']
+    if pause is not None:
+        layer['pause'] = pause
+    return manifest
+
+
+class PauseTests(unittest.TestCase):
+    """`pause`: a looping animation is hidden for that long after its last frame,
+    rounded up to whole frames, then starts again at frame 0 (the firmware side
+    is tests/theme/test_engine.cpp and test_validation.cpp)."""
+
+    def preview(self, manifest):
+        shown = Preview(manifest)
+        self.addCleanup(shown.close)
+        return shown
+
+    def seen(self, shown, elapsed):
+        """The frame drawn at the animation's corner, or None while it is hidden."""
+        pixel = shown.renderer.frame(None, elapsed)[0]
+        if pixel == stheme.rgb565(0, 0, 0):
+            return None
+        return next(i for i, color in enumerate(COLORS) if pixel == stheme.rgb565(*color))
+
+    def refused(self, manifest, expected):
+        found = errors(manifest)
+        self.assertTrue(any(expected in e for e in found), f'{expected!r} not in {found}')
+
+    def test_accepted(self):
+        for pause in (0, 1, 900, 60000):
+            with self.subTest(pause=pause):
+                self.assertEqual(errors(paused(4, 2, pause)), [])
+        self.assertEqual(errors(paused(4, 2, None)), [])
+        self.assertEqual(errors(paused(4, 2, 0, loop=False)), [])   # asks for nothing
+        # A pause of 0 also goes with a frame binding.
+        self.assertEqual(errors(paused(6, 2, 0, bind=linear(input=(0, 1), output=(0, 1), group=3), spec=2)), [])
+
+    def test_refusals(self):
+        for bad in (60001, -1, 1.5, '500'):
+            self.refused(paused(4, 2, bad), 'layers[0].pause: expected an integer from 0 to 60000')
+        self.refused(paused(4, 2, 500, loop=False), 'layers[0].pause: only for looping animations')
+        image = paused(4, 2, None)
+        image['layers'][0] = {'id': 'a', 'type': 'image', 'x': 0, 'y': 0, 'source': 'anim/000.png', 'pause': 500}
+        self.refused(image, 'layers[0].pause: unknown field')   # an image has no pause
+
+    def test_not_for_a_frame_bound_animation(self):
+        message = 'layers[0].pause: not for a frame-bound animation'
+        self.refused(paused(8, 2, 500, bind=linear(), spec=2), message)
+        self.refused(paused(6, 2, 500, bind=linear(input=(0, 1), output=(0, 1), group=3), spec=2), message)
+        self.refused(paused(3, 2, 500, bind=stops([(0, 0), (1, 2)]), spec=2), message)
+
+    def test_the_layer_hides_after_its_last_frame_and_starts_again(self):
+        # 4 frames at 2 fps, 900 ms of pause: 2 frames (rounded up), a loop of 6 frames = 3 s.
+        shown = self.preview(paused(4, 2, 900))
+        self.assertEqual([self.seen(shown, ms) for ms in (0, 500, 1000, 1500)], [0, 1, 2, 3])
+        self.assertEqual([self.seen(shown, ms) for ms in (2000, 2500)], [None, None])
+        self.assertEqual([self.seen(shown, ms) for ms in (3000, 3500, 6000)], [0, 1, 0])
+
+    def test_no_pause_is_the_plain_loop(self):
+        for manifest in (paused(4, 2, None), paused(4, 2, 0)):
+            shown = self.preview(manifest)
+            self.assertEqual([self.seen(shown, ms) for ms in (0, 1500, 2000, 2500)], [0, 3, 0, 1])
+
+    def test_a_null_pause_is_no_pause(self):
+        # `"pause": null` passes both validators like an absent key, so the
+        # preview must treat it as 0 and not fail on `None * fps`.
+        manifest = paused(4, 2, None)
+        manifest['layers'][0]['pause'] = None
+        self.assertEqual(errors(manifest), [])
+        shown = self.preview(manifest)
+        self.assertEqual([self.seen(shown, ms) for ms in (0, 1500, 2000, 2500)], [0, 3, 0, 1])
+
+    def test_a_frame_past_the_last_is_never_drawn_even_if_a_picture_exists(self):
+        # The pause must hide the layer by itself, not rely on a missing file:
+        # give the first two paused frames a picture, and they still stay hidden.
+        shown = self.preview(paused(2, 2, 1000))
+        layer = shown.renderer.theme['layers'][0]
+        assets = shown.renderer.assets
+        for past in (2, 3):
+            assets[stheme.asset_path(layer, past)] = assets[stheme.asset_path(layer, 0)]
+        self.assertEqual([self.seen(shown, 500 * n) for n in range(5)], [0, 1, None, None, 0])
+
+    def test_a_pause_is_rounded_up_to_whole_frames(self):
+        # 1 ms at 2 fps is one hidden frame; 500 ms is exactly one; 501 ms is two.
+        for pause, hidden in ((1, 1), (500, 1), (501, 2)):
+            shown = self.preview(paused(2, 2, pause))
+            self.assertEqual([self.seen(shown, 500 * n) for n in range(2 + hidden + 1)],
+                             [0, 1] + [None] * hidden + [0], f'pause {pause}')
+
+
 if __name__ == '__main__':
     unittest.main()
