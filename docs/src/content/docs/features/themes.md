@@ -1132,22 +1132,46 @@ fetched before its interval is up. The manifest is read straight from the packag
 layer at a time, and no list in the engine needs one large block of memory;
 on the ESP8266 that is what makes this fit beside the web server.
 
-**A theme that leaves too little memory is refused (ESP8266 only).** Once a
-theme has loaded and drawn its first frame, the firmware checks the free heap
-and the largest free block. Under the shared Wi-Fi reserve (`WifiReserveFreeHeap` and
-`WifiReserveLargestBlock` in `WifiReserve.h`, with the numbers they come from)
-the Wi-Fi code of the SDK can run out of memory and crash the device, so the
-theme is dropped instead: the screen goes back to the previous mode, the
+**A theme that leaves too little memory is refused (ESP8266 only).** Under the
+shared Wi-Fi reserve (`WifiReserveFreeHeap` in `WifiReserve.h`, with the numbers
+it comes from, and the parser's own block limit `ThemeMode::ParseLargestBlock`)
+the Wi-Fi code of the SDK can run out of memory and crash the device. The
+measurement behind the reserve showed that the free heap separates clean runs
+from crashes and that the largest block does not; the block limit is the one
+the parser needs anyway, and it also catches heap that is free but split into
+small pieces. Two checks keep a theme above it:
+
+1. *Before the engine builds the theme.* The package is parsed, so the firmware
+   knows how many bytes the engine is about to add: a state for every layer, and
+   one string for every text longer than 15 characters (`ThemeFootprint.h`; the
+   strings grow in steps of 15, 30, 60, 120 characters, and the estimate takes
+   the step, and the longest a `{WEEKDAY}` or `{MONTH}` can be). If the free
+   heap minus that is under the reserve, or the largest block is, the theme is
+   refused at once, before the heap goes down. The estimate is held to the
+   engine's own numbers by a host test.
+2. *After the first frame*, for a few seconds, and again once when the first
+   fetched values change the texts: the same reserve on the real heap. It
+   catches what the estimate cannot know, such as a fetched value that makes a
+   text longer.
+
+A refused theme is dropped: the screen goes back to the previous mode, the
 settings no longer name the theme (no later boot tries it again), and
 `/api/status` carries `themeError` ("not enough memory to run this theme"),
-which the Status tab shows as a "Theme" line. The device does not restart. The
-check runs for a few seconds after a load, and again once when the first
-fetched values change the texts; a theme that is running is never dropped later
-because a request used some heap. Choosing the theme again, installing or
-removing it clears the message. `tools/make_oom_theme.py` writes test packages
-of any size, with an optional data source. Its default, 32 layers of 65
-characters, is the size that crashed a plain device before this check, and is
-refused with it.
+which the Status tab shows as a "Theme" line. The device does not restart. A
+theme that is running is never dropped later because a request used some heap.
+Choosing the theme again, installing or removing it clears the message.
+`tools/make_oom_theme.py` writes test packages of any size, with an optional
+data source. Its default, 32 layers of 65 characters, is the size that crashed
+a plain device before these checks, and is refused by the first one.
+
+**Choosing a theme is saved after it has loaded.** `POST /api/themes/select`
+changes the live selection at once (the screen, `/api/themes` and
+`/api/config` show it) but does not write the setting. It is written when the
+theme has loaded and passed the memory check (a few seconds on the ESP8266, the
+first drawn frame on the other boards). A theme that crashes the device while it
+loads therefore does not come back at the next boot. Two things follow: a
+restart in those first seconds brings back the old theme, and a settings save
+made in them (for another setting) saves the new theme with it.
 
 The engine holds a bounded entry index and layer state in RAM. Compositing uses
 row buffers, not a 115,200-byte framebuffer. Static scenes produce no display

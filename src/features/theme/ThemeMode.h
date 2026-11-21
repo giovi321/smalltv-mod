@@ -5,6 +5,7 @@
 #include "ThemePackage.h"
 #include "ThemeData.h"
 #include "ThemeMargin.h"
+#include "ThemeSelection.h"
 #include <LittleFS.h>
 #include <memory>
 #include <vector>
@@ -72,7 +73,10 @@ class ThemeMode : public DisplayMode {
   const String& refusal() const { return refusal_; }
   // The mode and theme the select request replaced, kept until the theme is
   // loaded: a refusal puts them back (ThemeRefusal.h).
+  // While an earlier pick still waits to be saved, the previous theme stays
+  // the last one that passed: a refusal of this pick must not save the earlier one.
   void rememberPrevious(uint8_t mode, const String& id) {
+    if (hasPrev_ && pending_.pending()) return;
     hasPrev_ = true;
     prevMode_ = mode;
     prevId_ = id;
@@ -82,15 +86,23 @@ class ThemeMode : public DisplayMode {
     refusal_ = "";
     refusedId_ = "";
   }
+  // The select request picked this theme but did not save the setting: it is
+  // saved once the theme has loaded and passed the memory check, so a crash
+  // during the first load does not bring the theme back at the next boot
+  // (ThemeSelection.h).
+  void saveAfterLoad(const String& id) { pending_.pick(id.c_str()); }
  private:
   void unload();
   void refreshData();
+  void acceptSelection(const Settings& s);
 #if defined(SMALLTV_FAMILY_ESP8266)
+  bool refusedBeforeBuild(smalltv::Theme& theme);   // true: the theme was refused and dropped
   bool checkMargin();   // true: the theme was refused and dropped
   void refuseForMemory();
   smalltv::MarginWatch marginWatch_;
   bool fetchWatched_ = false;   // the first fetched values of this load restarted the watch
 #endif
+  smalltv::PendingSelection pending_;
   bool hasPrev_ = false;
   uint8_t prevMode_ = 0;
   String prevId_;

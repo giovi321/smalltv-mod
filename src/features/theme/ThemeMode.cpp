@@ -5,11 +5,15 @@
 #include "Platform.h"
 #include "WifiReserve.h"
 #include "ThemeDataClient.h"
+#include "ThemeFootprint.h"
 #include <Arduino_GFX_Library.h>
 #include <font/glcdfont.h>
 #include <algorithm>
 
 ThemeMode g_themeMode;
+// main.cpp: saves the settings once a theme picked in the web UI has loaded
+// and passed (ThemeSelection.h). On every board.
+extern void appThemeAccepted();
 #if defined(SMALLTV_FAMILY_ESP8266)
 // main.cpp: puts the settings right after a refusal and saves them.
 extern void appThemeRefused(bool hasPrev, uint8_t prevMode, const String& prevId, const String& refusedId);
@@ -134,6 +138,12 @@ void ThemeMode::invalidate(const Settings& s) {
   messageDrawn_ = false;
 }
 #if defined(SMALLTV_FAMILY_ESP8266)
+// Frees what a parsed theme holds. A sibling of refuseForMemory() and not a
+// line in it: the temporary lives in this frame, which is gone before the
+// settings are saved (T13).
+__attribute__((noinline)) static void dropTheme(smalltv::Theme& theme) {
+  smalltv::Theme gone(std::move(theme));
+}
 // Drops the theme for lack of memory, the way release() does, and tells the
 // app to put the settings right (main.cpp). The heap is free again before that
 // call, which saves the settings. Nothing here ends the program: the device
@@ -156,8 +166,25 @@ __attribute__((noinline)) void ThemeMode::refuseForMemory() {
   error_ = refusal_;
   messageDrawn_ = false;
   keepData_ = false;
+  pending_.drop();   // a refused theme is never saved
   appThemeRefused(hasPrev_, prevMode_, prevId_, refusedId_);
   hasPrev_ = false;
+}
+// The check before the engine builds the theme (ThemeMargin.h, tooBigToBuild):
+// the package is parsed, nothing else is allocated yet. How many bytes the
+// engine is about to add (the layers' states and texts, ThemeFootprint.h) is
+// known from the parsed theme, so a theme that would take the heap under the
+// Wi-Fi reserve is refused now, before the heap goes down, not 200 ms after.
+// On the device the first check after the load came too late (#132): the
+// Wi-Fi code ran on 1 KB for that long and crashed. Values fetched later can
+// change the texts: the check after the load stays as the net for those.
+// Both numbers are read here; service() only learns whether the theme is gone.
+__attribute__((noinline)) bool ThemeMode::refusedBeforeBuild(smalltv::Theme& theme) {
+  const smalltv::MarginLimits limits{WifiReserveFreeHeap, ParseLargestBlock};
+  if (!smalltv::tooBigToBuild(ESP.getFreeHeap(), platformMaxFreeBlock(), uint32_t(smalltv::engineBytes(theme)), limits)) return false;
+  dropTheme(theme);
+  refuseForMemory();
+  return true;
 }
 // One reading of the margin per frame while the watch is on (ThemeMargin.h).
 // The loop stack is tight, so the numbers are compared here and service()
@@ -212,7 +239,15 @@ void ThemeMode::service(const Settings& s) {
       package_.reset();
       file_.reset();
       hasPrev_ = false;   // no theme, so nothing to refuse later
-    } else {
+    }
+#if defined(SMALLTV_FAMILY_ESP8266)
+    // Parsed, and nothing built yet: refuse a theme the engine would take the
+    // heap under the Wi-Fi reserve with, before it does (ThemeMode::refusedBeforeBuild).
+    else if (refusedBeforeBuild(theme)) {
+      // Dropped. The settings are put right and the message is drawn below.
+    }
+#endif
+    else {
       // After a release the same package loads again, so its sources match.
       if (!keepData_ || dataNextMs_.size() != theme.data.size()) {
         dataNextMs_.assign(theme.data.size(), 0);
@@ -261,6 +296,24 @@ void ThemeMode::service(const Settings& s) {
     package_.reset();
     file_.reset();
     messageDrawn_ = false;
-  }
+  } else acceptSelection(s);
+}
+// The theme was drawn. If the select request picked it and did not save the
+// setting (ThemeSelection.h), this is where it is saved: on the ESP8266 when the
+// watch of the margin is over (the theme passed), on the other boards after
+// the first good frame. A refused theme never gets here.
+__attribute__((noinline)) void ThemeMode::acceptSelection(const Settings& s) {
+  if (!pending_.pending()) return;
+#if defined(SMALLTV_FAMILY_ESP8266)
+  const bool passed = !marginWatch_.active();
+#else
+  const bool passed = true;
+#endif
+  if (!pending_.accept(s.themeId.c_str(), passed)) return;
+  // The save builds the settings as JSON, which needs heap a theme close to the
+  // reserve does not leave: free the theme first, as a web request does. It
+  // loads again at the next frame, with the data it had.
+  release(ParseFreeHeap, ParseLargestBlock);
+  appThemeAccepted();
 }
 #endif

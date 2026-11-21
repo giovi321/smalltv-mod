@@ -490,18 +490,14 @@ void selectTheme() {
       return;
     }
   }
-  String oldId = settings->themeId;
-  uint8_t oldMode = settings->mode;
   // A refusal for lack of memory (ThemeMargin.h) puts these back.
-  g_themeMode.rememberPrevious(oldMode, oldId);
+  g_themeMode.rememberPrevious(settings->mode, settings->themeId);
   settings->themeId = id;
   settings->mode = MODE_THEME;
-  if (!saveSettings(*settings)) {
-    settings->themeId = oldId;
-    settings->mode = oldMode;
-    reply(500, "Could not save selection");
-    return;
-  }
+  // Not saved yet: a theme that crashes the device while it loads would come
+  // back at every boot. The load that passes the memory check saves it
+  // (ThemeSelection.h); until then the old setting stays in flash.
+  g_themeMode.saveAfterLoad(id);
   clockReapply(*settings);
   g_themeMode.forgetRefusal();   // a new pick may try again, even the refused theme
   appInvalidate();

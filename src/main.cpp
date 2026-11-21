@@ -341,6 +341,16 @@ void appThemeRefused(bool hasPrev, uint8_t prevMode, const String& prevId, const
 }
 #endif
 
+#if WITH_THEME
+// Called by ThemeMode once a theme picked in the web UI has loaded and passed
+// the memory check (ThemeSelection.h): the select request left the setting
+// unsaved, so a crash during the first load could not bring the theme back.
+// Called from the loop, with the theme released when the heap is short.
+void appThemeAccepted() {
+  saveSettings(g_settings);   // atomic: a failed save leaves the old file, and the old theme comes back at the next boot
+}
+#endif
+
 static void bootProgress(const char* msg) {
   gfxBoot("SmallTV", msg);
 }

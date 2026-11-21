@@ -2,15 +2,28 @@
 // The memory margin after a theme load: the pure part (no Arduino, so the
 // host tests run it). tests/theme/test_margin.cpp holds it.
 //
-// After the engine takes a theme, and the first frame has allocated the
-// layers' texts, the free heap and the largest free block must both stay at
-// or above their limits: the free heap of the shared Wi-Fi reserve
+// The free heap and the largest free block must both stay at or above their
+// limits while a theme runs: the free heap of the shared Wi-Fi reserve
 // (WifiReserve.h, WifiReserveFreeHeap) and the parser's block limit
-// (ThemeMode::ParseLargestBlock). Under it the ESP8266's Wi-Fi code can run out of
-// memory inside the SDK and write through a null pointer: a crash that no
-// check in this firmware can catch.
+// (ThemeMode::ParseLargestBlock; the #132 measurement showed that the free
+// heap separates clean runs from crashes and the block does not, so the block
+// limit is the parser's own). Under them the ESP8266's Wi-Fi
+// code can run out of memory inside the SDK and write through a null pointer:
+// a crash that no check in this firmware can catch. Two checks hold it:
 //
-// One short reading is not a verdict: a web reply or the buffers of the
+//  1. Before the engine builds anything (tooBigToBuild, below): the parse is
+//     done, so the bytes the engine is about to add are known (engineBytes(),
+//     ThemeFootprint.h). A theme that would leave less than the reserve is
+//     refused at once, before the heap goes down. This is the check that
+//     keeps a crashing theme from crashing. A check that only came after
+//     the load was too late: the Wi-Fi code ran on the low heap for the whole
+//     time it waited for its readings, and crashed (#132).
+//  2. After the engine takes the theme and the first frame has allocated the
+//     layers' texts (MarginWatch, below): the same reserve, judged on the
+//     real heap, for what the estimate cannot know (values fetched later that
+//     make a text longer).
+//
+// For the second check, one short reading is not a verdict: a web reply or the buffers of the
 // select request can hold heap for a moment. So the watch refuses only when
 // ShortInARow readings in a row, at least GapMs apart, are short. It watches
 // for SettleMs after a load, and again after fetched values changed the
@@ -27,6 +40,18 @@ struct MarginLimits {
 // Either number under its limit. Exactly at the limit is enough.
 constexpr bool memoryShort(uint32_t freeHeap, uint32_t largestBlock, MarginLimits limits) {
   return freeHeap < limits.freeHeap || largestBlock < limits.largestBlock;
+}
+
+// The check before the engine builds a theme, from what it is about to add
+// (engineBytes(), ThemeFootprint.h): true when the free heap after that would
+// be under the reserve, or the largest block already is. A theme that would
+// leave less is refused before the heap goes down, so the Wi-Fi code never
+// runs on less than the reserve and no crash can come first. The block is
+// judged as it is now: building only makes it smaller, so this refuses too
+// little, never too much, and the check after the load (MarginWatch) is the net.
+// `addedBytes` over the free heap must not wrap round to "plenty".
+constexpr bool tooBigToBuild(uint32_t freeHeap, uint32_t largestBlock, uint32_t addedBytes, MarginLimits limits) {
+  return freeHeap < addedBytes || memoryShort(freeHeap - addedBytes, largestBlock, limits);
 }
 
 class MarginWatch {
