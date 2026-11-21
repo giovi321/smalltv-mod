@@ -39,6 +39,15 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCL
 # EXPECT_FLOAT_JSON makes the build fail if that flag is missing.
 c++ -std=c++11 -Wall -Wextra -Werror -g -DARDUINOJSON_USE_DOUBLE=0 -DEXPECT_FLOAT_JSON=1 -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_validation.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-validation-float-tests
 /tmp/smalltv-theme-validation-float-tests
+# The layer limit raised to 40 (THEME_MAX_LAYERS): exactly 40 layers load and 41
+# are refused with the limit named; a 40-layer theme renders; the object-file and
+# stack checks in check_layer_limit.sh. EXPECTED_MAX_LAYERS says what the test
+# build must have, so a flag that does not reach the header fails the test.
+c++ -std=c++11 -Wall -Wextra -Werror -g -DTHEME_MAX_LAYERS=40 -DEXPECTED_MAX_LAYERS=40 -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_validation.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-validation-40-tests
+/tmp/smalltv-theme-validation-40-tests
+c++ -std=c++11 -Wall -Wextra -Werror -g -DTHEME_MAX_LAYERS=40 -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_render.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-render-40-tests
+/tmp/smalltv-theme-render-40-tests
+sh tests/theme/check_layer_limit.sh 40
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" -I".pio/libdeps/smalltv_esp32_8mb/GFX Library for Arduino/src" tests/theme/check_example.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-example-check
 /tmp/smalltv-theme-example-check examples/themes/pixel-room.stheme
 /tmp/smalltv-theme-example-check examples/themes/terminal-ops.stheme
@@ -49,3 +58,7 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCL
 # ArduinoJson's malloc calls as well as operator new.
 c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" -Wl,--wrap=malloc,--wrap=free,--wrap=realloc tests/theme/test_memory.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-memory-tests
 /tmp/smalltv-theme-memory-tests
+# The same at the raised layer limit: the largest block stays in its budget, what
+# one more layer costs stays in its bound, and the load peak is printed.
+c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -DTHEME_MAX_LAYERS=40 -DEXPECTED_MAX_LAYERS=40 -Isrc/features/theme -I"$THEME_JSON_INCLUDE" -Wl,--wrap=malloc,--wrap=free,--wrap=realloc tests/theme/test_memory.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-memory-40-tests
+/tmp/smalltv-theme-memory-40-tests

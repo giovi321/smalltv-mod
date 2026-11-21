@@ -1,10 +1,12 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
 import tempfile
 import unittest
+from unittest import mock
 import sys
 from PIL import Image
 
@@ -59,6 +61,34 @@ class PackTests(unittest.TestCase):
             (root/'theme.json').write_text(json.dumps(manifest))
             with self.assertRaises(ValueError):
                 pack.build(root)
+
+    def test_layer_limit(self):
+        # 32 layers unless SMALLTV_THEME_MAX_LAYERS names the limit of the
+        # firmware the package is for (a build with -DTHEME_MAX_LAYERS=<n>).
+        def write(root, count):
+            manifest = {'spec': 1, 'theme': {'id': 'test', 'name': 'Test', 'author': 'Me', 'version': '1'},
+                        'display': {'width': 240, 'height': 240, 'background': '#000000'},
+                        'layers': [{'id': f'l{i}', 'type': 'shape', 'shape': 'rectangle', 'x': 0, 'y': 0,
+                                    'width': 1, 'height': 1, 'fill': '#000000'} for i in range(count)]}
+            (root/'theme.json').write_text(json.dumps(manifest))
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            with mock.patch.dict(os.environ):
+                os.environ.pop('SMALLTV_THEME_MAX_LAYERS', None)
+                write(root, 32)
+                pack.build(root)
+                write(root, 33)
+                with self.assertRaisesRegex(ValueError, 'at most 32 layers'):
+                    pack.build(root)
+            with mock.patch.dict(os.environ, {'SMALLTV_THEME_MAX_LAYERS': '40'}):
+                write(root, 40)
+                pack.build(root)
+                write(root, 41)
+                with self.assertRaisesRegex(ValueError, 'at most 40 layers'):
+                    pack.build(root)
+            with mock.patch.dict(os.environ, {'SMALLTV_THEME_MAX_LAYERS': 'many'}):
+                with self.assertRaises(ValueError):
+                    pack.build(root)
 
     def test_rejects_oversized_image(self):
         with self.assertRaises(ValueError):

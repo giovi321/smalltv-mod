@@ -263,11 +263,22 @@ int main() {
   // Non-object layers and too many layers are still rejected with the same messages.
   json=base;json.insert(json.find("[{")+1,"7,");
   assert(!parseTheme(json,theme,error));assert(error=="layers[0]: expected an object");
+  // The limit is 32 layers, unless the build sets THEME_MAX_LAYERS: exactly the
+  // limit loads, one more is refused with a message that names the limit. The
+  // expected limit comes from the test build (EXPECTED_MAX_LAYERS), not from
+  // THEME_MAX_LAYERS, which the header itself defines when the build does not.
+#ifndef EXPECTED_MAX_LAYERS
+#define EXPECTED_MAX_LAYERS 32
+#endif
+  assert(MaxLayers==EXPECTED_MAX_LAYERS);
+  const std::string tooMany="layers: expected an array of at most "+std::to_string(EXPECTED_MAX_LAYERS)+" layers";
   {deserializeJson(d,base);JsonObject first=d["layers"][0];JsonDocument copy;copy.set(first);
-   for(int i=1;i<33;++i){JsonObject l=d["layers"].add<JsonObject>();l.set(copy.as<JsonObjectConst>());l["id"]=std::string("t")+std::to_string(i);}
-   serializeJson(d,json);assert(!parseTheme(json,theme,error));assert(error=="layers: expected an array of at most 32 layers");}
+   for(size_t i=1;i<MaxLayers;++i){JsonObject l=d["layers"].add<JsonObject>();l.set(copy.as<JsonObjectConst>());l["id"]=std::string("t")+std::to_string(i);}
+   json.clear();serializeJson(d,json);assert(parseTheme(json,theme,error));assert(theme.layers.size()==MaxLayers);
+   JsonObject l=d["layers"].add<JsonObject>();l.set(copy.as<JsonObjectConst>());l["id"]="one-more";
+   json.clear();serializeJson(d,json);assert(!parseTheme(json,theme,error));assert(error==tooMany);}
   json=base;json.replace(json.find("[{"),1,"{\"x\":");json.replace(json.rfind("]"),1,"}");
-  assert(!parseTheme(json,theme,error));assert(error=="layers: expected an array of at most 32 layers");
+  assert(!parseTheme(json,theme,error));assert(error==tooMany);
   json=base;json+=" x";assert(!parseTheme(json,theme,error));assert(error=="theme.json: trailing content after manifest");
   // Nesting still stops at eight levels in all, counting the root object and the layers array.
   json=base;json.insert(json.find("\"size\":48"),"\"deep\":"+std::string(6,'[')+std::string(6,']')+",");
