@@ -1086,7 +1086,14 @@ them: the install is refused with `layers: expected an array of at most 32
 layers`. A firmware you build yourself can raise the limit with
 `-DTHEME_MAX_LAYERS=<n>` (1 to 255; the default is 32, and without the flag the
 image is the same as before). Each layer costs RAM (its record in the theme and
-its state in the engine) and 2 bytes of stack in `render()`. FILL_IN_COST
+its state in the engine) and 2 bytes of stack in `render()`. Measured on the
+32-bit host build with plain rectangle layers, each layer past the first holds
+about 125 bytes of heap once loaded and about 110 bytes more while it runs. A
+theme of 40 such layers holds about 5,250 bytes loaded and 4,460 bytes while
+running, and its load peak is about 8,500 bytes, against about 4,250, 3,580 and
+7,020 bytes at 32. The 3,840-byte running budget and the 5,120-byte load budget
+that the bundled themes are held to do not apply to a theme with this many
+layers, so check the free heap on your device before relying on a high limit.
 The error text names the limit of the build.
 
 The packer, the native tools and the skill check against the same number. Tell
