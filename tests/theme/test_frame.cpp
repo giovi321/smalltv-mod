@@ -559,6 +559,11 @@ static void testPauseRefused() {
   const char* msg = "layers[0].pause: not for a frame-bound animation";
   assert(bad(withPause(anim(8, linear("w.moon", "[0,29]", "[0,7]")), "500"), msg));
   assert(bad(withPause(cat(), "500"), msg));
+  {
+    // `bad` matches a part of the text; the whole reason must be exactly this one.
+    Theme exact; std::string reason;
+    assert(!parseTheme(manifest(2, withPause(cat(), "500")), exact, reason) && reason == msg);
+  }
   assert(bad(withPause(anim(6, steps("w.day", "[{\"at\":0,\"frame\":0}]", kGroup3)), "1"), msg));
   // A pause of 0 asks for nothing, so it is allowed; so is a pause on a layer
   // whose frame is not picked by a value (even with another binding).
