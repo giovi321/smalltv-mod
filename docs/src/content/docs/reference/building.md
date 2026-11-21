@@ -28,16 +28,16 @@ Eight envs: six published images, the loader, and `smalltv_noupdate`, which CI b
 pio run -e smalltv_lean
 ```
 
-The ESP8266 shares one 80 KB DRAM arena between static allocations and the heap, so a byte of static dropped is a byte the heap gains. On the 3.5.0 build:
+The ESP8266 shares one 80 KB DRAM arena between static allocations and the heap, so a byte of static dropped is a byte the heap gains. Measured on `main` after v3.10.0 (`9d66ffd`):
 
 | Build | Static RAM | Heap gained |
 |-------|-----------|-------------|
-| `smalltv` | 56,984 B | baseline |
-| `smalltv_lean` | 48,820 B | 8,164 B |
+| `smalltv` | 57,156 B | baseline |
+| `smalltv_lean` | 48,832 B | 8,324 B |
 
 Lean compiles out Home Assistant, the usage meter and theme clocks. Since 3.5.0 the Home Assistant screen store (5,792 bytes) and the MQTT client with its 768-byte receive buffer are no longer static in either image: `haBoot()` (`src/features/ha/HaBoot.cpp`) takes them from the heap at boot, and only when a broker host is set. A standard device with the host blank therefore keeps that memory too, without the lean image.
 
-That headroom decides whether two fetch paths run at all. `features/radar/RadarClient.cpp` and `features/ticker/StockClient.cpp` both skip their fetch unless a 16,000-byte contiguous block is available, which is what the BearSSL handshake actually allocates. Both refuse quietly rather than crash, so a device below the threshold shows an empty scope or a blank ticker with no error. On a busy LAN, or over a weak link where retransmissions keep the WiFi queues full, the standard build can sit under both.
+That headroom decides whether the HTTPS fetches run at all. The radar (`features/radar/RadarClient.cpp`) and a cash.ch quote (`features/ticker/StockClient.cpp`) skip their fetch unless a 16,000-byte contiguous block is available, which is what the BearSSL handshake allocates. A Yahoo quote skips its fetch unless the free heap is at least its receive buffer plus 12,000 bytes. All of them refuse quietly rather than crash, so a device below the threshold shows an empty scope or a blank ticker with no error. On a busy LAN, or over a weak link where retransmissions keep the WiFi queues full, the standard build can sit under both.
 
 Read the current figures from `/api/status`: `heap` is free bytes and `maxblk` is the largest contiguous block.
 
@@ -47,16 +47,16 @@ The env inherits `smalltv` through `extends` and interpolates its `build_flags` 
 
 The six `WITH_*` flags in `src/config.h` each default to 1 and can be set to 0 in any env, or passed through `PLATFORMIO_BUILD_FLAGS`:
 
-| Flag | Drops | Static RAM saved on the ESP8266 (2.12.0) |
+| Flag | Drops | Static RAM saved on the ESP8266 |
 |------|-------|--------------------------------|
-| `WITH_HA=0` | Home Assistant screens over MQTT | 7,668 B |
-| `WITH_TICKER=0` | The stock and crypto ticker | 3,328 B |
-| `WITH_RADAR=0` | The plane radar | 2,180 B |
-| `WITH_USAGE=0` | The Claude usage meter and its mascot | 1,080 B |
-| `WITH_THEME=0` | Theme clocks | not measured |
-| `WITH_NOTIFY=0` | Notification overlays | not measured |
+| `WITH_THEME=0` | Theme clocks | 5,348 B |
+| `WITH_TICKER=0` | The stock and crypto ticker | 3,292 B |
+| `WITH_HA=0` | Home Assistant screens over MQTT | 1,796 B |
+| `WITH_RADAR=0` | The plane radar | 1,336 B |
+| `WITH_USAGE=0` | The Claude usage meter and its mascot | 1,168 B |
+| `WITH_NOTIFY=0` | Notification overlays | 1,052 B |
 
-Each figure is that one flag measured on its own against the 55,536-byte standard build of 2.12.0. Combining flags saves slightly less than the sum, because the features share some code and string data. The Home Assistant figure is lower since 3.5.0, because its screen store left static memory (see above); on a device with the broker host blank that memory is free anyway.
+Each figure is that one flag measured on its own against the 57,156-byte standard build above. Combining flags does not add up exactly, because the features share some code and string data: the three flags of the lean image save 8,312 B one by one, and lean saves 8,324 B. The Home Assistant figure leaves out its screen store and MQTT client, which come from the heap at boot only when a broker host is set (see above).
 
 Every feature is guarded at the module level, so dropping one takes its code, its settings handling, and its web UI tab with it. The tab disappears because `/api/config` reports the compiled-in features and the UI hides what is missing, which means a slim build needs no separate web UI.
 

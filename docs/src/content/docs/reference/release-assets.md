@@ -68,9 +68,9 @@ After the swap the System tab reports the new variant, and from then on self-upd
 
 ## Why the ESP8266 and the NM-TV-154 get two images and the other boards get one
 
-The ESP8266 shares a single 80 KB DRAM arena between static allocations and the heap, so anything compiled in costs heap that TLS then cannot have. Two fetch paths refuse to start a handshake when memory runs short: the plane radar and a cash.ch quote each want a 16,000-byte contiguous block. Below that the affected screen goes quiet, and since 2.12.1 the Status tab's Radar line says so explicitly.
+The ESP8266 shares a single 80 KB DRAM arena between static allocations and the heap, so anything compiled in costs heap that TLS then cannot have. The HTTPS fetches refuse to start a handshake when memory runs short: the plane radar and a cash.ch quote each want a 16,000-byte contiguous block, and a Yahoo quote wants its receive buffer plus 12,000 bytes of free heap. Below that the affected screen goes quiet, and since 2.12.1 the Status tab's Radar line says so explicitly.
 
-The lean image gives that back. On the 3.5.0 build static RAM is 56,984 bytes for the standard image and 48,820 for lean, so the heap starts 8,164 bytes larger. Lean compiles out Home Assistant, the usage meter and theme clocks.
+The lean image gives that back. On `main` after v3.10.0 static RAM is 57,156 bytes for the standard image and 48,832 for lean, so the heap starts 8,324 bytes larger. Lean compiles out Home Assistant, the usage meter and theme clocks.
 
 Since 3.5.0 the standard image also leaves out the largest piece of Home Assistant when it is not used: the four-screen store (5,792 bytes) and the MQTT client with its 768-byte receive buffer come from the heap at boot, and only when a broker host is set. On a standard ESP8266 running the Pixel Room theme, free heap is about 14.4 KB with the broker host blank and about 7.3 KB with Home Assistant on. So a device that does not use Home Assistant needs the lean image only when it also has no use for theme clocks and still runs short.
 
