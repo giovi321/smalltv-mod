@@ -6,6 +6,8 @@
 #include "BlockList.h"
 #include "ThemeCatalog.h"
 #include "ThemeData.h"
+#include "ThemeFootprint.h"
+#include "ThemeMargin.h"
 #include "ThemePackage.h"
 #include <algorithm>
 #include <cassert>
@@ -13,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
 #include <malloc.h>
@@ -27,16 +30,58 @@ using namespace smalltv;
 static size_t live = 0, peak = 0, largest = 0, calls = 0;   // calls: allocations made while counting
 static bool counting = false;
 static size_t charge(void* p) { return p ? (malloc_usable_size(p) + 4 + 7) / 8 * 8 : 0; }
+// What the same allocations cost on the device: umm_malloc charges by the size
+// asked for (a 4-byte header, whole 8-byte blocks), where this host's malloc
+// rounds up to 16 and so charges a few bytes more here and there. The estimate
+// of what the engine adds (ThemeFootprint.h) is held against this count. It
+// keeps the sizes asked for in a table of its own (no allocation); an
+// allocation made before counting began is not in it and is not subtracted.
+static long deviceLive = 0;
+static const size_t DeviceSlots = 1 << 16;
+static void* const Freed = reinterpret_cast<void*>(1);
+static struct { void* p; size_t charged; } deviceSlots[DeviceSlots];
+static size_t deviceSlot(void* p) { return (reinterpret_cast<size_t>(p) >> 3) * 2654435761u & (DeviceSlots - 1); }
+static void deviceAdd(void* p, size_t requested) {
+  // An address freed while nothing counted is still in the table: take it over.
+  size_t i = deviceSlot(p), tries = 0;
+  while (deviceSlots[i].p && deviceSlots[i].p != p) {
+    i = (i + 1) & (DeviceSlots - 1);
+    if (++tries == DeviceSlots) abort();
+  }
+  // A live address is never handed out twice, so one found here is stale: its
+  // charge stays in the count as an offset, which the differences ignore.
+  if (deviceSlots[i].p != p) {
+    i = deviceSlot(p);
+    while (deviceSlots[i].p && deviceSlots[i].p != Freed) i = (i + 1) & (DeviceSlots - 1);
+  }
+  deviceSlots[i].p = p;
+  deviceSlots[i].charged = (requested + 4 + 7) / 8 * 8;
+  deviceLive += long(deviceSlots[i].charged);
+}
+static void deviceRemove(void* p) {
+  for (size_t i = deviceSlot(p), tries = 0; deviceSlots[i].p && tries < DeviceSlots; i = (i + 1) & (DeviceSlots - 1), ++tries)
+    if (deviceSlots[i].p == p) {
+      deviceLive -= long(deviceSlots[i].charged);
+      deviceSlots[i].p = Freed;
+      return;
+    }
+}
 static void* track(void* p, size_t requested) {
   if (counting && p) {
     ++calls;
     live += charge(p);
     if (live > peak) peak = live;
     if (requested > largest) largest = requested;
+    deviceAdd(p, requested);
   }
   return p;
 }
-static void untrack(void* p) { if (counting && p) live -= charge(p); }
+static void untrack(void* p) {
+  if (counting && p) {
+    live -= charge(p);
+    deviceRemove(p);
+  }
+}
 extern "C" {
 void* __real_malloc(size_t);
 void* __real_realloc(void*, size_t);
@@ -104,7 +149,10 @@ struct NoDisplay : Display {
   void row(int, int, const uint16_t*, int) override {}
 };
 
-struct Usage { size_t peak, loaded, theme, running, largest; };
+// `predicted` is what engineBytes() says the engine will add to a loaded theme
+// (ThemeFootprint.h); running - loaded is what it really added.
+// `added` is the same, counted as the device charges it (see deviceLive).
+struct Usage { size_t peak, loaded, theme, running, largest, predicted; long added; };
 // Peak while loading; what a loaded theme holds (the Theme plus the
 // package's entry index, which ThemeMode keeps for reading assets); what the
 // Theme alone holds; what it holds while it runs (the engine's per-layer
@@ -135,6 +183,8 @@ static Usage load(const char* path) {
     Package package(source);
     Theme loaded;
     assert(package.load(loaded, error));
+    usage.predicted = engineBytes(loaded);
+    const long deviceAfterLoad = deviceLive;
     Engine engine;
     engine.setTheme(std::move(loaded), 0);
     tm time{};
@@ -144,6 +194,7 @@ static Usage load(const char* path) {
     NoDisplay display;
     assert(render(engine, dirty, package, display));
     usage.running = live;
+    usage.added = deviceLive - deviceAfterLoad;
   }
   usage.largest = largest;
   counting = false;
@@ -1106,7 +1157,197 @@ static void testDataReplyLists() {
   assert(extractThemeValues(many, oneSpec1, keyedValues, DataParseBudget) && keyedValues.size() == 1 && keyedValues[0].value == std::string(31, 'd'));
 }
 
+// ---- The estimate of what the engine adds (ThemeFootprint.h, issue #132) ----------
+//
+// Before the engine builds the states and the texts of a loaded theme, the
+// firmware asks engineBytes() how much heap that will take, and refuses a
+// theme that would leave less than the Wi-Fi reserve. The property that
+// matters: the estimate is never under what the engine really adds (an
+// estimate that is low lets a crashing theme through), and not far over it
+// (a high one refuses themes that fit). Measured here the way the heap counts
+// (the same allocator wrap as everything above), after a theme was parsed and
+// the engine took it and drew its first frame's state, with and without a
+// clock and in a language. The texts grow in steps (15, 30, 60, 120, ... the
+// capacity of a std::string built one character at a time), and a text that
+// crosses a step costs twice: the estimate has to take the step.
+struct Footprint { size_t predicted, measured; };
+static Footprint footprint(const std::string& json, bool withClock, uint8_t language, int month = 9, int weekday = 5) {
+  Theme theme;
+  std::string error;
+  Footprint f{};
+  live = peak = largest = 0;
+  counting = true;
+  {
+    bool ok = parseTheme(json, theme, error);
+    if (!ok) std::cerr << error << '\n';
+    assert(ok);
+    const long parsed = deviceLive;
+    f.predicted = engineBytes(theme);
+    Engine engine;
+    engine.setTheme(std::move(theme), 0);
+    engine.setLanguage(language);
+    tm time{};
+    time.tm_year = 126; time.tm_mon = month; time.tm_mday = 23; time.tm_wday = weekday; time.tm_yday = 295;
+    time.tm_hour = 16; time.tm_min = 15;
+    std::vector<Rect> dirty = engine.update(1000, withClock ? &time : nullptr);
+    f.measured = size_t(deviceLive - parsed);
+  }
+  counting = false;
+  return f;
+}
+// How far over the measured bytes the estimate may be. For text without
+// tokens it is exact (the engine's strings grow in the steps the estimate
+// takes); the room here is for the bundled themes, whose texts have tokens
+// and whose layers are not all text.
+static size_t overBound(size_t measured) { return 64 + measured / 16; }
+static int estimateCases = 0;
+static size_t worstOver = 0;
+// `looseLayers`: layers whose text has a token. A token is counted at its
+// longest ({WEEKDAY} 13 characters) because the clock sets later and the
+// text then takes that room (the check after the load is no net for a clock
+// that syncs after its few seconds), so on a Friday in October, or with no
+// clock yet, such a layer holds one step less than the bound: up to 128 B (a
+// text of 110 characters and {WEEKDAY} is bounded at 240 and held at 120).
+static void expectEstimate(const char* what, const Footprint& f, size_t looseLayers = 0) {
+  ++estimateCases;
+  const size_t allowed = overBound(f.measured) + looseLayers * 128;
+  if (f.predicted < f.measured || f.predicted - f.measured > allowed)
+    fprintf(stderr, "estimate %s: predicted %zu B, measured %zu B\n", what, f.predicted, f.measured);
+  assert(f.predicted >= f.measured);
+  assert(f.predicted - f.measured <= allowed);
+  if (!looseLayers && f.predicted - f.measured > worstOver) worstOver = f.predicted - f.measured;
+}
+static std::string textManifest(int layers, const std::function<std::string(int)>& text, int spec = 1) {
+  std::string json = "{\"spec\":" + std::to_string(spec) + ",\"theme\":{\"id\":\"est\",\"name\":\"Est\",\"author\":\"A\",\"version\":\"1\"},"
+    "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},\"layers\":[";
+  for (int i = 0; i < layers; ++i) {
+    if (i) json += ",";
+    json += "{\"id\":\"t" + std::to_string(i) + "\",\"type\":\"text\",\"x\":0,\"y\":" + std::to_string(i * 7) +
+            ",\"size\":16,\"color\":\"#ffffff\",\"value\":\"" + text(i) + "\"}";
+  }
+  return json + "]}";
+}
+static void testEstimate() {
+  // One layer, every length a manifest allows: the steps at 15, 30, 60 and 120.
+  for (int length = 1; length <= 128; ++length) {
+    const std::string json = textManifest(1, [&](int) { return std::string(length, 'x'); });
+    expectEstimate(("1 layer x " + std::to_string(length)).c_str(), footprint(json, true, 0));
+  }
+  // The shapes of the series that measured the device: 32 layers of 12 to 65.
+  for (int length : {12, 20, 28, 36, 40, 50, 55, 59, 60, 61, 64, 65, 100, 120, 121, 128}) {
+    const std::string json = textManifest(32, [&](int) { return std::string(length, 'y'); });
+    expectEstimate(("32 layers x " + std::to_string(length)).c_str(), footprint(json, true, 0));
+    expectEstimate(("32 layers x " + std::to_string(length) + " no clock").c_str(), footprint(json, false, 0));
+  }
+  // Mixed lengths and a count that is not a multiple of a block.
+  const int mix[] = {3, 14, 15, 16, 29, 30, 31, 59, 60, 61, 90, 128};
+  for (int layers : {1, 5, 12, 13, 25, 32})
+    expectEstimate(("mixed " + std::to_string(layers)).c_str(),
+                   footprint(textManifest(layers, [&](int i) { return std::string(mix[i % 12], 'z'); }), true, 0));
+  // Tokens: the clock fills them at the first update, or leaves "--" without a clock.
+  // The estimate takes the longest each can be ({WEEKDAY} up to 13 characters).
+  const char* tokens[] = {"{HH}:{MM}:{SS}", "{WEEKDAY} {MONTH} {DD}", "{YYYY}-{MO}-{DD} {AMPM}", "{WD} {MON} {hh}:{MM} {AMPM} {WW}"};
+  for (const char* t : tokens) {
+    // Spec 2: {MO}, {AMPM}, {WW} and the languages are not in spec 1.
+    expectEstimate(t, footprint(textManifest(8, [&](int) { return std::string(t); }, 2), true, 0), 8);
+    expectEstimate((std::string(t) + " no clock").c_str(), footprint(textManifest(8, [&](int) { return std::string(t); }, 2), false, 0), 8);
+  }
+  // A token that carries a text over a step: 50 characters and {WEEKDAY} is 56
+  // on a Tuesday and 63 on a Wednesday ("Wednesday" is 9, "Saturday" 8, but the
+  // longest in any language is 13), so the capacity may be 60 or 120.
+  for (int fill : {45, 46, 47, 48, 49, 50, 51, 58, 59, 60, 107, 108, 110}) {
+    const std::string t = std::string(fill, 'w') + "{WEEKDAY}";
+    expectEstimate(("text and token " + std::to_string(fill)).c_str(), footprint(textManifest(16, [&](int) { return t; }, 2), true, 0), 16);
+  }
+  // Another language: names in Portuguese are longer ("Segunda-feira", 13).
+  for (uint8_t language = 0; language < 6; ++language)
+    expectEstimate(("language " + std::to_string(language)).c_str(),
+                   footprint(textManifest(8, [&](int) { return std::string(20, 'q') + "{MONTH} {WEEKDAY} {MON} {WD}"; }, 2), true, language), 8);
+  // Localized layers (spec 2): the text of the device's language is the one expanded.
+  for (uint8_t language = 0; language < 6; ++language)
+    expectEstimate(("localized " + std::to_string(language)).c_str(), footprint(localizedManifest(4, 30), true, language), 4);
+  // Every language, month and weekday: the estimate may never be under what a
+  // name makes of a text. Each theme holds one token behind 40 to 62 fixed
+  // characters, so one of the layers sits on each step (60) whatever the name's
+  // length; {YYYY} and {HH}:{MM} are exact, the names are bounded by their slot.
+  const char* sweepTokens[] = {"{MONTH}", "{WEEKDAY}", "{MON}", "{WD}", "{YYYY}", "{HH}:{MM}"};
+  int sweepCases = 0;
+  for (const char* token : sweepTokens) {
+    const std::string json = textManifest(23, [&](int i) { return std::string(40 + i, 'k') + token; }, 2);
+    for (uint8_t language = 0; language < 6; ++language)
+      for (int month = 0; month < 12; ++month)
+        for (int weekday = 0; weekday < 7; ++weekday) {
+          const Footprint f = footprint(json, true, language, month, weekday);
+          ++sweepCases;
+          if (f.predicted < f.measured)
+            fprintf(stderr, "sweep %s language %d month %d weekday %d: predicted %zu B, measured %zu B\n", token, int(language), month, weekday, f.predicted, f.measured);
+          assert(f.predicted >= f.measured);
+        }
+  }
+  printf("estimate sweep: %d cases (6 tokens x 6 languages x 12 months x 7 weekdays)\n", sweepCases);
+  // A translation longer than the English text is the one that is expanded in
+  // its language, so it is what the estimate must hold.
+  {
+    std::string json = "{\"spec\":2,\"theme\":{\"id\":\"lt\",\"name\":\"Lt\",\"author\":\"A\",\"version\":\"1\"},"
+      "\"display\":{\"width\":240,\"height\":240,\"background\":\"#000000\"},\"layers\":[";
+    for (int i = 0; i < 2; ++i)   // the translations of a theme hold 1,024 B at most
+      json += std::string(i ? "," : "") + "{\"id\":\"t" + std::to_string(i) + "\",\"type\":\"text\",\"x\":0,\"y\":" + std::to_string(i * 20) +
+              ",\"size\":16,\"color\":\"#ffffff\",\"value\":{\"en\":\"short\",\"pt\":\"" + std::string(100, 'p') + "\",\"es\":\"" +
+              std::string(14, 'e') + "\",\"fr\":\"" + std::string(61, 'f') + "\",\"de\":\"" + std::string(31, 'd') + "\",\"it\":\"" + std::string(16, 'i') + "\"}}";
+    json += "]}";
+    for (uint8_t language = 0; language < 6; ++language)
+      expectEstimate(("long translation " + std::to_string(language)).c_str(), footprint(json, true, language), 2);   // loose: the bound holds the longest language whichever is on
+  }
+  // Layers that are not text hold no string: the states only (the show-rule themes).
+  expectEstimate("show: 31 layers", footprint(showManifest({31, 27, 45, 1}, "weather.code", true), true, 0));
+  expectEstimate("show: 9 layers", footprint(showManifest({9, 36, 144, 4}, "weather.code", true), true, 0));
+  printf("estimate: %d cases, never under the engine's bytes, at most %zu B over\n", estimateCases, worstOver);
+}
+
 int main(int argc, char** argv) {
+  setvbuf(stdout, nullptr, _IONBF, 0);   // a failed assert must not eat the table above it
+  // --estimate <package>...: the estimate against what the engine adds to each
+  // package (the test packages of the #132 series), and what the check before
+  // the build decides about it on a device that leaves 14.6 to 15.6 KB free
+  // without a theme (DeviceFreeLow, DeviceFreeHigh).
+  if (argc > 2 && strcmp(argv[1], "--estimate") == 0) {
+    for (int i = 2; i < argc; ++i) {
+      Usage u = load(argv[i]);
+      const long added = u.added;
+      printf("%-36s adds %5ld B  predicted %5zu B  over %4ld B\n", argv[i], added, u.predicted, long(u.predicted) - added);
+      assert(long(u.predicted) >= added);
+      assert(long(u.predicted) - added <= long(overBound(size_t(added))));
+    }
+    std::cout << "package estimate tests passed\n";
+    return 0;
+  }
+  // --refused <package>...: the check before the build refuses each package, at
+  // the high end of what the device leaves free (so a refusal is certain).
+  // --accepted <package>...: it lets each package through at the low end.
+  // The largest block is taken as ample: it is the pure check's own test.
+  const bool refused = argc > 2 && strcmp(argv[1], "--refused") == 0;
+  if (refused || (argc > 2 && strcmp(argv[1], "--accepted") == 0)) {
+    // The block limit is the parser's (ThemeMode::ParseLargestBlock, 1,536 B;
+    // test_margin.cpp holds the value). The block passed below is always ample.
+    const MarginLimits limits{uint32_t(WifiReserveFreeHeap), 1536};
+    for (int i = 2; i < argc; ++i) {
+      Usage u = load(argv[i]);
+      // The model above says a loaded theme leaves DeviceFree - running (the
+      // host's "running", charged as this host's malloc charges). The heap at
+      // the check is that plus what the engine then adds (counted as the
+      // device charges it), so what the theme leaves is what the model says,
+      // less any excess in the estimate. Low end: also the 0.6 KB the host's
+      // build lacks for doubles (T56).
+      const long freeAtCheck = long(refused ? DeviceFreeHigh : DeviceFreeLow - AlignDoubleSlack) - long(u.running) + u.added;
+      const bool tooBig = tooBigToBuild(uint32_t(freeAtCheck), 8192, uint32_t(u.predicted), limits);
+      printf("%-36s free at the check %6ld B  predicted %5zu B  leaves %6ld B  reserve %u B  %s\n", argv[i], freeAtCheck,
+             u.predicted, freeAtCheck - long(u.predicted), unsigned(WifiReserveFreeHeap), tooBig ? "refused" : "accepted");
+      assert(tooBig == refused);
+    }
+    std::cout << (refused ? "refused-before-build tests passed\n" : "accepted-before-build tests passed\n");
+    return 0;
+  }
+  testEstimate();
   // A show rule holds its ranges itself (4 floats a side) and names its source
   // by index: 40 bytes, no string and no vector of its own.
   if (sizeof(ShowRule) > 40) fprintf(stderr, "sizeof(ShowRule) %zu\n", sizeof(ShowRule));

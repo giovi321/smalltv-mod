@@ -70,3 +70,16 @@ c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -DTHEME_MAX_LAYERS=40 -DEXPECTED_MA
 python3 tools/make_oom_theme.py /tmp/smalltv-oom-32x65.stheme 32 65
 python3 tools/make_oom_theme.py /tmp/smalltv-oom-32x20.stheme 32 20
 /tmp/smalltv-theme-memory-tests --below-reserve /tmp/smalltv-oom-32x65.stheme /tmp/smalltv-oom-32x20.stheme
+# The check before the engine builds a theme (#132): the estimate of what the
+# engine adds, against what it adds, for the measurement series (26 x 12 up to
+# 32 x 65) and the bundled themes; the packages that crash or leave under the
+# reserve are refused, the light ones and the bundled themes are let through.
+SERIES=""
+for s in 26x12 32x12 32x20 32x28 32x36 32x40 32x50 32x55 32x60 32x64 32x65; do
+  python3 tools/make_oom_theme.py /tmp/smalltv-oom-$s.stheme "${s%x*}" "${s#*x}" > /dev/null
+  SERIES="$SERIES /tmp/smalltv-oom-$s.stheme"
+done
+BUNDLED="examples/themes/pixel-room.stheme examples/themes/live-status.stheme examples/themes/terminal-ops.stheme"
+/tmp/smalltv-theme-memory-tests --estimate $SERIES $BUNDLED
+/tmp/smalltv-theme-memory-tests --refused /tmp/smalltv-oom-32x65.stheme /tmp/smalltv-oom-32x64.stheme /tmp/smalltv-oom-32x60.stheme /tmp/smalltv-oom-32x20.stheme
+/tmp/smalltv-theme-memory-tests --accepted /tmp/smalltv-oom-26x12.stheme /tmp/smalltv-oom-32x12.stheme $BUNDLED

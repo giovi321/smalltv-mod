@@ -20,6 +20,7 @@
 // c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme tests/theme/test_margin.cpp -o /tmp/smalltv-margin-tests
 #include "ThemeMargin.h"
 #include "ThemeRefusal.h"
+#include "ThemeSelection.h"
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -81,6 +82,137 @@ static void testMemoryShort() {
   CHECK(memoryShort(100000, 999, l));    // a big total does not cover a small block
   CHECK(memoryShort(3999, 100000, l));   // and a big block does not cover a small total
   CHECK(!memoryShort(100000, 100000, l));
+}
+
+// ---- 1b. The check before the engine builds the theme ----------------------------
+//
+// tooBigToBuild(free, block, added, limits): the heap after the build would be
+// under the reserve, or the block already is. `added` comes from engineBytes()
+// (ThemeFootprint.h, tested against the engine in test_memory.cpp).
+
+static void testTooBigToBuild() {
+  const MarginLimits l{4000, 1000};
+  // Free heap minus what the build adds must stay at the reserve or above.
+  CHECK(!tooBigToBuild(7000, 5000, 3000, l));   // exactly at the reserve is enough
+  CHECK(tooBigToBuild(6999, 5000, 3000, l));    // one byte under
+  CHECK(!tooBigToBuild(7001, 5000, 3000, l));
+  // More to add than there is free must not wrap round to "plenty".
+  CHECK(tooBigToBuild(100, 5000, 200, l));
+  CHECK(tooBigToBuild(0, 5000, 1, l));
+  CHECK(tooBigToBuild(4294967295u, 5000, 4294967295u, l));
+  // The block is judged as it is now: it only shrinks while the theme builds.
+  CHECK(!tooBigToBuild(100000, 1000, 0, l));
+  CHECK(tooBigToBuild(100000, 999, 0, l));
+  CHECK(tooBigToBuild(100000, 999, 10, l));
+  // The bigger the theme, the less it takes to refuse.
+  for (uint32_t add = 0; add < 12000; add += 250) {
+    const bool short1 = tooBigToBuild(9000, 5000, add, l);
+    const bool short2 = tooBigToBuild(9000, 5000, add + 250, l);
+    CHECK(!short1 || short2);
+  }
+  // With nothing to add it is the check of memoryShort().
+  const uint32_t frees[] = {0, 3999, 4000, 4001, 100000};
+  const uint32_t blocks[] = {0, 999, 1000, 1001, 100000};
+  for (uint32_t f : frees)
+    for (uint32_t b : blocks) CHECK(tooBigToBuild(f, b, 0, l) == memoryShort(f, b, l));
+}
+
+// ---- 1c. The selection is saved after the theme passed ----------------------------
+//
+// A theme picked in the web UI is the live selection at once, and the stored
+// one only when it has loaded and passed the memory check (ThemeSelection.h).
+// So a crash during the first load leaves the old setting in flash, and the
+// next boot does not load the theme that just crashed the device.
+
+static void testPendingSelectionBasics() {
+  PendingSelection p;
+  CHECK(!p.pending());
+  CHECK(!p.accept("a", true));                  // nothing picked: nothing to save
+  p.pick("a");
+  CHECK(p.pending());
+  CHECK(!p.accept("a", false));                 // not through the check yet
+  CHECK(p.pending());                           // still waiting
+  CHECK(p.accept("a", true));                   // passed: save, once
+  CHECK(!p.pending());
+  CHECK(!p.accept("a", true));
+}
+
+static void testPendingSelectionDropAndReplace() {
+  PendingSelection p;
+  p.pick("a");
+  p.drop();                                     // refused for memory
+  CHECK(!p.pending() && !p.accept("a", true));
+  p.pick("a");
+  CHECK(!p.accept("b", true));                  // the user picked something else on the way
+  CHECK(!p.pending());
+  CHECK(!p.accept("a", true));                  // and the old pick is gone for good
+  p.pick("a");
+  p.pick("b");                                  // a second pick replaces the first
+  CHECK(!p.accept("a", true));
+  p.pick("a");
+  p.pick("b");
+  CHECK(p.accept("b", true));
+  p.pick("");                                   // an empty id is no pick
+  CHECK(!p.pending());
+}
+
+// The device in miniature: the live selection (RAM), the stored one (flash).
+struct MiniDevice {
+  std::string live, stored;
+  PendingSelection pending;
+  int saves = 0;
+  explicit MiniDevice(const char* id) : live(id), stored(id) {}
+  void select(const char* id) { live = id; pending.pick(id); }    // the web request: no save
+  void frame(bool passed) { if (pending.accept(live.c_str(), passed)) { stored = live; ++saves; } }
+  void refuse() { pending.drop(); live = stored; }                // the refusal puts the old setting back
+  void reboot() { live = stored; pending.drop(); }                // a crash or a restart
+};
+
+static void testSelectDoesNotSaveBeforeThePass() {
+  MiniDevice d("old");
+  d.select("new");
+  CHECK(d.live == "new");                       // the screen shows the pick at once
+  CHECK(d.stored == "old" && d.saves == 0);     // flash still holds the old one
+  d.frame(false);
+  d.frame(false);
+  CHECK(d.stored == "old" && d.saves == 0);     // while the check runs
+  d.frame(true);
+  CHECK(d.stored == "new" && d.saves == 1);     // saved once the theme passed
+  d.frame(true);
+  CHECK(d.saves == 1);                          // and not again
+}
+
+static void testACrashDuringTheLoadKeepsTheOldSetting() {
+  MiniDevice d("old");
+  d.select("crashes");
+  d.frame(false);
+  d.reboot();                                   // the first load crashed the device
+  CHECK(d.live == "old" && d.stored == "old");  // the next boot does not bring the theme back
+  d.frame(true);
+  CHECK(d.saves == 0);
+}
+
+static void testARefusedThemeNeverReachesTheStoredSetting() {
+  MiniDevice d("old");
+  d.select("big");
+  d.refuse();
+  d.frame(true);
+  CHECK(d.live == "old" && d.stored == "old" && d.saves == 0);
+  // A new pick after a refusal works as before.
+  d.select("small");
+  d.frame(true);
+  CHECK(d.stored == "small" && d.saves == 1);
+}
+
+// Two picks in a row: the first has not passed, the second is refused. What
+// comes back is the theme that was stored before both, and the first is never saved.
+static void testSecondPickRefusedKeepsTheStoredOne() {
+  MiniDevice d("old");
+  d.select("first");
+  d.select("second");     // ThemeMode keeps "old" as the previous one while a pick waits
+  d.refuse();
+  d.frame(true);
+  CHECK(d.live == "old" && d.stored == "old" && d.saves == 0);
 }
 
 static const MarginLimits kLimits{4000, 1000};
@@ -337,7 +469,7 @@ static void testConstants() {
   const std::string mode = slurp("src/features/theme/ThemeMode.cpp");
   CHECK(mode.find("#include \"WifiReserve.h\"") != std::string::npos);
   CHECK(mode.find("{WifiReserveFreeHeap, ParseLargestBlock}") != std::string::npos);
-  CHECK(count(mode, "{WifiReserveFreeHeap, ParseLargestBlock}") >= 1);   // the check after the load
+  CHECK(count(mode, "{WifiReserveFreeHeap, ParseLargestBlock}") == 2);   // the check before the build and the check after the load
   CHECK(mode.find("WifiReserveLargestBlock") == std::string::npos);
   CHECK(h.find("WifiReserveLargestBlock") == std::string::npos);
   CHECK(slurp("src/features/theme/ThemeMargin.h").find("WifiReserveLargestBlock") == std::string::npos);
@@ -407,13 +539,102 @@ static void testModeWiring() {
   CHECK(head.find("error_.length() ? error_ : refusal_") != std::string::npos);
 }
 
+// The check before the build: after the parse, before the engine takes the theme.
+static void testBuildWiring() {
+  const std::string mode = slurp("src/features/theme/ThemeMode.cpp");
+  const std::string service = body(mode, "void ThemeMode::service(");
+  CHECK(!service.empty());
+  CHECK(mode.find("#include \"ThemeFootprint.h\"") != std::string::npos || slurp("src/features/theme/ThemeMode.h").find("#include \"ThemeFootprint.h\"") != std::string::npos);
+  // In service(): the package is parsed, then the check, then the engine takes the theme.
+  CHECK(before(service, "package_->load(theme, error)", "refusedBeforeBuild("));
+  CHECK(before(service, "refusedBeforeBuild(", "engine_.setTheme(std::move(theme), millis());"));
+  CHECK(onlyOnEsp8266(mode, "refusedBeforeBuild("));
+  // The work is in a function of its own (the loop stack, T12/T13).
+  const size_t def = mode.find("ThemeMode::refusedBeforeBuild(");
+  CHECK(def != std::string::npos);
+  CHECK(mode.rfind("__attribute__((noinline))", def) != std::string::npos && def - mode.rfind("__attribute__((noinline))", def) < 60);
+  const std::string check = body(mode, "ThemeMode::refusedBeforeBuild(");
+  CHECK(!check.empty());
+  CHECK(check.find("engineBytes(theme)") != std::string::npos);
+  CHECK(check.find("ESP.getFreeHeap()") != std::string::npos);
+  CHECK(check.find("platformMaxFreeBlock()") != std::string::npos);
+  CHECK(check.find("tooBigToBuild(") != std::string::npos);
+  CHECK(check.find("WifiReserveFreeHeap") != std::string::npos && check.find("ParseLargestBlock") != std::string::npos);
+  // A refusal drops the parsed theme first (the settings save needs the heap),
+  // then goes the way of the check after the load.
+  CHECK(before(check, "dropTheme(theme);", "refuseForMemory();"));
+  CHECK(check.find("restart") == std::string::npos && check.find("Restart") == std::string::npos);
+  // The check after the load stays as the net for what the estimate misses.
+  CHECK(before(service, "engine_.update(", "checkMargin("));
+}
+
+// The select request does not save; the load that passes does.
+static void testSelectWiring() {
+  const std::string web = slurp("src/features/theme/ThemeWeb.cpp");
+  const std::string select = body(web, "void selectTheme()");
+  CHECK(!select.empty());
+  CHECK(select.find("saveSettings(") == std::string::npos);            // no early save
+  CHECK(select.find("Could not save selection") == std::string::npos);  // so no failed-save answer either
+  CHECK(select.find("g_themeMode.saveAfterLoad(id);") != std::string::npos);
+  CHECK(before(select, "settings->themeId = id;", "g_themeMode.saveAfterLoad(id);"));
+  CHECK(before(select, "g_themeMode.saveAfterLoad(id);", "appInvalidate();"));
+  CHECK(before(select, "g_themeMode.saveAfterLoad(id);", "reply(200, id);"));
+  // The delete handler still saves its own change.
+  CHECK(body(web, "void deleteTheme()").find("saveSettings(") != std::string::npos);
+  const std::string head = slurp("src/features/theme/ThemeMode.h");
+  CHECK(head.find("void saveAfterLoad(") != std::string::npos);
+  CHECK(head.find("smalltv::PendingSelection pending_;") != std::string::npos);
+  CHECK(head.find("#include \"ThemeSelection.h\"") != std::string::npos);
+  // A second pick while the first still waits must not make the unsaved first
+  // pick the "previous" theme: a refusal of the second would then save it.
+  // The previous one stays the last theme that passed.
+  const std::string remember = body(head, "void rememberPrevious(");
+  CHECK(!remember.empty());
+  CHECK(before(remember, "if (hasPrev_ && pending_.pending()) return;", "hasPrev_ = true;"));
+}
+
+static void testAcceptWiring() {
+  const std::string mode = slurp("src/features/theme/ThemeMode.cpp");
+  const std::string service = body(mode, "void ThemeMode::service(");
+  // After the frame is drawn, and not when the draw failed.
+  CHECK(before(service, "smalltv::render(", "acceptSelection("));
+  CHECK(before(service, "Could not read theme asset", "acceptSelection("));
+  CHECK(service.find("} else acceptSelection(s);") != std::string::npos);
+  const std::string accept = body(mode, "ThemeMode::acceptSelection(");
+  CHECK(!accept.empty());
+  const size_t acceptDef = mode.find("ThemeMode::acceptSelection(");
+  CHECK(acceptDef != std::string::npos);
+  CHECK(mode.rfind("__attribute__((noinline))", acceptDef) != std::string::npos && acceptDef - mode.rfind("__attribute__((noinline))", acceptDef) < 60);
+  CHECK(accept.find("pending_.accept(s.themeId.c_str(),") != std::string::npos);
+  // On the ESP8266 the theme has passed when the margin watch is over; the
+  // other boards have no watch, a drawn frame is the pass.
+  CHECK(accept.find("!marginWatch_.active()") != std::string::npos);
+  CHECK(onlyOnEsp8266(mode, "!marginWatch_.active();"));
+  // A save needs heap that a theme next to the reserve does not leave: the
+  // theme is released first, as a request does, and loads again afterwards.
+  CHECK(before(accept, "release(ParseFreeHeap, ParseLargestBlock);", "appThemeAccepted();"));
+  CHECK(before(accept, "pending_.accept(", "release("));
+  CHECK(accept.find("restart") == std::string::npos && accept.find("Restart") == std::string::npos);
+  // A refusal ends the wait: the refused theme is never saved.
+  const std::string refuse = body(mode, "ThemeMode::refuseForMemory(");
+  CHECK(refuse.find("pending_.drop();") != std::string::npos);
+  CHECK(before(refuse, "pending_.drop();", "appThemeRefused("));
+  // The app's hook saves the settings, on every board.
+  const std::string app = slurp("src/main.cpp");
+  const std::string hook = body(app, "void appThemeAccepted(");
+  CHECK(!hook.empty());
+  CHECK(hook.find("saveSettings(g_settings)") != std::string::npos);
+  CHECK(!onlyOnEsp8266(app, "void appThemeAccepted("));
+  CHECK(mode.find("extern void appThemeAccepted(") != std::string::npos);
+}
+
 static void testWebWiring() {
   const std::string web = slurp("src/features/theme/ThemeWeb.cpp");
   const std::string select = body(web, "void selectTheme()");
   CHECK(!select.empty());
   // The previous mode and theme go to ThemeMode before the settings change.
-  CHECK(before(select, "g_themeMode.rememberPrevious(oldMode, oldId);", "settings->themeId = id;"));
-  CHECK(before(select, "uint8_t oldMode = settings->mode;", "g_themeMode.rememberPrevious("));
+  CHECK(before(select, "g_themeMode.rememberPrevious(settings->mode, settings->themeId);", "settings->themeId = id;"));
+  CHECK(before(select, "g_themeMode.rememberPrevious(settings->mode, settings->themeId);", "settings->mode = MODE_THEME;"));
   CHECK(before(select, "g_themeMode.forgetRefusal(", "appInvalidate();"));
   // Installing or deleting a theme lets the refused one try again.
   CHECK(count(web, "forgetRefusal(") >= 3);
@@ -460,6 +681,13 @@ static void testStatusWiring() {
 
 int main() {
   testMemoryShort();
+  testTooBigToBuild();
+  testPendingSelectionBasics();
+  testPendingSelectionDropAndReplace();
+  testSelectDoesNotSaveBeforeThePass();
+  testACrashDuringTheLoadKeepsTheOldSetting();
+  testARefusedThemeNeverReachesTheStoredSetting();
+  testSecondPickRefusedKeepsTheStoredOne();
   testWatchIdleUntilStarted();
   testWatchRefusesAfterShortInARow();
   testWatchCountsOnlyReadingsApart();
@@ -481,6 +709,9 @@ int main() {
   testRefusalNeverLeavesTheRefusedTheme();
   testConstants();
   testModeWiring();
+  testBuildWiring();
+  testSelectWiring();
+  testAcceptWiring();
   testWebWiring();
   testAppWiring();
   testStatusWiring();
