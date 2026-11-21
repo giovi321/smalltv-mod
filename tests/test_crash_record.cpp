@@ -191,6 +191,12 @@ int main() {
     assert(w.heap() == 4100 && w.block() == 900);
     w.reset();                      // a reset starts the quiet ticks and the schedule again
     assert(!w.any() && !w.blockDue());
+    // a heap-only tick below the block value moves the heap low, never the block low
+    w.reset();
+    for (unsigned i = 0; i < CRASH_QUIET_TICKS; i++) w.sampleHeap(100);
+    w.sample(5000, 4000);
+    w.sampleHeap(300);
+    assert(w.heap() == 300 && w.block() == 4000);
     // how many walks in 1000 ticks: none in the quiet 20, then every 10th
     w.reset();
     unsigned walks = 0;
