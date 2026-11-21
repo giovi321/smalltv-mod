@@ -21,7 +21,7 @@ Every field is optional. The smallest useful request is `{"label":"..."}`, which
 |---|---|
 | `type` | Which preset to start from: `info`, `warning`, `alert`, `done`, `waiting`. Defaults to `info`. An unknown type is rejected. |
 | `label` | The message. Scrolls if it is wider than the panel. |
-| `title` | A word above the label, up to 20 characters. There is none unless you ask for one — see below. |
+| `title` | A word above the label, up to 20 characters. There is none unless you ask for one (see below). |
 | `anim` | Animation name, overriding the preset's: `info`, `warn`, `bang`, `pulse`, `jumping`, `waving`. An unknown name is rejected. |
 | `color` | Accent colour for both text lines, overriding the preset's. `#rrggbb`, or one of `white` `black` `red` `green` `blue` `yellow` `cyan` `magenta` `orange` `gray`. |
 | `ttl` | How long to hold the screen, in seconds. Clamped to 2 to 120. Defaults to the preset's. |
@@ -41,9 +41,9 @@ A `type` sets five things at once: the accent colour, the animation, the hold ti
 | `done` | cream | `jumping` | 20 | 0 | TASK DONE |
 | `waiting` | cream | `waving` | 20 | 1 | NEEDS YOU |
 
-The fallback word is the one thing that is not simply a default. It appears **only when there is no label**, because a line reading "ALERT" above your message says nothing the colour and the animation have not already said, and it costs a line the message could use. Send a label and you get the label; send nothing and the word keeps the screen from being blank. Setting `title` explicitly overrides both cases — that is how you get a header when you actually want one.
+The fallback word is the one thing that is not simply a default. It appears **only when there is no label**, because a line reading "ALERT" above your message says nothing the colour and the animation have not already said, and it costs a line the message could use. Send a label and you get the label; send nothing and the word keeps the screen from being blank. Setting `title` explicitly overrides both cases. That is how you get a header when you actually want one.
 
-None of the rest is binding either. Every field is one you can override independently in the same request — the preset decides only what you get when you say nothing. An information notice that arrived by mail, in white, holding for a minute, is one request:
+None of the rest is binding either. Every field is one you can override independently in the same request: the preset decides only what you get when you say nothing. An information notice that arrived by mail, in white, holding for a minute, is one request:
 
 ```bash
 curl -X POST http://smalltv.local/api/notify \
@@ -58,21 +58,21 @@ The two types named after the endpoint's original states, `done` and `waiting`, 
 
 Overlays queue rather than overwrite. When one expires the next takes the panel, so a burst of events is shown in turn instead of leaving only the last one.
 
-The queue holds 4 on the ESP32 boards and 2 on the ESP8266, on top of the one on screen. It is ordered by priority first and arrival second, so equal-priority events are shown in the order they were fired and a more important one goes to the front of the line. An arrival that is **strictly** more important than what is on screen does not wait at all: it takes the panel immediately, and the overlay it interrupted is dropped rather than requeued — it has already had its time on screen.
+The queue holds 4 on the ESP32 boards and 2 on the ESP8266, on top of the one on screen. It is ordered by priority first and arrival second, so equal-priority events are shown in the order they were fired and a more important one goes to the front of the line. An arrival that is **strictly** more important than what is on screen does not wait at all: it takes the panel immediately, and the overlay it interrupted is dropped rather than requeued, because it has already had its time on screen.
 
 When the queue is full, the arrival displaces the least important thing waiting. If everything already queued outranks it, the arrival is the one refused, with HTTP 429.
 
-**A repeat refreshes rather than queues.** An arrival naming the same `type` and the same `label` as something already on screen restarts that overlay in place, with whatever the new request asked for; the same match against something already queued replaces it where it sits. This is what keeps a heartbeat working — a script firing `waiting` every ten seconds with `ttl:20` keeps one overlay alive, as it always did, instead of building a queue that holds the panel for the sum of those hold times and then replays events the session has long moved past.
+**A repeat refreshes rather than queues.** An arrival naming the same `type` and the same `label` as something already on screen restarts that overlay in place, with whatever the new request asked for; the same match against something already queued replaces it where it sits. This is what keeps a heartbeat working: a script firing `waiting` every ten seconds with `ttl:20` keeps one overlay alive, as it always did, instead of building a queue that holds the panel for the sum of those hold times and then replays events the session has long moved past.
 
 This is what priority is for: an `alert` fired while three `info` notices are queued behind a fourth is on the panel immediately, and the `info` notices resume afterwards.
 
 ## Long labels
 
-A label that fits on one line is centred and still. A longer one scrolls right to left, continuously, for as long as the overlay is up — after a short pause on the first frame so a label that only just overflows is readable before it moves.
+A label that fits on one line is centred and still. A longer one scrolls right to left, continuously, for as long as the overlay is up, after a short pause on the first frame so a label that only just overflows is readable before it moves.
 
 The buffer is 96 characters on the ESP32 boards and 48 on the ESP8266; past that the label is cut. Anything outside plain printable ASCII is dropped, so accents and emoji disappear rather than drawing as blanks.
 
-It scrolls at 100 px/s, which is 120 ms per character. A 90-character label is 1108 px including the gap before it repeats, so one full pass takes about 11 seconds: at the default `ttl` of 20 it goes round just under twice. Anything much longer than that, or a shorter `ttl`, is worth pairing with a raised `ttl` — otherwise the end of the message may never reach the screen.
+It scrolls at 100 px/s, which is 120 ms per character. A 90-character label is 1108 px including the gap before it repeats, so one full pass takes about 11 seconds: at the default `ttl` of 20 it goes round just under twice. Anything much longer than that, or a shorter `ttl`, is worth pairing with a raised `ttl`, otherwise the end of the message may never reach the screen.
 
 ## What happens to the screen underneath
 
@@ -80,7 +80,7 @@ The overlay is not a mode. It cannot be selected in the Display tab and it never
 
 Handing back is careful about the carousel. The time the overlay spent on screen is credited back to the rotation timer, so if the ticker had four seconds left when the alert arrived, it still has four seconds left afterwards, on the same symbol. That credit spans the whole run rather than the last request in it, so a queue that chained four overlays gives back all four. The underlying feature repaints from what it already had rather than re-fetching, so an alert costs no extra network traffic.
 
-Nothing about a notification is saved. There is no history, and a reboot leaves no trace of one — a queue included.
+Nothing about a notification is saved. There is no history, and a reboot leaves no trace of one, a queue included.
 
 ## Worth knowing
 
@@ -93,16 +93,16 @@ Nothing about a notification is saved. There is no history, and a reboot leaves 
 
 Both tables are meant to be edited.
 
-A type is one row in `src/features/notify/NotifyTypes.h` — name, word, colour, animation, hold time, priority — and nothing else in the firmware indexes into that table.
+A type is one row in `src/features/notify/NotifyTypes.h`: name, word, colour, animation, hold time, priority. Nothing else in the firmware indexes into that table.
 
 An animation is one row in `src/features/notify/NotifyAnims.cpp`, and there are two kinds.
 
-A **procedural** one is a function returning the colour of a single pixel, given its position, the frame number and the accent colour. `info`, `warn`, `bang` and `pulse` are these, which is why they follow whatever colour the request asks for and cost no flash beyond their own code. Write it with integer arithmetic — it is called once per pixel per frame and the ESP8266 has no FPU.
+A **procedural** one is a function returning the colour of a single pixel, given its position, the frame number and the accent colour. `info`, `warn`, `bang` and `pulse` are these, which is why they follow whatever colour the request asks for and cost no flash beyond their own code. Write it with integer arithmetic, because it is called once per pixel per frame and the ESP8266 has no FPU.
 
 It works per-pixel rather than by drawing shapes for a reason worth knowing before you add one: the panel has no framebuffer. A routine that clears its box and then draws into it leaves that box black on screen for the milliseconds the drawing takes, every frame, which reads as heavy flicker rather than as animation. Returning one pixel at a time lets the renderer write each pixel exactly once per frame, in place.
 
-The same trap has a second form that no rendering strategy will save you from: **animating a large filled area at all**. Change its colour and it reads as a fault rather than as an animation — a gentler ramp between shades does not rescue it, because amplitude was never the problem. Move it instead and you trade the flicker for tearing: translating a 168-pixel shape while the panel scans out and the firmware writes row by row puts the new position at the top of the screen and the old one below it.
+The same trap has a second form that no rendering strategy will save you from: **animating a large filled area at all**. Change its colour and it reads as a fault rather than as an animation: a gentler ramp between shades does not rescue it, because amplitude was never the problem. Move it instead and you trade the flicker for tearing: translating a 168-pixel shape while the panel scans out and the firmware writes row by row puts the new position at the top of the screen and the old one below it.
 
-So the rule is: **keep the body still and constant, and animate a thin outline.** All four procedural animations follow it — a fixed shape with a ring or outline emanating from its edge and fading out. What separates them is tempo, and that turns out to be enough: `warn` emanates over about 880 ms and reads as "look at this", `bang` over about 320 ms and reads as "act now". Both arrived at that shape only after a strobing version and a tearing one.
+So the rule is: **keep the body still and constant, and animate a thin outline.** All four procedural animations follow it: a fixed shape with a ring or outline emanating from its edge and fading out. What separates them is tempo, and that turns out to be enough: `warn` emanates over about 880 ms and reads as "look at this", `bang` over about 320 ms and reads as "act now". Both arrived at that shape only after a strobing version and a tearing one.
 
-A **pixel** one is a frame set from `src/features/notify/notify_frames.h`; `jumping` and `waving` are these, taken from Clawdmeter's own splash set. That header is generated by `tools/extract_notify.py` and is never hand-edited — the registry wraps it rather than growing it, so regenerating it does not disturb anything you added.
+A **pixel** one is a frame set from `src/features/notify/notify_frames.h`; `jumping` and `waving` are these, taken from Clawdmeter's own splash set. That header is generated by `tools/extract_notify.py` and is never hand-edited: the registry wraps it rather than growing it, so regenerating it does not disturb anything you added.

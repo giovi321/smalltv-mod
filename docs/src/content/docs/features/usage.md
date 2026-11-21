@@ -56,6 +56,8 @@ The PC-side daemon is a separate project, [clawdmeter-daemon](https://github.com
 
 2. In the web UI open **Display → Mode → Clawdmeter**. Then open the **Clawdmeter** tab: for push, leave the **Usage daemon URL** blank; for serve and pull, set it to `http://<that-pc-ip>:8787/`. Save.
 
+In push mode the daemon posts the usage to `POST /api/usage`, the one route that stays open when the web UI password is set; the body is in [HTTP API](/smalltv-mod/reference/http-api/).
+
 The mascot animations are a curated subset of the [claudepix](https://claudepix.vercel.app) pixel-art set, re-rendered on the ST7789.
 
 ### Multiple devices (auto-discovery)

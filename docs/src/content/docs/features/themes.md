@@ -173,7 +173,7 @@ once; an unknown key, a missing `=`, an empty key, a duplicate key, or more than
 32 values fails the command before it writes any output. Injected values only
 affect the preview frames; they cannot change package validation or which
 assets are read. `examples/themes/live-status` is the reference fixture for this
-workflow — see [Example: a dynamic dashboard](#example-a-dynamic-dashboard).
+workflow: see [Example: a dynamic dashboard](#example-a-dynamic-dashboard).
 
 This utility converts image pixels on your computer. The device reads RGB565
 assets directly; it does not decode PNG/GIF/TTF. The package stores the same
@@ -308,15 +308,17 @@ affect notifications or other display modes.
 
 Installing a theme installs its data sources too: the device will periodically
 poll every URL the manifest declares, including addresses on your LAN. Only
-install themes from sources you trust — a manifest's `data` block is not
+install themes from sources you trust: a manifest's `data` block is not
 sandboxed beyond the request limits above (2 KiB response, one in-flight
 request, three-second deadline).
 
 Fetched values are scalars used as-is: to interpolate into text (above), or to
-drive a layer's position, size, or color through the bindings below. There are
-no history buffers, line charts, arrays, aggregation, arithmetic expressions, or
-conditions in V1 — a fetched number maps to a property through exactly one
-declared, bounded rule.
+drive a layer's position, size, color or animation frame through the bindings
+below. There are no history buffers, line charts, aggregation or arithmetic
+expressions: a fetched number maps to a property through exactly one declared,
+bounded rule. Spec 2 adds two bounded exceptions: a path can pick one element
+of a list (above), and a layer can be shown or hidden by `show` rules (see
+[Showing and hiding layers](#showing-and-hiding-layers-spec-2)).
 
 Every layer needs `id`, `type`, `x`, and `y`. The device clips geometry outside the
 canvas. Colors are exactly `#RRGGBB`, case insensitive; asset alpha is supported.
@@ -538,7 +540,7 @@ scroll horizontally, instead of being clipped:
 | `gap` | integer | 0–240 px | loop only, default 24 | Blank space between repeated copies |
 
 `gap` is rejected in bounce mode; it has no effect there. `x`, `y`, and `anchor`
-position the viewport, not the complete unscrolled string — `x: 120` with
+position the viewport, not the complete unscrolled string: `x: 120` with
 `anchor: center` centers the 200px viewport at x=120, not the full text. The
 viewport height is `size`; its width is `scroll.width`. It clips to the 240×240
 canvas like any other layer, and text is additionally clipped to the viewport
@@ -548,7 +550,7 @@ If the rendered text fits within the viewport, it stays fixed at its initial
 position and never schedules a repaint. Otherwise scrolling starts after
 `pause` milliseconds. In `loop` mode, the text moves continuously in one
 direction; once it has scrolled past its own width plus `gap`, it wraps back to
-the start and pauses again — the gap is where a second, repeated copy would
+the start and pauses again; the gap is where a second, repeated copy would
 begin. In `bounce` mode, the text moves to its far edge, pauses, reverses, moves
 back to the start, and pauses again, alternating direction on every cycle.
 Timing uses elapsed milliseconds and a subpixel accumulator, the same technique
@@ -559,9 +561,9 @@ visible integer pixel offset actually changes.
 
 Changing the expanded text, or a binding that affects `size`, `scroll.width`, or
 `scroll.speed`, resets scroll position, phase, and direction to their initial
-state and restarts the pause. Any other change — an unrelated data value, a
+state and restarts the pause. Any other change (an unrelated data value, a
 binding affecting `x` or color, or calling the engine's notification-recovery
-`invalidate()` — does not reset scroll progress; switching themes does.
+`invalidate()`) does not reset scroll progress; switching themes does.
 
 ### Image
 
@@ -674,7 +676,7 @@ fetched scalar. A binding's `source` is the same declared
 recomputed from the parsed theme and the latest fetched values whenever those
 values change (and, for a binding on `time.*`, whenever the clock moves); the
 parsed manifest itself is never mutated. Only the changed
-region is repainted — the union of the layer's old and new visible bounds.
+region is repainted: the union of the layer's old and new visible bounds.
 
 ### Numeric mapping
 
@@ -699,7 +701,7 @@ The result is rounded to the nearest integer, halves away from zero. When
 `clamp` is true, the source value is limited to the interval between the two
 `input` endpoints before interpolation. When `clamp` is false, extrapolation
 beyond that interval is permitted, but the final integer is still clamped to
-the property's safe range below — that clamp cannot be disabled. A missing,
+the property's safe range below; that clamp cannot be disabled. A missing,
 partial, or non-finite fetched value leaves the static manifest value in
 effect for that property, so a theme always has a valid fallback appearance.
 
@@ -847,7 +849,7 @@ round again. With `w.day` at 1 it plays 3, 4, 5 and round again.
 
 Each property may be bound once; a layer may bind at most eight properties. A
 color property may be bound only when that property already exists statically
-on the layer — binding `stroke` does not implicitly enable a missing stroke,
+on the layer: binding `stroke` does not implicitly enable a missing stroke,
 and `scroll.width`/`scroll.speed` require a static `scroll` object. `frame` is
 only for animations and needs `"spec": 2`. Image and
 animation dimensions are not bindable, because runtime asset scaling is
@@ -1025,13 +1027,13 @@ well defined. Without a clock (before it is set) the rule holds only with
 theme declaring one data source (`status`, with `label`, `level`, and `state`
 fields) and every capability above:
 
-* `headline` — a `loop`-scrolling `{status.label}` text viewport;
-* `headline-bounce` — a second, `bounce`-scrolling label, so both scroll modes
+* `headline`: a `loop`-scrolling `{status.label}` text viewport;
+* `headline-bounce`: a second, `bounce`-scrolling label, so both scroll modes
   are copyable side by side;
-* `level-track` and `level-bar` — a rounded track and a bar whose `width` maps
+* `level-track` and `level-bar`: a rounded track and a bar whose `width` maps
   fetched level 0–100 to 0–200 px, with `fill` selected from green/amber/red
   color stops at the same thresholds;
-* `level-caption` — status text whose `color` is bound from the same numeric
+* `level-caption`: status text whose `color` is bound from the same numeric
   `status.level` field, through color stops rather than a numeric mapping.
 
 Every layer also has valid static fallback geometry and colors, so the theme

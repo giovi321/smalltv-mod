@@ -26,7 +26,7 @@ The GeekMagic SmallTV is a small cube with a 1.54" colour screen, an ESP inside,
 
 <CardGrid>
   <Card title="Stock and crypto ticker" icon="seti:default">
-    Price, change, percent change, and a sparkline for up to 8 rotating symbols. Data from Yahoo Finance with no backend, or your own webhook.
+    Price, change, percent change, and a sparkline for up to 8 rotating symbols. Data from Yahoo Finance or cash.ch with no backend, or your own webhook.
   </Card>
   <Card title="Claude usage meter" icon="seti:crystal">
     An animated mascot plus your 5-hour and 7-day usage bars with reset countdowns, fed over WiFi by the clawdmeter-daemon on your PC. The daemon can auto-discover several SmallTVs on the LAN and push usage to all of them at once.
@@ -43,6 +43,8 @@ Plus one thing that is not a mode: on every ESP32 board the firmware carries a [
 A [Home Assistant screen](/smalltv-mod/features/ha/) arrives over MQTT as a JSON draw list and the device shows it as a full 240×240 screen. A [notification](/smalltv-mod/features/notify/) takes the panel for a few seconds when a script pushes one over HTTP, then puts back whatever was showing. And a [theme clock](/smalltv-mod/features/themes/) replaces the screen with a clock face of your own: background art, animated sprites, clock and date text, and live values from JSON sources, installed as a `.stheme` package with no firmware rebuild.
 
 ![A Home Assistant screen pushed over MQTT, a notification overlay, and the Pixel Room theme clock](/smalltv-mod/assets/screen2.svg)
+
+![A portfolio summary, the Claude usage meter in its 7-day-only layout, and the first-boot setup screen](/smalltv-mod/assets/screen3.svg)
 
 ## Design a clock face in SmallTV Studio
 

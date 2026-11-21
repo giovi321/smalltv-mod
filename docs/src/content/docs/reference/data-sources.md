@@ -3,7 +3,7 @@ title: Data sources
 description: "Where each ticker gets its prices: Yahoo Finance, cash.ch, GitHub, or your own webhook."
 ---
 
-The ticker can pull prices four ways. Yahoo Finance works out of the box with no server. cash.ch covers Swiss instruments Yahoo does not carry, also with no server. GitHub is a serverless proxy for cash.ch that you host yourself from a fork — still nothing running on hardware of yours. A custom webhook lets you own the source. Every ticker picks its own source in the **Ticker** tab, so a rotation can mix all of them freely.
+The ticker can pull prices four ways. Yahoo Finance works out of the box with no server. cash.ch covers Swiss instruments Yahoo does not carry, also with no server. GitHub is a serverless proxy for cash.ch that you host yourself from a fork, so nothing runs on hardware of yours. A custom webhook lets you own the source. Every ticker picks its own source in the **Ticker** tab, so a rotation can mix all of them freely.
 
 ## Yahoo Finance, the default
 
@@ -38,7 +38,7 @@ cash.ch's CDN requires a modern TLS handshake (ECDHE). The ESP32 boards do this 
 
 If you want a device that never even attempts the handshake, the **GitHub** source below is a drop-in alternative for the same listing keys.
 
-One more thing to watch on the ESP8266: the web UI's Display tab has a "Clock & night mode" card, and enabling it runs NTP to know when to dim. NTP only starts while night mode is enabled, but on an ESP8266 that already has cash.ch tickers, the heap NTP holds can be enough to starve the large contiguous block the cash.ch TLS handshake needs, and cash.ch tickers can stop fetching. If you run night mode on an ESP8266 with cash.ch tickers, switch those tickers to the **GitHub** source for the same listing keys (published by you, see below), or leave night mode off on that device. ESP32 boards have enough headroom for both at once.
+One more thing to watch on the ESP8266: the web UI's Display tab has a "Clock & night mode" card, and enabling it runs NTP to know when to dim. NTP only starts while something needs the clock (night mode, the sunrise and sunset schedule, a theme clock on screen or in the carousel), but on an ESP8266 that already has cash.ch tickers, the heap NTP holds can be enough to starve the large contiguous block the cash.ch TLS handshake needs, and cash.ch tickers can stop fetching. If you run night mode on an ESP8266 with cash.ch tickers, switch those tickers to the **GitHub** source for the same listing keys (published by you, see below), or leave night mode off on that device. ESP32 boards have enough headroom for both at once.
 
 ## Custom webhook
 
@@ -72,10 +72,10 @@ The device pulls rather than receives a push, so your backend never needs to kno
 
 The **GitHub** source is a serverless proxy for cash.ch. A scheduled GitHub Action fetches cash.ch and publishes one small JSON file per listing key to a `data` branch; the device reads it from `raw.githubusercontent.com`, which every board can reach over plain static-RSA HTTPS (the same handshake GitHub self-update and Yahoo use). No ECDHE on the device, so it cannot hit the memory limits the direct cash.ch path pushes against.
 
-This repo does **not** run that publishing workflow — it only ships the pieces, as an example you wire up in your own fork:
+This repo does **not** run that publishing workflow. It only ships the pieces, as an example you wire up in your own fork:
 
-- [`.github/scripts/fetch-quotes.mjs`](https://github.com/giovi321/smalltv-mod/blob/main/.github/scripts/fetch-quotes.mjs) — the fetcher. No dependencies beyond Node 20+; reads the config, writes `out/quotes/<key>.json` in the exact JSON the firmware's webhook parser accepts.
-- [`quotes-config.json`](https://github.com/giovi321/smalltv-mod/blob/main/quotes-config.json) — the symbol list, with a placeholder entry showing the format.
+- [`.github/scripts/fetch-quotes.mjs`](https://github.com/giovi321/smalltv-mod/blob/main/.github/scripts/fetch-quotes.mjs): the fetcher. No dependencies beyond Node 20+; reads the config, writes `out/quotes/<key>.json` in the exact JSON the firmware's webhook parser accepts.
+- [`quotes-config.json`](https://github.com/giovi321/smalltv-mod/blob/main/quotes-config.json): the symbol list, with a placeholder entry showing the format.
 
 To run it yourself, fork the repo, list your listing keys in `quotes-config.json`, and add a workflow like this as `.github/workflows/quotes.yml` in the fork:
 
@@ -123,9 +123,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Committing every run also keeps the schedule alive: GitHub disables scheduled workflows after 60 days of no repo activity. The workflow is free — GitHub Actions has no minute limit on public repositories.
+Committing every run also keeps the schedule alive: GitHub disables scheduled workflows after 60 days of no repo activity. The workflow is free: GitHub Actions has no minute limit on public repositories.
 
-Two last steps: point the firmware at the fork by setting `REPO_OWNER`/`REPO_NAME` in `src/config.h` (they build the `raw.githubusercontent.com/<owner>/<repo>/data/quotes/` base URL) and flash it, then use it like the cash.ch source — set a ticker's source to **GitHub** and its symbol to the cash.ch listing key. A key only works once it is published, so let the workflow run once (or trigger it by hand) after adding a key.
+Two last steps: point the firmware at the fork by setting `REPO_OWNER`/`REPO_NAME` in `src/config.h` (they build the `raw.githubusercontent.com/<owner>/<repo>/data/quotes/` base URL) and flash it, then use it like the cash.ch source: set a ticker's source to **GitHub** and its symbol to the cash.ch listing key. A key only works once it is published, so let the workflow run once (or trigger it by hand) after adding a key.
 
 This is the belt-and-suspenders option. On the ESP32 boards the direct cash.ch source is simpler and needs no published file. On the ESP8266 the direct source works too, but GitHub is there if you would rather the device never do the ECDHE handshake at all.
 

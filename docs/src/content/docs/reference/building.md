@@ -137,7 +137,9 @@ src/                    shared core (device, net, web, settings)
   Clock.*               SNTP and the night-mode window
   WgClient.*            WireGuard tunnel (no-op stubs without SMALLTV_WIREGUARD)
   BearSslTuning.cpp     ESP8266 TLS cipher/curve pinning
-  OtaUpdate.*           GitHub self-update (ESP8266)
+  OtaUpdate.*           GitHub self-update (download in place on the ESP32, update at boot on the ESP8266)
+  StatusJson.h          the /api/status reply, written in 128-byte pieces
+  CrashRecord.h         the last-crash record kept in RTC memory (ESP8266)
   features/
     ticker/             TickerMode + StockClient
     usage/              UsageMode + UsageClient + Mascot
@@ -145,16 +147,26 @@ src/                    shared core (device, net, web, settings)
     notify/             NotifyMode + its overlay frames (armed over HTTP, never persisted)
     ha/                 Home Assistant screens over MQTT
     theme/              the .stheme clock-face engine and its web API
+lib/ESP8266mDNS/        the ESP8266 core 3.1.2 mDNS library with two memory fixes (see below)
 partitions/             ESP32 flash layouts (4 MB shared by C2 + NM-TV-154, 8 MB for the Pro)
 n8n/                    webhook contract and importable workflows
 extra_script.py         Windows-only SCons spawn workaround for the ESP8266 envs
 ```
 
+## The mDNS library on the ESP8266
+
+The ESP8266 envs build `lib/ESP8266mDNS/`, a copy of the ESP8266 core 3.1.2 mDNS library (LEAmDNS) with two changes, instead of the core's own. Both keep a busy network from running the heap out, where a failed allocation restarts the device:
+
+- An answer record in a response from another device is handled when it is read, not after the whole packet (v3.6.0 or later)
+- A known answer in a query is read whole only when the reply uses it; any other is skipped after its header. This change is on `main` after v3.10.0 and comes from esphome-libs/arduino-esp8266#9
+
+`lib/ESP8266mDNS/README-SMALLTV.md` describes both changes. `tools/check_mdns_copy.py` runs in CI and checks that the copy still matches the pinned core apart from them, and `tests/mdns/` tests them on the host. The ESP32 envs ignore the folder (`lib_ignore` in `[esp32_base]`) and use the ESP32 core's own mDNS.
+
 ## Windows builds
 
 `extra_script.py` replaces SCons's process spawn on Windows. The default path sends build-tool command lines through `cmd.exe`, which can mis-tokenize the long quoted lines this project generates and fail a `.cpp` compile with "no such file or directory". The script re-tokenizes the line itself and starts the process directly, including the `\"`-escaped quotes the ESP8266 `ARDUINO_BOARD_ID` define carries.
 
-It is wired into `[env:smalltv]` with `extra_scripts = pre:extra_script.py`, so `smalltv_lean` inherits it through `extends`. The override is gated on `os.name == "nt"` and does nothing on Linux or macOS, where SCons escapes for `sh` with single quotes that this tokenizer does not parse. The ESP32 envs do not use it.
+It is wired into `[env:smalltv]` with `extra_scripts = pre:extra_script.py`, so `smalltv_lean` and `smalltv_noupdate` inherit it through `extends`. The override is gated on `os.name == "nt"` and does nothing on Linux or macOS, where SCons escapes for `sh` with single quotes that this tokenizer does not parse. The ESP32 envs do not use it.
 
 ## ESP32 toolchain notes
 
@@ -178,10 +190,10 @@ The two peer limits are compile-time because `esp_wireguard` allocates peers sta
 
 | Build | `firmware.bin` | Of the 1,572,864 B slot | Free |
 |-------|---------------|-------------------------|------|
-| `smalltv_esp32` | 1,434,192 B | 91.2% | 138,672 B |
-| `smalltv_esp32_wg` | 1,479,984 B | 94.1% | 92,880 B |
+| `smalltv_esp32` | 1,483,136 B | 94.3% | 89,728 B |
+| `smalltv_esp32_wg` | 1,529,104 B | 97.2% | 43,760 B |
 
-Measured in CI on v3.0.0, which is what builds the published binaries. The client costs 45,792 bytes, about a third of the plain image's spare flash. Both fit with room left, so this is a headroom decision rather than a hard limit: the plain image keeps its spare bytes for whatever the firmware grows into next, and the WireGuard one spends a third of them on the tunnel.
+Measured on the v3.10.0 release assets, which CI builds. The client costs 45,968 bytes, about half of the plain image's spare flash. Both fit with room left, so this is a headroom decision rather than a hard limit: the plain image keeps its spare bytes for whatever the firmware grows into next, and the WireGuard one spends half of them on the tunnel.
 
 Growing the slot is the alternative to the split, and it is not one a field device can take: raising `app0` and `app1` in `partitions/smalltv_4mb_ota.csv` at the expense of `spiffs` (0xF0000 is generous for one `config.json`) is a partition-table change, and only `firmware.factory.bin` over USB can install that.
 
@@ -191,16 +203,18 @@ The env inherits `smalltv_esp32` through `extends` and interpolates that env's `
 
 ## Footprint
 
-Measured as the flashable `firmware.bin` in CI on v3.0.0, which is what an OTA slot has to hold:
+Measured as the flashable `firmware.bin` of the v3.10.0 release assets, which CI builds, and which is what an OTA slot has to hold:
 
 | Build | `firmware.bin` | Slot | Used | Free |
 |-------|---------------|------|------|------|
-| `smalltv` | 795,184 B | 1,044,464 B | 76.1% | 249,280 B |
-| `smalltv_lean` | 658,896 B | 1,044,464 B | 63.1% | 385,568 B |
-| `smalltv_c2` | 1,441,216 B | 1,572,864 B | 91.6% | 131,648 B |
-| `smalltv_esp32` | 1,434,192 B | 1,572,864 B | 91.2% | 138,672 B |
-| `smalltv_esp32_wg` | 1,479,984 B | 1,572,864 B | 94.1% | 92,880 B |
-| `smalltv_esp32_8mb` | 1,499,104 B | 2,228,224 B | 67.3% | 729,120 B |
+| `smalltv` | 846,752 B | 1,044,464 B | 81.1% | 197,712 B |
+| `smalltv_lean` | 677,664 B | 1,044,464 B | 64.9% | 366,800 B |
+| `smalltv_c2` | 1,492,880 B | 1,572,864 B | 94.9% | 79,984 B |
+| `smalltv_esp32` | 1,483,136 B | 1,572,864 B | 94.3% | 89,728 B |
+| `smalltv_esp32_wg` | 1,529,104 B | 1,572,864 B | 97.2% | 43,760 B |
+| `smalltv_esp32_8mb` | 1,561,712 B | 2,228,224 B | 70.1% | 666,512 B |
+
+The loader, `smalltv-mod-loader.bin`, is 315,920 B.
 
 The ESP8266 slot comes from `eagle.flash.4m1m.ld`, the 4 MB ESP32 slot from `partitions/smalltv_4mb_ota.csv` and the Pro's from `partitions/smalltv_8mb_ota.csv`. The mascot frame data lives in flash, not the heap.
 

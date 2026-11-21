@@ -3,13 +3,13 @@ title: Settings explained
 description: Every tab in the settings page, and every option in it, in plain language.
 ---
 
-The settings page is a single page with tabs across the top: Status, WiFi, Display, Ticker, Clawdmeter, Radar, System. Not every device has all of them: a unit built without the radar feature, for example, has no Radar tab. This page goes through each tab. For the deeper technical reference (data source details, exact request formats) see [Data sources](/smalltv-mod/reference/data-sources/) and each mode's own page.
+The settings page is a single page with tabs across the top: Status, WiFi, Display, Ticker, Clawdmeter, Radar, Home Assistant, System. Not every device has all of them: the lean ESP8266 image, for example, has no Clawdmeter or Home Assistant tab. This page goes through each tab. For the deeper technical reference (data source details, exact request formats) see [Data sources](/smalltv-mod/reference/data-sources/) and each mode's own page.
 
 One button applies everything: **Save settings**, at the very bottom of the page, under every tab. Nothing you type takes effect until you press it. If a save fails, a message on the page says why, and the device keeps the settings it had before.
 
 ## Status
 
-Read-only. Shows the firmware version, whether the device is online, its network name, IP address, signal strength, free memory, how long it has been running since the last restart, and why it last restarted. On a device with the WireGuard client, a VPN line says whether the tunnel is up.
+Read-only. Shows the firmware version, whether the device is online, its network name, IP address, signal strength, free memory, how long it has been running since the last restart, and why it last restarted. On a device with the WireGuard client, a VPN line says whether the tunnel is up. A Radar line says what the radar's last refresh did, and a Home Assistant line appears when that feature is not running as set (for example "restart the device").
 
 The live ticker values used to be here; they now sit at the top of the Ticker tab, next to the settings that produce them.
 
@@ -29,11 +29,15 @@ Networks must be 2.4 GHz. If you cannot see your network in the scan, see [Troub
 
 ## Display
 
-**Mode**: which of the three features is on screen, named after the tab that configures it, or **Carousel** to rotate between the ones you tick below it, staying on each for the number of seconds you set. Each mode is configured in its own tab regardless of whether it is the active one, so you can set up the ticker and the radar ahead of time and only switch to Carousel once both are ready.
+**Mode**: which feature is on screen (Ticker, Clawdmeter, Radar, Home Assistant or Theme clock), named after the tab that configures it, or **Carousel** to rotate between the ones you tick below it, staying on each for the number of seconds you set (30 by default). **Theme clock** starts unticked in the carousel; tick it once a theme is installed. Each mode is configured in its own tab regardless of whether it is the active one, so you can set up the ticker and the radar ahead of time and only switch to Carousel once both are ready.
 
-**Screen**: brightness as a percentage; "Auto-brightness" if your unit has a light sensor and you want the screen to follow the room instead of a fixed level; orientation, if the device is mounted sideways or upside down; and a fix for a dark screen with the backlight visibly on, "Backlight is active-low", which is on by default and should stay that way unless the screen looks wrong.
+**Theme clocks**: pick an installed clock face and press **Use theme**, remove one with **Remove**, or choose a `.stheme` file and press **Install .stheme** to add one. Themes are made in [SmallTV Studio](https://giovi321.github.io/smalltv-studio/); the format is in [Theme clocks](/smalltv-mod/features/themes/). Not in the lean ESP8266 image.
+
+**Screen**: brightness as a percentage (90 by default); "Auto-brightness" if your unit has a light sensor and you want the screen to follow the room instead of a fixed level; orientation, if the device is mounted sideways or upside down; and a fix for a dark screen with the backlight visibly on, "Backlight is active-low", which is on by default and should stay that way unless the screen looks wrong.
 
 **Colour**: the panels fitted to these devices are not all the same part, so the same firmware can look warm on one unit and green on another. Turn a channel down with the Red, Green, and Blue sliders until the screen matches what you expect; 100 percent on all three is the untouched image, and "Reset to 100%" puts it back. Two more fixes for panels that are wired differently: "Colour order" swaps red and blue for a unit that shows them the wrong way round, and "Invert the panel" is for a screen that looks like a photographic negative. Saving applies all of this immediately, so you can watch the screen while you adjust.
+
+**Button**: only on the SmallTV Pro and the NM-TV-154, which have a touch button on top. Pick what a short tap and a long press (held 0.6 seconds or more) do: nothing, blank the screen for about a second, go to the first page, go to the next page (this pauses the carousel), show the network address, light the screen at its normal brightness for a few seconds (for example during the night schedule), or clear the notification on screen. The sensitivity is set in the same card.
 
 **Clock & night mode**: pick your timezone by name (for example `Europe/Zurich`) from the dropdown; daylight saving is applied automatically, you never touch it again. **Language** (v3.4.0 or later) sets the month and weekday names a spec 2 theme shows, and the text of a theme that gives one per language; spec 1 themes and the other screens stay in English. Turn on "Dim or blank the screen on a nightly schedule" to set a from-time, a to-time, and a night brightness, where 0 turns the backlight fully off and anything else just dims it. This needs the internet once, at the times it checks, to know what time it is; it does not need it constantly, and the device stays reachable through the night either way. From v3.4.0 the same card can also make the brightness follow sunrise and sunset (set the device location first; see [Sunrise and sunset brightness](/smalltv-mod/features/sun/)). That schedule and auto-brightness never run together: switching auto-brightness on, for example from Home Assistant, switches the sun schedule off. This is by design.
 
@@ -66,6 +70,10 @@ Two fields: the address of the daemon running on your PC, the small program that
 **What to show**: the size of the markers and labels, a minimum altitude below which aircraft are hidden (useful for filtering out ground traffic at a nearby airport), and independent toggles for callsign/altitude labels, speed vectors, and the rim dots for traffic beyond the outer ring.
 
 **Airports**: up to six, each an ICAO code (for example `LSZH` for Zurich) with its own latitude and longitude, drawn as small markers on the scope.
+
+## Home Assistant
+
+**MQTT**: the address and port of your MQTT broker (1883 by default), an optional username and password, and how many seconds each screen stays up (15 by default). Leave the address blank to switch the feature off. Switching it on or off takes effect after a restart (System tab, **Reboot**); changing from one broker to another takes effect at once. **Clear screens** removes every screen from the device and from the broker. What to publish is in [Home Assistant screens](/smalltv-mod/features/ha/).
 
 ## System
 

@@ -56,7 +56,7 @@ Hardware SPI on the ESP8266 uses fixed clock and data pins. The rest are the Sma
 | DC | 0 | boot-strap pin |
 | RST | 2 | boot-strap pin |
 | CS | 15 | boot-strap pin |
-| Backlight | 5 | PWM, active-low |
+| Backlight | 5 | hardware sigma-delta from v3.9.0 (software PWM before), active-low |
 
 ## SmallTV (ESP32-C2 / ESP8684)
 
@@ -98,11 +98,12 @@ The pins are set in `src/board_esp32c2.h`. Two panel quirks are worth knowing: t
 | Display | 1.54" 240×240 IPS ST7789, SPI, RGB colour order |
 | Sold as | NMMiner NM-TV-154 BTC lottery miner, PCB marked "NM-TV-Miner" |
 | WireGuard VPN | in the second image only, `-esp32-wg` |
+| Extras | capacitive touch button (GPIO 32), configured in the Button card of the web UI |
 | Build env | `smalltv_esp32`, or `smalltv_esp32_wg` |
 
 Two images are published for this board, and the only difference is the WireGuard client. `smalltv-mod-firmware-esp32.bin` leaves it out; `smalltv-mod-firmware-esp32-wg.bin` compiles it in. Both carry every other feature, run the same code and use the same partition table.
 
-The split exists because of flash. The 4 MB layout gives each OTA slot 1,572,864 bytes, and the classic ESP32's own framework libraries cost about 100 KB more than the ESP32-C2's. The v3.0.0 images measure 1,434,192 bytes (91.2%) without the client and 1,479,984 bytes (94.1%) with it, so the tunnel costs 45,792 bytes and leaves 92,880 free. Both fit comfortably. It is still a choice because the slot cannot be grown without a new partition table, and a device in the field cannot install one over the air, so the room the plain image keeps is the only room this board will ever have for whatever the firmware grows into next, and the tunnel spends about a third of it.
+The split exists because of flash. The 4 MB layout gives each OTA slot 1,572,864 bytes, and with the client in it the classic ESP32 image is about 36 KB larger than the ESP32-C2's. The v3.10.0 images measure 1,483,136 bytes (94.3%) without the client and 1,529,104 bytes (97.2%) with it, so the tunnel costs 45,968 bytes and leaves 43,760 free. Both fit. It is still a choice because the slot cannot be grown without a new partition table, and a device in the field cannot install one over the air, so the room the plain image keeps is the only room this board will ever have for whatever the firmware grows into next, and the tunnel spends about half of it.
 
 Take `-esp32-wg` if you want to reach the device from outside your LAN. Take the plain one otherwise. Swapping later is a manual upload in the System tab and needs no cable, because the two images share a partition table; [Which release file to download](/smalltv-mod/reference/release-assets/#switch-a-device-from-one-variant-to-the-other) walks through it.
 
@@ -119,6 +120,7 @@ The pin map comes from [NMMiner's own custom-firmware guide](https://www.nmminer
 | CS | 15 | |
 | Backlight | 19 | PWM, active-low |
 | Panel power | 21 | driven low at boot to power the display |
+| Touch button | 32 | ESP32 T9 touch channel |
 
 The pins are set in `src/board_esp32.h`.
 

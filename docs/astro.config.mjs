@@ -62,6 +62,7 @@ export default defineConfig({
           items: [
             { label: 'Which release file to download', link: '/reference/release-assets/' },
             { label: 'Data sources', link: '/reference/data-sources/' },
+            { label: 'HTTP API', link: '/reference/http-api/' },
             { label: 'Building from source', link: '/reference/building/' },
             { label: 'Recovery and credits', link: '/reference/recovery/' },
           ],

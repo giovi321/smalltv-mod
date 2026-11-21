@@ -39,7 +39,7 @@ A setup page usually opens by itself. If it does not, open a browser and go to `
 
 ## 3. Tell it about your WiFi
 
-You are now looking at the device's settings page, a row of tabs across the top: Status, WiFi, Display, Ticker, Clawdmeter, Radar, System.
+You are now looking at the device's settings page, a row of tabs across the top: Status, WiFi, Display, Ticker, Clawdmeter, Radar, Home Assistant, System.
 
 1. Open the **WiFi** tab.
 2. Press **Scan networks**. After a few seconds you get a list, strongest first. Networks with a lock need a password.

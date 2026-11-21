@@ -35,7 +35,7 @@ The device fetches the free [adsb.lol](https://adsb.lol) API directly over HTTPS
 GET https://api.adsb.lol/v2/lat/<lat>/lon/<lon>/dist/<nm>
 ```
 
-No API key. The device parses the feed and keeps the closest 24 aircraft. The endpoint is rate-limited to about one request a second, so keep the refresh interval sensible. The default is 10 seconds.
+No API key. The request goes out as HTTP/1.1, because adsb.lol answers HTTP/1.0 with `426 Upgrade Required`. The device parses the feed and keeps the closest 24 aircraft. The endpoint is rate-limited to about one request a second, so keep the refresh interval sensible. The default is 10 seconds.
 
 ### adsb.fi, the default on the ESP32
 
@@ -61,8 +61,9 @@ Start at the **Radar** line in the Status tab. Since 2.12.1 it reports what the 
 
 Two of those stages have known causes on the ESP8266:
 
-- `skipped, low heap`: the radar refuses to start a TLS handshake unless a 16,000-byte contiguous block is free (shown in the Status tab next to Free heap). Install `smalltv-mod-firmware-lean.bin`, which compiles out Home Assistant screens and the usage meter, or use the webhook below, which is plain HTTP and skips the check. See [Which release file to download](/smalltv-mod/reference/release-assets/).
+- `skipped, low heap`: the radar refuses to start a TLS handshake unless a 16,000-byte contiguous block is free (shown in the Status tab next to Free heap). If you do not use Home Assistant screens, leave the broker host blank in the Home Assistant tab and restart (v3.5.0 or later), which gives back about 6.5 KB. Otherwise install `smalltv-mod-firmware-lean.bin`, which compiles out Home Assistant screens, the usage meter and theme clocks, or use the webhook below, which is plain HTTP and skips the check. See [Which release file to download](/smalltv-mod/reference/release-assets/).
 - `no aircraft in feed` on every poll while flightradar shows a full sky: before 2.12.1 this is what a device pointed at adsb.fi showed after Cloudflare fronted that feed, because Cloudflare's chunked responses misparsed as empty. 2.12.1 requests HTTP/1.0, which cannot be chunked; on older firmware, switch the source to adsb.lol.
+- `http error` with code `426` on every poll with adsb.lol: firmware before v3.5.1 sent adsb.lol an HTTP/1.0 request, which adsb.lol now refuses. Update to v3.5.1 or later, or switch the source to the webhook.
 
 ### Custom webhook, a LAN proxy
 

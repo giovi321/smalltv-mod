@@ -50,7 +50,7 @@ The `<target>` suffix names the board. No suffix at all means the original ESP82
 
 ## Check what a device is running
 
-The System tab shows the running variant next to the version, for example `smalltv-mod 2.12.0 (esp8266-lean)`. The same string is in `/api/status` as `variant`.
+The System tab shows the running variant next to the version, for example `smalltv-mod 3.10.0 (esp8266-lean)`. The same string is in `/api/status` as `variant`.
 
 That name also decides what a self-update downloads. Each build is compiled with its own `UPDATE_ASSET` and `FW_VARIANT` (`src/config.h`), and the updater only accepts the release asset whose name matches. So a lean device fetches `smalltv-mod-firmware-lean.bin` and stays lean, and an `esp32-wg` device fetches `smalltv-mod-firmware-esp32-wg.bin` and keeps its tunnel. A self-update never moves a device between variants, in either direction: it will not quietly take features away, and it will not quietly add them.
 
@@ -76,6 +76,6 @@ Since 3.5.0 the standard image also leaves out the largest piece of Home Assista
 
 The ESP32 boards have several times the RAM and manage TLS buffers dynamically through mbedTLS, so RAM never forces a second image on them.
 
-Flash does, on one of them. The NM-TV-154's 4 MB layout gives each OTA slot 1,572,864 bytes, the same as the ESP32-C2's, but the classic ESP32's framework libraries cost about 100 KB more than the C2's, so the same code starts closer to the ceiling here. The v3.0.0 images measure 1,434,192 bytes without the WireGuard client and 1,479,984 bytes with it: the tunnel costs 45,792 bytes, about a third of what the plain image has spare. Both fit, and the slot cannot be enlarged without a partition-table change that no over-the-air update can install, so the client ships as the separate `-esp32-wg` image and the plain one keeps the headroom. The ESP32-C2 and the SmallTV Pro have room for the client without that trade, so they carry it in their only image.
+Flash does, on one of them. The NM-TV-154's 4 MB layout gives each OTA slot 1,572,864 bytes, the same as the ESP32-C2's, but the same code builds about 36 KB larger on the classic ESP32, so it starts closer to the ceiling here. The v3.10.0 images measure 1,483,136 bytes without the WireGuard client and 1,529,104 bytes with it: the tunnel costs 45,968 bytes, about half of what the plain image has spare. Both fit, and the slot cannot be enlarged without a partition-table change that no over-the-air update can install, so the client ships as the separate `-esp32-wg` image and the plain one keeps the headroom. The ESP32-C2 and the SmallTV Pro have room for the client without that trade, so they carry it in their only image.
 
 See [Building from source](/smalltv-mod/reference/building/#the-smalltv_lean-env) to build either ESP8266 image yourself, or a slimmer combination of your own, and [the smalltv_esp32_wg env](/smalltv-mod/reference/building/#the-smalltv_esp32_wg-env) for the NM-TV-154 pair.

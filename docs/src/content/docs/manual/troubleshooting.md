@@ -34,7 +34,7 @@ If the `.local` address does not open in your browser, try the plain IP address 
 
 ## The device shows the wrong time, or night mode isn't dimming the screen
 
-The device gets the time from the internet, and it only checks it when something needs it: night mode, or a WireGuard tunnel on the models that have one. The clock line in the Display tab reports on night mode only, so on a device using the clock purely for a tunnel it still reads as though NTP were idle. Either way, none of this affects the ticker or the radar.
+The device gets the time from the internet, and it only checks it when something needs it: night mode, the sunrise and sunset schedule, a theme clock on screen or in the carousel, or a WireGuard tunnel on the models that have one. The clock line in the Display tab reports on night mode only, so on a device using the clock purely for a tunnel or a theme it still reads as though NTP were idle. Either way, none of this affects the ticker or the radar.
 
 - Give it a minute after saving: the first check happens shortly after you enable night mode, not instantly.
 - Confirm the timezone in the Clock & night mode card matches where you are; a correct clock in the wrong timezone will dim at the wrong local time.
@@ -123,16 +123,29 @@ If you exported a settings backup beforehand (System tab, "Export settings"), im
 - If the backlight circuit is inverted from what the firmware expects, the screen can appear dark even at full brightness; toggle "Backlight is active-low" in the Display tab.
 - If the device does not respond to the settings page at all, it may not be reachable on the network; see "I can't find the settings page anymore" above.
 
+## The ESP8266 shows CRASH a few seconds after every start (3.10.0)
+
+This is a known issue in 3.10.0, also reproduced on 3.7.0, on the standard ESP8266 image (`smalltv-mod-firmware.bin`), tracked in [issue #134](https://github.com/giovi321/smalltv-mod/issues/134). It needs a theme clock and a ticker that uses Yahoo Finance, both ticked in the carousel.
+
+- Symptom: within about half a minute of power-on, at the ticker's first fetch, the device restarts and stays on the CRASH screen. The **Last crash** line in the Status tab shows an exception with cause `0x1d` (exception 29, a write to address 0). It happens again on the next start
+- Cause: the ticker's first HTTPS handshakes after a start take most of the heap, and the WiFi driver then fails to allocate memory and writes through a null pointer
+- Workaround: install `smalltv-mod-firmware-lean.bin` (see [Which release file to download](/smalltv-mod/reference/release-assets/)), or untick **Theme clock** in the carousel while a ticker uses Yahoo Finance. The CRASH screen keeps the settings page and the firmware upload reachable, so either change can be made from there
+
 ## The screen shows CRASH
 
 Rare, but if it happens: the device restarted after an internal fault, and stays on this screen instead of trying to redraw whatever crashed it. It shows a fault code and its IP address, and the settings page and firmware update are still reachable at that address. Reinstalling the latest firmware version through the System tab normally clears it, and no settings are lost by doing so.
 
 From v3.5.0 the Status tab also keeps a **Last crash** line after such a restart: the reason, the fault registers (not for an abort or a stack overflow, where the chip records none), the firmware version that crashed and how long it had been up. It stays through normal restarts until you press **clear** next to it or unplug the device. `GET /api/status` carries the same record as `lastCrash`, and `POST /api/crash/clear` clears it. Include that line when you report the crash.
 
+## The screen flickers at low brightness
+
+On the ESP8266 models before v3.9.0 the backlight was driven by a software PWM, which WiFi traffic can delay, so a low brightness flashed during a fetch, an update or a start. From v3.9.0 the backlight runs on a hardware generator and holds steady. Update from the System tab.
+
 ## Updating from GitHub fails
 
 - On the original ESP8266 model, firmware version 2.6.1 and earlier cannot update themselves due to a bug in that version's updater; a broken updater cannot fix itself. Update that device once by hand as described in [Flashing](/smalltv-mod/getting-started/flashing/#after-the-first-flash), and the automatic updater works normally afterwards.
 - A failed update leaves the device running its current version; nothing is lost, and the System tab shows the reason for the failure. Usually pressing "Check for latest" and "Update now" again succeeds on a retry.
+- On the ESP8266 a manual upload in the System tab can answer "Upload not started: not enough memory in one piece". The updater needs a 4 KB block of memory in one piece, and the device refuses the upload at the start rather than fail halfway (v3.6.0 or later). Restart the device, then upload again.
 - The download needs the device's normal internet connection; if WiFi is unstable at the time, wait and try again.
 
 ## The web UI answers "Forbidden"

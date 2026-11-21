@@ -9,14 +9,14 @@ Keep a `stock-backup.bin` from before your first flash and you can always return
 
 - **Re-flash anything** (your stock backup or this firmware) with the method for your board, described in [Flashing](/smalltv-mod/getting-started/flashing/).
 - **Factory reset** in the System tab wipes saved settings and restarts in SETUP MODE. It does not change the firmware.
-- On the ESP32 boards, a bad flash never bricks the device: it still enters download mode, so esptool can rewrite it — over USB on the C2 and the NM-TV-154, or over the internal UART header on the SmallTV Pro (no USB-serial chip; see [Flashing](/smalltv-mod/getting-started/flashing/#smalltv-pro-classic-esp32-8-mb)).
+- On the ESP32 boards, a bad flash never bricks the device: it still enters download mode, so esptool can rewrite it, over USB on the C2 and the NM-TV-154, or over the internal UART header on the SmallTV Pro (no USB-serial chip; see [Flashing](/smalltv-mod/getting-started/flashing/#smalltv-pro-classic-esp32-8-mb)).
 
 ## Notes and limitations
 
 - 2.4 GHz WiFi only. WPA2. For an AP password use at least 8 characters, or leave it blank for an open hotspot.
 - The web server is single-threaded, so the UI may pause briefly during a data poll.
 - HTTPS works on the ESP8266 but is RAM-tight. Prefer plain HTTP on your LAN for a webhook if you see instability. The ESP32 boards have more headroom.
-- The GitHub self-update works on every board from 2.7.0. The ESP32 boards download in place; the ESP8266 updates at boot (two reboots — see [Flashing](/smalltv-mod/getting-started/flashing/#after-the-first-flash)). ESP8266 devices still on 2.6.1 or older have a broken updater and need one manual upload in the System tab to get current.
+- The GitHub self-update works on every board from 2.7.0. The ESP32 boards download in place; the ESP8266 updates at boot (two reboots; see [Flashing](/smalltv-mod/getting-started/flashing/#after-the-first-flash)). ESP8266 devices still on 2.6.1 or older have a broken updater and need one manual upload in the System tab to get current.
 - Fonts are the built-in bitmap font, scaled, chosen for reliability and the retro look. No external font files are needed.
 
 ## Credits and references

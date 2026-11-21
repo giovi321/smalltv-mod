@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="868" height="320" viewBox="0 0 868 320" font-family="Consolas,Menlo,monospace">
+  <rect width="868" height="320" fill="#0e1116"/>
+
+  <!-- Panel 7: ticker portfolio summary page -->
+  <g transform="translate(20,20)">
+    <rect width="260" height="260" rx="22" fill="#1b2029" stroke="#2b323d"/>
+    <rect x="10" y="10" width="240" height="240" rx="10" fill="#000"/>
+    <g transform="translate(10,10)">
+      <!-- page dots: five symbols, then this summary -->
+      <circle cx="94" cy="9" r="2" fill="#424142"/>
+      <circle cx="104" cy="9" r="2" fill="#424142"/>
+      <circle cx="114" cy="9" r="2" fill="#424142"/>
+      <circle cx="124" cy="9" r="2" fill="#424142"/>
+      <circle cx="134" cy="9" r="2" fill="#424142"/>
+      <circle cx="144" cy="9" r="2" fill="#fff"/>
+      <text x="39" y="47" fill="#fff" font-size="30" font-weight="700" textLength="159">Portfolio</text>
+      <text x="4" y="72" fill="#fff" font-size="20" textLength="46">AAPL</text>
+      <text x="116" y="72" fill="#00ff00" font-size="20" textLength="70">+30.3%</text>
+      <text x="188" y="72" fill="#fff" font-size="20" textLength="46">4691</text>
+      <text x="4" y="90" fill="#fff" font-size="20" textLength="46">MSFT</text>
+      <text x="116" y="90" fill="#ff0000" font-size="20" textLength="58">-3.4%</text>
+      <text x="188" y="90" fill="#fff" font-size="20" textLength="46">4152</text>
+      <text x="4" y="108" fill="#fff" font-size="20" textLength="46">NVDA</text>
+      <text x="116" y="108" fill="#00ff00" font-size="20" textLength="70">+50.3%</text>
+      <text x="188" y="108" fill="#fff" font-size="20" textLength="46">4284</text>
+      <text x="4" y="126" fill="#fff" font-size="20" textLength="82">BTC-USD</text>
+      <text x="116" y="126" fill="#00ff00" font-size="20" textLength="70">+57.1%</text>
+      <text x="188" y="126" fill="#fff" font-size="20" textLength="46">4870</text>
+      <text x="4" y="144" fill="#fff" font-size="20" textLength="82">ETH-USD</text>
+      <text x="116" y="144" fill="#00ff00" font-size="20" textLength="70">+28.8%</text>
+      <text x="188" y="144" fill="#fff" font-size="20" textLength="46">4020</text>
+      <rect x="4" y="150" width="232" height="1" fill="#424142"/>
+      <text x="4" y="170" fill="#fff" font-size="20" textLength="58">Total</text>
+      <text x="78" y="170" fill="#00ff00" font-size="20" textLength="70">+29.7%</text>
+      <text x="164" y="170" fill="#fff" font-size="20" textLength="70">$22.0k</text>
+    </g>
+    <text x="130" y="290" fill="#8b96a5" font-size="14" text-anchor="middle">Portfolio</text>
+  </g>
+
+  <!-- Panel 8: Claude usage, 7-day only (plans without a 5-hour limit) -->
+  <g transform="translate(304,20)">
+    <rect width="260" height="260" rx="22" fill="#1b2029" stroke="#2b323d"/>
+    <rect x="10" y="10" width="240" height="240" rx="10" fill="#000"/>
+    <g transform="translate(10,10)">
+      <!-- header: idle mascot pose, 20x20 cells at 2 px from (6,4) -->
+      <g fill="#ce7d6b">
+        <rect x="16" y="12" width="22" height="20"/>
+        <rect x="12" y="18" width="30" height="6"/>
+        <rect x="12" y="24" width="2" height="2"/>
+        <rect x="40" y="24" width="2" height="2"/>
+        <rect x="16" y="32" width="2" height="6"/>
+        <rect x="22" y="32" width="2" height="6"/>
+        <rect x="30" y="32" width="2" height="6"/>
+        <rect x="36" y="32" width="2" height="6"/>
+      </g>
+      <rect x="20" y="16" width="2" height="4" fill="#080c08"/>
+      <rect x="32" y="16" width="2" height="4" fill="#080c08"/>
+      <text x="56" y="33" fill="#fff" font-size="30" font-weight="700" textLength="105">CLAUDE</text>
+      <!-- single tall 7-day card -->
+      <rect x="8" y="52" width="224" height="180" rx="10" fill="#181c18"/>
+      <text x="22" y="80" fill="#b5aea5" font-size="20" textLength="130">7-DAY USAGE</text>
+      <text x="57" y="145" fill="#fff" font-size="70" font-weight="700" textLength="119">61%</text>
+      <rect x="22" y="162" width="196" height="18" rx="9" fill="#292829"/>
+      <rect x="22" y="162" width="119" height="18" rx="9" fill="#7b8e5a"/>
+      <!-- even-pace marker: share of the week already elapsed -->
+      <rect x="117" y="157" width="2" height="28" fill="#fff"/>
+      <text x="24" y="206" fill="#b5aea5" font-size="20" textLength="190">Resets in 3d 14h</text>
+      <!-- amber: usage runs 5 points or more ahead of an even burn -->
+      <text x="42" y="226" fill="#de7552" font-size="20" textLength="154">Even pace 49%</text>
+    </g>
+    <text x="130" y="290" fill="#8b96a5" font-size="14" text-anchor="middle">Claude usage, 7-day only</text>
+  </g>
+
+  <!-- Panel 9: first-boot setup hotspot -->
+  <g transform="translate(588,20)">
+    <rect width="260" height="260" rx="22" fill="#1b2029" stroke="#2b323d"/>
+    <rect x="10" y="10" width="240" height="240" rx="10" fill="#000"/>
+    <g transform="translate(10,10)">
+      <text x="30" y="39" fill="#ffff00" font-size="30" font-weight="700" textLength="177">SETUP MODE</text>
+      <text x="60" y="78" fill="#848284" font-size="20" textLength="118">Join WiFi:</text>
+      <text x="42" y="102" fill="#fff" font-size="20" textLength="154">SmallTV-Setup</text>
+      <text x="36" y="138" fill="#848284" font-size="20" textLength="166">(open network)</text>
+      <text x="60" y="196" fill="#848284" font-size="20" textLength="118">Then open:</text>
+      <text x="12" y="220" fill="#00ff00" font-size="20" textLength="214">http://192.168.4.1</text>
+    </g>
+    <text x="130" y="290" fill="#8b96a5" font-size="14" text-anchor="middle">Setup hotspot</text>
+  </g>
+</svg>
