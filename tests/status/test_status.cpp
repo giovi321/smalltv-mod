@@ -403,7 +403,31 @@ int main() {
     e.hasDetail = true; e.heap = 7000;
     StringSink s4;
     { PieceWriter<128> out(s4); writeStatusCrash(out, e); out.flush(); }
-    assert(s4.text == ",\"lastCrash\":{\"reason\":\"Exception\",\"fw\":\"3.2.1\",\"heap\":7000,\"trace\":[],\"more\":0}");
+    assert(s4.text == ",\"lastCrash\":{\"reason\":\"Exception\",\"fw\":\"3.2.1\",\"heap\":7000,\"trace\":[]}");   // no "more" key when 0
+    // A record taken from the hardware watchdog has no detail, but it still
+    // knows how many crashes came before it: "more" is written outside the
+    // detail block, whenever it is not 0 (review of #137, point 1).
+    CrashSnapshot h = {};
+    snap(h, "Hardware watchdog", "3.2.1");
+    h.hasRegisters = true; h.exccause = 28; h.epc1 = 0x40201234;
+    h.more = 2;
+    StringSink s5;
+    { PieceWriter<128> out(s5); writeStatusCrash(out, h); out.flush(); }
+    assert(s5.text == ",\"lastCrash\":{\"reason\":\"Hardware watchdog\",\"fw\":\"3.2.1\",\"exccause\":\"0x1c\","
+                      "\"epc\":\"0x40201234\",\"addr\":\"0x00000000\",\"more\":2}");
+    h.more = 1;   // the smallest non-zero count is written too
+    StringSink s6;
+    { PieceWriter<5> out(s6); writeStatusCrash(out, h); out.flush(); }
+    assert(s6.text.size() > 6 && s6.text.compare(s6.text.size() - 9, 9, "\"more\":1}") == 0);
+    h.more = 0;   // none before: no key
+    StringSink s7;
+    { PieceWriter<128> out(s7); writeStatusCrash(out, h); out.flush(); }
+    assert(s7.text.find("more") == std::string::npos);
+    // and a record with detail and a count: still once, at the end
+    d.more = 1;
+    StringSink s8;
+    { PieceWriter<128> out(s8); writeStatusCrash(out, d); out.flush(); }
+    assert(s8.text.size() > 9 && s8.text.compare(s8.text.size() - 9, 9, "\"more\":1}") == 0 && s8.text.find("more") == s8.text.rfind("more"));
   }
   {  // fetch: nothing before the first theme data fetch has ended, then the
      // count of refusals and how the last one ended

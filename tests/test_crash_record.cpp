@@ -16,10 +16,12 @@ static CrashRtc sample() {
 }
 
 int main() {
-  // The record is 25 words. It must stay clear of the OTA hand-off (0..31), the
-  // diag build's record (32..74) and the words a build may keep from 112 on.
+  // The record is 25 words. It must stay clear of the OTA hand-off (words
+  // 0..31) and end inside the user memory: the core's rtcUserMemoryWrite()
+  // refuses anything past 512 bytes, that is 128 words (core Esp.cpp,
+  // `offset * 4 + size > 512`).
   assert(sizeof(CrashRtc) == 100);
-  assert(CRASH_RTC_WORD >= 75 && CRASH_RTC_WORD + sizeof(CrashRtc) / 4 <= 112);
+  assert(CRASH_RTC_WORD >= 32 && CRASH_RTC_WORD + sizeof(CrashRtc) / 4 <= 128);
   // A record of an older layout (#56's "CRSH" at word 96) is never read as this one.
   assert(CRASH_MAGIC != 0x43525348);
 

@@ -31,6 +31,12 @@ int main() {
   const std::string web = slurp("src/WebPortal.cpp");
   CHECK(!plat.empty() && !web.empty());
 
+  // The build-time guard on the record's place is the real limit, 128 words
+  // (512 bytes of RTC user memory), and keeps the OTA words (0..31) clear.
+  CHECK(at(plat, "sizeof(CrashRtc) / 4 + CRASH_RTC_WORD <= 128") != std::string::npos);
+  CHECK(at(plat, "CRASH_RTC_WORD >= 32") != std::string::npos);
+  CHECK(at(plat, "<= 112") == std::string::npos);
+
   // The callback: head (trace, failed allocation, lows), first write, then the
   // heap walk, then the second write. The walk must come after the first write.
   const std::string cb = body(plat, "extern \"C\" void custom_crash_callback(");
@@ -54,7 +60,8 @@ int main() {
   // Nothing in the callback may allocate.
   CHECK(at(cb, "String") == std::string::npos && at(cb, "new ") == std::string::npos && at(cb, "malloc") == std::string::npos);
 
-  // The sampler runs from the boot call; the lows restart through the platform call.
+  // The sampler runs from the boot call; the lows restart at boot and through
+  // the platform call (which the clear handler makes, below).
   const std::string begin = body(plat, "void platformCrashRecordBegin() {\n");   // not the ESP32 stub, which has {} on one line
   CHECK(at(begin, "os_timer_arm(&s_lowsTimer, 100, true)") != std::string::npos);
   CHECK(at(begin, "os_timer_arm(") < at(begin, "ESP.getResetInfoPtr()"));   // before any early return
@@ -73,8 +80,7 @@ int main() {
   for (const char* o : outs) CHECK(at(get, o) != std::string::npos);
   CHECK(at(get, "crashBlockKnown(") != std::string::npos);
 
-  // The status handler: every field to the writer, and the lows restart only
-  // after the last chunk went out.
+  // The status handler: every field to the writer.
   const std::string st = body(web, "static void handleStatus(");
   CHECK(!st.empty());
   // One record, no second copy of it (the copy cost 224 B of the 4 KB stack,
@@ -95,8 +101,18 @@ int main() {
   CHECK(at(statush, "struct StatusCrash") == std::string::npos);
   CHECK(at(statush, "writeStatusCrash(Out& out, const CrashSnapshot& k)") != std::string::npos);
   CHECK(at(statush, "snprintf") == std::string::npos);
-  CHECK(at(st, "platformCrashLowsReset()") != std::string::npos);
-  CHECK(at(st, "server.sendContent(\"\", 0)") < at(st, "platformCrashLowsReset()"));
+  // The lows restart at boot and on a crash clear, never on a status read
+  // (review of #137, point 2): a read of the status page would otherwise
+  // cut the window a later crash record covers to the time since that read.
+  CHECK(at(st, "platformCrashLowsReset") == std::string::npos);
+  const std::string clr = body(web, "static void handleCrashClear() {");
+  CHECK(!clr.empty());
+  CHECK(at(clr, "platformCrashRecordClear()") != std::string::npos);
+  CHECK(at(clr, "platformCrashLowsReset()") != std::string::npos);
+  CHECK(at(begin, "s_lows.reset()") != std::string::npos);   // and at boot
+  size_t resets = 0;   // the web code calls it in one place only
+  for (size_t p = at(web, "platformCrashLowsReset"); p != std::string::npos; p = at(web, "platformCrashLowsReset", p + 1)) resets++;
+  CHECK(resets == 1);
 
   if (failures) { std::printf("%d wiring check(s) failed\n", failures); return 1; }
   std::printf("crash record wiring tests passed\n");
