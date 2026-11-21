@@ -79,6 +79,24 @@ struct StatusRadar {
   uint32_t triedAgo = 0, okAgo = 0;
   const char* url = "";         // left out when empty
 };
+struct StatusRain {
+  uint8_t frames = 0;
+  bool error = false;
+  bool stale = false;           // the set is too old to show (screen says "unavailable")
+  const char* stage = "";
+  int http = 0;                 // left out when 0
+  uint8_t cropK = 0;            // left out when 0
+  uint32_t generated = 0;       // left out when 0
+  bool hasTried = false, hasOk = false;
+  uint32_t triedAgo = 0, okAgo = 0;
+  const char* url = "";         // left out when empty
+  uint32_t drawMs = 0, blitMs = 0, citiesMs = 0;   // render cost, left out when 0
+  uint32_t decodeMs = 0;              // last tile decode, left out when 0
+  bool smallMem = false;              // ... in the small-memory mode (written when decodeMs is)
+  uint32_t minHeap = 0, minBlk = 0;   // heap low-water mark of the last fetch, left out when 0
+  char minWhere = 0;                  // where minBlk was hit: L list, D download, X decode, S between steps
+  uint32_t fsFree = 0;                // LittleFS free bytes at the last room check, left out when 0
+};
 
 namespace statusout {
 // `,"key":` (the key is a PSTR literal with its comma and quotes), then the value.
@@ -198,6 +216,33 @@ template <class Out> void writeStatusRadar(Out& out, const StatusRadar& r) {
   if (r.hasTried) member(out, PSTR(",\"triedAgo\":"), r.triedAgo);
   if (r.hasOk) member(out, PSTR(",\"okAgo\":"), r.okAgo);
   if (r.url[0]) member(out, PSTR(",\"url\":"), r.url);
+  jsonout::raw(out, PSTR("}"));
+}
+
+// `,"rain":{...}`.
+template <class Out> void writeStatusRain(Out& out, const StatusRain& r) {
+  using statusout::member;
+  member(out, PSTR(",\"rain\":{\"frames\":"), r.frames);
+  member(out, PSTR(",\"error\":"), r.error);
+  member(out, PSTR(",\"stale\":"), r.stale);
+  member(out, PSTR(",\"stage\":"), r.stage);
+  if (r.http) member(out, PSTR(",\"http\":"), r.http);
+  if (r.cropK) member(out, PSTR(",\"cropK\":"), r.cropK);
+  if (r.generated) member(out, PSTR(",\"generated\":"), r.generated);
+  if (r.hasTried) member(out, PSTR(",\"triedAgo\":"), r.triedAgo);
+  if (r.hasOk) member(out, PSTR(",\"okAgo\":"), r.okAgo);
+  if (r.url[0]) member(out, PSTR(",\"url\":"), r.url);
+  if (r.drawMs)   member(out, PSTR(",\"drawMs\":"), r.drawMs);
+  if (r.blitMs)   member(out, PSTR(",\"blitMs\":"), r.blitMs);
+  if (r.citiesMs) member(out, PSTR(",\"citiesMs\":"), r.citiesMs);
+  if (r.decodeMs) {
+    member(out, PSTR(",\"decodeMs\":"), r.decodeMs);
+    member(out, PSTR(",\"smallMem\":"), r.smallMem);
+  }
+  if (r.minHeap)  member(out, PSTR(",\"minHeap\":"), r.minHeap);
+  if (r.minBlk)   member(out, PSTR(",\"minBlk\":"), r.minBlk);
+  if (r.minWhere) { char w[2] = {r.minWhere, 0}; member(out, PSTR(",\"minWhere\":"), (const char*)w); }
+  if (r.fsFree)   member(out, PSTR(",\"fsFree\":"), r.fsFree);
   jsonout::raw(out, PSTR("}"));
 }
 

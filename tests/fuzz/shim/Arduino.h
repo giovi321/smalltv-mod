@@ -28,6 +28,8 @@ class String {
   String(unsigned long n) : s_(std::to_string(n)) {}
   String(unsigned long n, unsigned char base) { char b[40]; snprintf(b, sizeof b, base == 16 ? "%lx" : "%lu", n); s_ = b; }
   String(float n) { char b[40]; snprintf(b, sizeof b, "%g", double(n)); s_ = b; }
+  String(unsigned n, unsigned char base) : String((unsigned long)n, base) {}
+  String(float n, unsigned char decimals) { char b[48]; snprintf(b, sizeof b, "%.*f", (int)decimals, double(n)); s_ = b; }
   unsigned length() const { return s_.size(); }
   const char* c_str() const { return s_.c_str(); }
   bool isEmpty() const { return s_.empty(); }
@@ -41,6 +43,7 @@ class String {
   String& operator+=(const String& o) { s_ += o.s_; return *this; }
   String& operator+=(const char* o) { s_ += o; return *this; }
   String& operator+=(char c) { s_ += c; return *this; }
+  String& operator+=(int n) { s_ += std::to_string(n); return *this; }
   String operator+(const String& o) const { return String(s_ + o.s_); }
   bool operator==(const String& o) const { return s_ == o.s_; }
   bool operator==(const char* o) const { return s_ == o; }

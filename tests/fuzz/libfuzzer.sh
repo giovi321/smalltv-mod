@@ -1,7 +1,7 @@
 #!/bin/sh
 # Optional: the same targets under libFuzzer (needs clang with the fuzzer
 # runtime; the default tests/fuzz/run.sh does not). One binary per target:
-#   sh tests/fuzz/libfuzzer.sh package|manifest|meta|import|font|data [libFuzzer args...]
+#   sh tests/fuzz/libfuzzer.sh package|manifest|meta|import|font|data|rain [libFuzzer args...]
 # e.g. sh tests/fuzz/libfuzzer.sh package -max_total_time=60 \
 #        /tmp/corpus-package examples/themes
 set -eu
@@ -12,6 +12,15 @@ THEME_JSON_INCLUDE=${THEME_JSON_INCLUDE:-.pio/libdeps/smalltv_esp32_8mb/ArduinoJ
 OUT=${FUZZ_OUT:-/tmp/smalltv-fuzz}
 upper=$(echo "$target" | tr '[:lower:]' '[:upper:]')
 mkdir -p "$OUT"
+if [ "$target" = rain ]; then   # the PNG decoder of the rain radar: fuzz_rain.cpp
+  clang++ -m32 -std=c++11 -O1 -g -fno-omit-frame-pointer \
+    -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
+    -Wno-unused-parameter -DFUZZ_LIBFUZZER -DSMALLTV_ESP8266 -include tests/fuzz/shim/progmem.h \
+    -Itests/fuzz/shim -Itests/rain -Isrc -Isrc/features/rain \
+    tests/fuzz/fuzz_rain.cpp src/features/rain/RainPng.cpp -o "$OUT/fuzz_rain"
+  "$OUT/fuzz_rain" "$@"
+  exit
+fi
 clang++ -m32 -std=c++11 -O1 -g -fno-omit-frame-pointer \
   -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
   -Wno-unused-parameter -D_FILE_OFFSET_BITS=64 \

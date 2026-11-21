@@ -5,6 +5,9 @@
 #include "Clock.h"
 #include <ArduinoJson.h>
 #include <algorithm>
+#if WITH_RAIN
+#include "RainClient.h"
+#endif
 extern void appInvalidate();
 namespace {
 WebServerClass* server;
@@ -169,6 +172,12 @@ void receiveUpload() {
     // it already.
     g_themeMode.release(UINT32_MAX);
     LittleFS.remove(staging);
+#if WITH_RAIN
+    // The rain radar keeps its frames on LittleFS down to RAIN_FS_KEEP_FREE
+    // (~750 KB for a full set): free them for the package. They are fetched
+    // again by the next poll, which then makes room around the new theme.
+    rainRemoveAll();
+#endif
     // Preserve room for a settings rewrite plus filesystem metadata overhead,
     // so a large upload cannot leave too little space for the device to save
     // its own configuration afterward. The size of the last save stands in
