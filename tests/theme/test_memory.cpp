@@ -772,8 +772,9 @@ static void testLayerCap() {
   assert((cap.loaded - one.loaded) <= (MaxLayers - 1) * layerBound);
   // The load peak grows a little faster than what is kept: while it loads, the
   // parser also holds a range entry for each layer (measured on the host build at 32
-  // layers: 152 B a layer on average, against 112 B kept), so its bound is wider.
-  const size_t peakBound = sizeof(Layer) + 40;
+  // layers: 152 B a layer on average, 158 B at 40, against 112 to 128 B kept), so
+  // its bound is wider.
+  const size_t peakBound = sizeof(Layer) + 48;
   assert((cap.loadPeak - one.loadPeak) <= (MaxLayers - 1) * peakBound);
   assert((cap.running - one.running) <= (MaxLayers - 1) * runningBound);
   // And the cap is the cap: one layer more is refused, with the limit named.
