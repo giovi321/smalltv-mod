@@ -1472,7 +1472,8 @@ class Renderer:
             return first + min(count - 1, n)
         # `pause`: hidden frames after the last one, whole frames rounded up.
         # A frame past the last is the layer in its pause: nothing is drawn.
-        pause_frames = (l.get('pause', 0) * l['fps'] + 999) // 1000
+        # Both validators accept `"pause": null`, which is no pause.
+        pause_frames = ((l.get('pause') or 0) * l['fps'] + 999) // 1000
         return first + n % (count + pause_frames)
 
     def layer_text(self, l):
