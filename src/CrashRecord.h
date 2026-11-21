@@ -27,11 +27,13 @@ static const unsigned CRASH_TRACE_WORDS = 8;
 // Where the record sits in the user words as ESP.rtcUserMemoryRead() counts
 // them (the SDK adds 64). Taken: the OTA hand-off to eboot 0..31 (anything
 // written there between Update.end() and the reboot makes eboot boot the old
-// image), the diag build's record 32..74 (never together with this one: both
-// define the crash callback). The record is 25 words: 76..100.
+// image). The user memory ends at word 127 (512 bytes: the core's
+// rtcUserMemoryWrite() refuses more). The record is 25 words: 76..100. Its
+// place differs from the 3.5.0 record's (word 96) so that an older record is
+// never overwritten or read as this one.
 static const uint32_t CRASH_RTC_WORD = 76;
-// Samples left out after a reset of the low-water marks (100 ms each): the
-// status reply that resets them is the biggest dip there is.
+// Samples left out after a reset of the low-water marks (100 ms each), at
+// boot or after a crash clear: the first ticks are the start-up's own dip.
 static const unsigned CRASH_QUIET_TICKS = 20;
 
 struct CrashRtc {
@@ -79,7 +81,7 @@ struct CrashSnapshot {
   uint32_t failSize;       // size of the last failed allocation, 0: none since boot
   uint32_t failAddr;       // its caller
   bool     hasLows;        // false if the sampler took no sample
-  uint32_t lowHeap, lowBlk;   // lows since the last status read
+  uint32_t lowHeap, lowBlk;   // lows since boot or the last crash clear
   uint32_t trace[CRASH_TRACE_WORDS];   // code addresses from the stack, 0: unused
   uint32_t more;           // earlier crashes that were never cleared
 };
@@ -151,7 +153,7 @@ static inline unsigned crashCollectTrace(const uint32_t* words, unsigned count, 
   return n;
 }
 
-// The lowest free heap and largest block since the last reset, fed from a
+// The lowest free heap and largest block since boot or the last crash clear, fed from a
 // 100 ms timer. The first CRASH_QUIET_TICKS after a reset are left out.
 class CrashLowWater {
  public:

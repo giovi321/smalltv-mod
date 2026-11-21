@@ -345,7 +345,8 @@ static void handleStatus() {
   // up; otherwise the web server writes the last chunk (a chunked reply only:
   // an HTTP/1.0 reply just ends when the connection closes).
   if (smalltv::endReply(out, sink) && !server.requestIsHttp10()) server.sendContent("", 0);
-  platformCrashLowsReset();    // the lows a crash records start over with each status read
+  // The lows a crash records are not reset here: they cover the time since
+  // boot or since the last crash clear, however often the status is read.
 }
 
 // Fingerprint of everything network-identity related: the WiFi list and the
@@ -469,6 +470,7 @@ static void handleReboot() {
 static void handleCrashClear() {
   if (!requireAuth()) return;
   platformCrashRecordClear();
+  platformCrashLowsReset();   // a new record starts with new lows
   server.send(200, "application/json", "{\"ok\":true}");
 }
 

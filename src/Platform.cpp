@@ -52,8 +52,10 @@ void platformOnTimeSync(void (*cb)()) {
 static_assert(sizeof(PlatformCrashRecord::trace) / 4 == CRASH_TRACE_WORDS, "trace size out of step");
 static_assert(CRASH_RST_WDT == REASON_WDT_RST && CRASH_RST_EXCEPTION == REASON_EXCEPTION_RST &&
               CRASH_RST_SOFT_WDT == REASON_SOFT_WDT_RST, "CrashReasonCode out of step with the SDK");
-static_assert(sizeof(CrashRtc) % 4 == 0 && sizeof(CrashRtc) / 4 + CRASH_RTC_WORD <= 112,
-              "crash record must fit the free RTC user words");
+// The RTC user memory is 512 bytes, 128 words (core Esp.cpp: rtcUserMemoryRead
+// and Write refuse `offset * 4 + size > 512`); words 0..31 are the OTA hand-off.
+static_assert(sizeof(CrashRtc) % 4 == 0 && CRASH_RTC_WORD >= 32 && sizeof(CrashRtc) / 4 + CRASH_RTC_WORD <= 128,
+              "crash record must fit the RTC user words, clear of the OTA hand-off");
 
 // The core's own record of its last failed allocation (heap.cpp: set on every
 // failed malloc, and by operator new right before it aborts with reason 254).
@@ -63,7 +65,7 @@ extern void* umm_last_fail_alloc_addr;
 extern int umm_last_fail_alloc_size;
 }
 
-// Lowest free heap and largest block since the last status read, from a
+// Lowest free heap and largest block since boot or the last crash clear, from a
 // 100 ms timer: the callback writes them into the record, so a crash says how
 // low the heap had been, not only what it was at the last moment.
 static CrashLowWater s_lows;
@@ -95,6 +97,10 @@ static void crashStore(CrashRtc& r) {
 // reads a counter and does not walk the heap.
 // An older record that was never cleared is not lost silently: it is counted
 // in `more` (the newest crash is the one shown).
+// `stack` is where the core says the trace starts. After a crash on the
+// BearSSL stack the core prints that stack on the serial port, then passes the
+// main stack's pointer (core_esp8266_postmortem.cpp), so the trace has no
+// BearSSL frames.
 extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint32_t stackEnd) {
   CrashRtc r;
   const bool have = crashLoad(r);

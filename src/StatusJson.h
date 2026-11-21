@@ -212,8 +212,10 @@ template <class Out> void writeStatusCrash(Out& out, const CrashSnapshot& k) {
       statusout::hex(out, t);
     }
     jsonout::raw(out, PSTR("]"));
-    member(out, PSTR(",\"more\":"), k.more);
   }
+  // Outside the detail block: a record made from the hardware watchdog has no
+  // detail but still knows how many crashes came before it.
+  if (k.more) member(out, PSTR(",\"more\":"), k.more);
   jsonout::raw(out, PSTR("}"));
 }
 
