@@ -51,14 +51,14 @@ The six `WITH_*` flags in `src/config.h` each default to 1 and can be set to 0 i
 
 | Flag | Drops | Static RAM saved on the ESP8266 |
 |------|-------|--------------------------------|
-| `WITH_THEME=0` | Theme clocks | 5,348 B |
+| `WITH_THEME=0` | Theme clocks | 5,328 B |
 | `WITH_TICKER=0` | The stock and crypto ticker | 3,292 B |
 | `WITH_HA=0` | Home Assistant screens over MQTT | 1,796 B |
-| `WITH_RADAR=0` | The plane radar | 1,336 B |
+| `WITH_RADAR=0` | The plane radar | 1,320 B |
 | `WITH_USAGE=0` | The Claude usage meter and its mascot | 1,168 B |
-| `WITH_NOTIFY=0` | Notification overlays | 1,052 B |
+| `WITH_NOTIFY=0` | Notification overlays | 1,036 B |
 
-Each figure is that one flag measured on its own against the 50,340-byte standard build above. Combining flags does not add up exactly, because the features share some code and string data: the three flags of the lean image save 8,312 B one by one, and lean saves 8,312 B as well. The Home Assistant figure leaves out its screen store and MQTT client, which come from the heap at boot only when a broker host is set (see above).
+Each figure is that one flag measured on its own against the 50,340-byte standard build above. Combining flags does not add up exactly, because the features share some code and string data: the three flags of the lean image save 8,292 B one by one, and lean saves 8,312 B. The Home Assistant figure leaves out its screen store and MQTT client, which come from the heap at boot only when a broker host is set (see above).
 
 Every feature is guarded at the module level, so dropping one takes its code, its settings handling, and its web UI tab with it. The tab disappears because `/api/config` reports the compiled-in features and the UI hides what is missing, which means a slim build needs no separate web UI.
 
