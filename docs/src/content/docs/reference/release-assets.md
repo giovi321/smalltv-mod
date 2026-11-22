@@ -70,7 +70,7 @@ After the swap the System tab reports the new variant, and from then on self-upd
 
 The ESP8266 shares a single 80 KB DRAM arena between static allocations and the heap, so anything compiled in costs heap that TLS then cannot have. The HTTPS fetches refuse to start a handshake when memory runs short: the plane radar and a cash.ch quote each want a 16,000-byte contiguous block, and a Yahoo quote wants its receive buffer plus 12,000 bytes of free heap. Below that the affected screen goes quiet, and since 2.12.1 the Status tab's Radar line says so explicitly.
 
-The lean image gives that back. On 3.12.0 static RAM is 50,400 bytes for the standard image and 42,088 for lean, so the heap starts 8,312 bytes larger. Lean compiles out Home Assistant, the usage meter and theme clocks.
+The lean image gives that back. After 3.12.0, with the radar, MQTT and usage buffers on the heap, static RAM is 48,288 bytes for the standard image and 41,048 for lean, so the heap starts 7,240 bytes larger. Lean compiles out Home Assistant, the usage meter and theme clocks.
 
 Since 3.5.0 the standard image also leaves out the largest piece of Home Assistant when it is not used: the four-screen store (5,792 bytes) and the MQTT client with its 768-byte receive buffer come from the heap at boot, and only when a broker host is set. On a standard ESP8266 running the Pixel Room theme, free heap is about 14.4 KB with the broker host blank and about 7.3 KB with Home Assistant on. So a device that does not use Home Assistant needs the lean image only when it also has no use for theme clocks and still runs short.
 
