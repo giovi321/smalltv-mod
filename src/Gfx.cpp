@@ -69,6 +69,22 @@ static Arduino_GFX*     gfx = nullptr;
 
 Arduino_GFX* gfxDev() { return gfx; }
 
+// Streamed full-window blit: see the comment in Gfx.h.
+void gfxBlitBegin() {
+  if (!gfx) return;
+  Arduino_TFT* t = static_cast<Arduino_TFT*>(gfx);
+  t->startWrite();
+  t->writeAddrWindow(0, 0, TFT_WIDTH, TFT_HEIGHT);
+}
+void gfxBlitRow(uint16_t* row, uint32_t len) {
+  if (!gfx) return;
+  static_cast<Arduino_TFT*>(gfx)->writePixels(row, len);
+}
+void gfxBlitEnd() {
+  if (!gfx) return;
+  static_cast<Arduino_TFT*>(gfx)->endWrite();
+}
+
 // ---------------------------------------------------------------------------
 // Backlight. The ESP32 family keeps analogWrite. The ESP8266 drives the pin
 // with the hardware sigma-delta generator instead of the core's software PWM:

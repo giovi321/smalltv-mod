@@ -37,6 +37,9 @@
 #if WITH_RADAR
 #include "RadarMode.h"
 #endif
+#if WITH_RAIN
+#include "RainMode.h"
+#endif
 #if WITH_HA
 #include "HaBoot.h"
 #include "HaMode.h"
@@ -55,6 +58,9 @@ static DisplayMode* kModes[] = {
 #endif
 #if WITH_RADAR
   &g_radarMode,
+#endif
+#if WITH_RAIN
+  &g_rainMode,
 #endif
 #if WITH_HA
   &g_haMode,
@@ -77,6 +83,9 @@ static bool carouselHas(const Settings& s, const DisplayMode* m) {
     case MODE_STOCKS: return s.carouselTicker;
     case MODE_USAGE:  return s.carouselUsage;
     case MODE_RADAR:  return s.carouselRadar;
+#if WITH_RAIN
+    case MODE_RAIN:   return s.carouselRain;
+#endif
 #if WITH_HA
     case MODE_HA:     return s.carouselHa;
 #endif
@@ -93,6 +102,10 @@ static void carouselNext(const Settings& s) {
     size_t cand = (g_carIdx + hop) % kModeCount;
     if (!carouselHas(s, kModes[cand])) continue;
     if (cand != g_carIdx) {
+      // The outgoing mode stops being serviced: let it give back what its
+      // next service() call can rebuild (the rain mode's city cache),
+      // so the incoming mode has the heap for its own fetch (TLS).
+      kModes[g_carIdx]->freeForRequest();
       g_carIdx = cand;
       kModes[cand]->wake(s);
     }
@@ -204,6 +217,7 @@ static void buttonAckNotify() {
 static void buttonGoHome() {
   g_carPaused = false;                 // resume normal rotation
   if (g_settings.mode == MODE_CAROUSEL && kModeCount > 0) {
+    if (g_carIdx != 0) kModes[g_carIdx]->freeForRequest();   // outgoing page, as in carouselNext()
     g_carIdx = 0;
     g_carSwitch = millis();
     if (!carouselHas(g_settings, kModes[0])) carouselNext(g_settings);  // 0 not ticked -> first ticked
@@ -474,6 +488,16 @@ void loop() {
 #if WITH_NOTIFY
   static bool wasNotifying = false;
   if (g_notifyMode.active()) {
+    // The overlay pauses the active mode: same release as a carousel switch.
+    if (!wasNotifying) {
+      // Read the current page without activeMode(), which may rotate the carousel.
+      if (g_settings.mode == MODE_CAROUSEL) {
+        if (g_carIdx < kModeCount) kModes[g_carIdx]->freeForRequest();
+      } else {
+        for (size_t i = 0; i < kModeCount; i++)
+          if (kModes[i]->modeConst() == g_settings.mode) kModes[i]->freeForRequest();
+      }
+    }
     wasNotifying = true;
     g_notifyMode.service(g_settings);
     delay(5);

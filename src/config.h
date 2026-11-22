@@ -142,6 +142,7 @@
 #define MODE_NOTIFY    4             // transient overlay: armed over HTTP, never persisted
 #define MODE_THEME     6             // declarative installed clock faces
 #define MODE_HA        5             // Home Assistant screens pushed over MQTT
+#define MODE_RAIN      7             // live rain radar (RainViewer)
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
@@ -268,6 +269,9 @@
 #ifndef WITH_HA
 #define WITH_HA 1
 #endif
+#ifndef WITH_RAIN
+#define WITH_RAIN 1
+#endif
 
 // Claude usage mode: once data stops arriving for this long (PC asleep, daemon
 // stopped, network down) the screen switches from the stats to the idle mascot
@@ -375,6 +379,82 @@
 #define DEFAULT_RADAR_LON       0.0f
 #define DEFAULT_RADAR_RANGE_KM  20
 #define DEFAULT_RADAR_POLL_SEC  10     // >=3 keeps us under the 1 req/s limit
+
+// ---------------------------------------------------------------------------
+// Rain radar (MODE_RAIN)
+//   RainViewer public API (v2): past 2h of radar frames, 10-minute steps, no
+//   API key. Fetched over plain HTTP — tilecache answers unencrypted, so the
+//   ESP8266 skips the BearSSL handshake entirely. The radar data is served
+//   at zoom 7 only (z>=8 returns map tiles, verified); the nowcast (future)
+//   frames were discontinued on 2026-01-01 and the code tolerates an empty
+//   array. Frames arrive as 256px RGBA PNGs with filter "None" on every row,
+//   decoded by the custom decoder in features/rain/RainPng.cpp.
+// ---------------------------------------------------------------------------
+#define RAIN_API_HOST      "api.rainviewer.com"
+#define RAIN_API_PATH      "/public/weather-maps.json"
+#define RAIN_USE_HTTPS     0               // 1 = https:// (RainViewer may force it one day)
+#define RAIN_TILE_DOMAIN   "rainviewer.com"   // tile host from the JSON must be <name>.rainviewer.com
+#define RAIN_PATH_MAX      64              // frame path from the JSON: '/' then [A-Za-z0-9/_-], at most this long
+#define RAIN_ZOOM          7               // the only zoom serving radar data
+#define RAIN_TILE_SIZE     256
+#define RAIN_COLOR_SCHEME  2               // Universal Blue (blue -> purple ramp)
+#define RAIN_USER_AGENT    "Mozilla/5.0 (SmallTV)"
+// The tile URL goes out over plain HTTP, so it carries the home position
+// rounded to 2 decimals (~1 km), not the stored one. The field moves by at
+// most ~0.5 km: under one source pixel (zoom 7, ~0.8 km/px), a few screen
+// pixels at the shortest ranges where the crop is enlarged most.
+#define RAIN_COORD_DECIMALS 2
+// Frames older than the refresh period plus this margin are not shown: the
+// screen says the data is unavailable instead (the provider may change or
+// stop the free API). RainViewer's newest frame normally lags 10-20 min.
+#define RAIN_STALE_SEC     3600
+// The decoder yields to WiFi/TCP only with at least this much heap free
+// (ESP8266); below, it feeds the watchdog instead, so the network stack never
+// allocates at the decoder's heap peak.
+#define RAIN_YIELD_MIN_HEAP 5120
+// A tile decode never takes free heap under this floor: once the decoder's
+// buffers are allocated, and at every output row, free heap under it stops
+// the decode. The 8 KB window pass then retries in the small-memory mode
+// (6 KB less); under the floor there too, the tile is skipped, the frame set
+// is kept as it is, and the next poll tries again. The Wi-Fi SDK crashes at
+// ~1.1 KB free (memcpy to NULL in ieee80211_setup_ratetable, issues #132 and
+// #134). To be replaced by the shared Wi-Fi reserve once #134 sizes it.
+#define RAIN_DECODE_MIN_HEAP 4096
+// Time budget of one decode pass. Real tiles take ~3 s with the 8 KB window
+// and 14-35 s in the small-memory mode (ESP8266 standard image); a hostile
+// tile of short copies that alternate between two stored segments reopens a
+// LittleFS file for each of them, for minutes. Past the budget the tile is
+// skipped, and later polls skip it without a request (the newer frames still
+// come); it leaves with the 2-hour window.
+#define RAIN_DECODE_MAX_MS 60000UL
+
+// Max frames kept in LittleFS (2h of past = 13). 8-bit frames = 57,600 B each
+// (64 KB on disk with 8 KB blocks): a full set takes ~800 KB of the ~1 MB
+// filesystem, which also holds config.json and /themes.
+#define MAX_RAIN_FRAMES    13
+#define RAIN_DIR           "/rain"
+#define RAIN_FRAME_BYTES   57600           // 240 x 240 palette indices
+// A tile is only downloaded when the filesystem has room for what the
+// fetch writes (the tile PNG at its Content-Length, the frame, the
+// small-memory history, meta.json; each rounded up to whole blocks) AND
+// still leaves RAIN_FS_KEEP_FREE to the rest of the firmware: a settings
+// save never finds the disk filled by radar frames (a theme install deletes
+// them first: rainRemoveAll() in ThemeWeb.cpp).
+// Short of room, the OLDEST frames of the set are deleted to make room for
+// the newer one (the screen keeps "now", over a shorter loop); only when
+// that cannot help does the fetch stop with "storage full". Turning rain off
+// deletes /rain.
+#define RAIN_FS_KEEP_FREE  49152
+#define RAIN_PNG_SIZE_GUESS 32768          // when the server sends no Content-Length
+                                           // (the download then stops at this size)
+#define RAIN_PNG_MAX       262144          // a tile announced larger is refused
+
+// Defaults (lat/lon 0,0 is the "not set yet" sentinel -> shows a prompt).
+#define DEFAULT_RAIN_LAT       0.0f
+#define DEFAULT_RAIN_LON       0.0f
+#define DEFAULT_RAIN_RANGE_KM  50
+#define DEFAULT_RAIN_POLL_SEC  900
+#define DEFAULT_RAIN_ANIM_SEC  8
 
 // ---------------------------------------------------------------------------
 // Defaults (used on first boot / factory reset)

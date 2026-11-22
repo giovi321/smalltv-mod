@@ -14,6 +14,7 @@ undefined behaviour aborts the run.
 | `font` | the `package` entry points, on spec 2 packages with a package font (STF) and text layers that use it: anchors, scrolling, fetched values, the clock; mutants change the font's header and glyph records in place | `examples/themes/bebas-clock.stheme`, random fonts that pass the load checks |
 | `import` | `deserializeJson()` + `settingsApplyJson()` as in `handleImport()`, then `settingsToJson()` and a second apply | `corpus/import/`, the device's own default export |
 | `data` | `readDataValues()`: a theme data source's JSON reply (read in pieces through the device's reader, filter and parse budget; over 2,048 bytes is refused like the device) read through eight paths, half the cases with list indexes (a spec 2 source); a refused reply must add nothing | `corpus/data/` |
+| `rain` | `rainDecodeToFs()`, the rain radar's PNG decoder (`fuzz_rain.cpp`, its own binary): every crop size, each input decoded twice over differently filled LZ windows, which must agree; a decode that succeeds must give 57,600 palette indices | `corpus/rain/`, synthetic tiles written by `make_rain_seeds.py` |
 
 `src/Settings.cpp` is compiled as it is, as the ESP8266 target, against the
 stand-in Arduino/ESP8266 headers in `shim/`. Nothing under `src/` is changed or

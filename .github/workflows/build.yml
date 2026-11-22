@@ -162,6 +162,12 @@ jobs:
       - name: Test mode of a save
         run: sh tests/mode/run.sh
 
+      # The rain frame set: frames named by their radar time, incremental
+      # polls, and a set that stays consistent through failed downloads,
+      # failed writes, reboots and location changes.
+      - name: Test rain frame set
+        run: sh tests/rain/run.sh
+
       # The mDNS library copy in lib/: a response is handled one record at a
       # time (peak: one record alive), and _parseResponse uses that loop.
       - name: Test mDNS answer handling
