@@ -1,8 +1,10 @@
 // The patched Arduino_GFX YCbCr2RGB.h (tools/patch_gfx_ycbcr.py), compiled as
-// on the ESP8266 against a host pgm_read_word: every table read through
-// GFX_YCBCR_READ gives the value a plain index gives, signed tables included,
-// and so does the pixel expression of the patched writeYCbCrPixels for every
-// Y, Cb and Cr.
+// on the ESP8266 against a host pgm_read_word: every table read through its
+// macro (GFX_YCBCR_READ_S16 for the int16_t tables, _U16 for the uint16_t ones)
+// gives the value a plain index gives, and so does the pixel expression of the
+// patched writeYCbCrPixels for every Y, Cb and Cr. A table read with the wrong
+// macro shows up here: a negative int16_t entry, or a uint16_t entry above
+// 0x7fff, comes back with another value.
 #include <stdint.h>
 #include <stdio.h>
 
@@ -13,12 +15,12 @@
 
 static int failures = 0;
 
-#define CHECK_TABLE(t)                                                         \
+#define CHECK_TABLE(t, READ)                                                   \
   for (unsigned i = 0; i < sizeof(t) / sizeof(t[0]); ++i)                      \
-    if (GFX_YCBCR_READ(t, i) != t[i])                                          \
+    if (READ(t, i) != t[i])                                                    \
     {                                                                          \
-      printf("FAIL %s[%u]: %d via the macro, %d direct\n", #t, i,              \
-             (int)GFX_YCBCR_READ(t, i), (int)t[i]);                            \
+      printf("FAIL %s[%u]: %d via %s, %d direct\n", #t, i, (int)READ(t, i),    \
+             #READ, (int)t[i]);                                                \
       ++failures;                                                              \
     }
 
@@ -34,26 +36,26 @@ static uint16_t pixelDirect(uint8_t y, uint8_t cb, uint8_t cr)
 // The statements of the patched function (tools/patch_gfx_ycbcr.py SOURCE_NEW).
 static uint16_t pixelPatched(uint8_t y, uint8_t cb, uint8_t cr)
 {
-  int16_t pxR = GFX_YCBCR_READ(CR2R16, cr);
-  int16_t pxG = -GFX_YCBCR_READ(CB2G16, cb) - GFX_YCBCR_READ(CR2G16, cr);
-  int16_t pxB = GFX_YCBCR_READ(CB2B16, cb);
-  int16_t pxY = GFX_YCBCR_READ(Y2I16, y);
-  return GFX_YCBCR_READ(CLIPRBE, pxY + pxR) | GFX_YCBCR_READ(CLIPGBE, pxY + pxG) | GFX_YCBCR_READ(CLIPBBE, pxY + pxB);
+  int16_t pxR = GFX_YCBCR_READ_S16(CR2R16, cr);
+  int16_t pxG = -GFX_YCBCR_READ_S16(CB2G16, cb) - GFX_YCBCR_READ_S16(CR2G16, cr);
+  int16_t pxB = GFX_YCBCR_READ_S16(CB2B16, cb);
+  int16_t pxY = GFX_YCBCR_READ_S16(Y2I16, y);
+  return GFX_YCBCR_READ_U16(CLIPRBE, pxY + pxR) | GFX_YCBCR_READ_U16(CLIPGBE, pxY + pxG) | GFX_YCBCR_READ_U16(CLIPBBE, pxY + pxB);
 }
 
 int main()
 {
-  CHECK_TABLE(Y2I16)
-  CHECK_TABLE(CR2R16)
-  CHECK_TABLE(CR2G16)
-  CHECK_TABLE(CB2G16)
-  CHECK_TABLE(CB2B16)
-  CHECK_TABLE(CLIPR)
-  CHECK_TABLE(CLIPG)
-  CHECK_TABLE(CLIPB)
-  CHECK_TABLE(CLIPRBE)
-  CHECK_TABLE(CLIPGBE)
-  CHECK_TABLE(CLIPBBE)
+  CHECK_TABLE(Y2I16, GFX_YCBCR_READ_S16)
+  CHECK_TABLE(CR2R16, GFX_YCBCR_READ_S16)
+  CHECK_TABLE(CR2G16, GFX_YCBCR_READ_S16)
+  CHECK_TABLE(CB2G16, GFX_YCBCR_READ_S16)
+  CHECK_TABLE(CB2B16, GFX_YCBCR_READ_S16)
+  CHECK_TABLE(CLIPR, GFX_YCBCR_READ_U16)
+  CHECK_TABLE(CLIPG, GFX_YCBCR_READ_U16)
+  CHECK_TABLE(CLIPB, GFX_YCBCR_READ_U16)
+  CHECK_TABLE(CLIPRBE, GFX_YCBCR_READ_U16)
+  CHECK_TABLE(CLIPGBE, GFX_YCBCR_READ_U16)
+  CHECK_TABLE(CLIPBBE, GFX_YCBCR_READ_U16)
 
   unsigned long pixels = 0;
   for (int y = 0; y < 256 && failures < 20; ++y)
@@ -70,6 +72,6 @@ int main()
     printf("%d failures\n", failures);
     return 1;
   }
-  printf("ok: 11 tables and %lu pixels read the same through GFX_YCBCR_READ\n", pixels);
+  printf("ok: 11 tables and %lu pixels read the same through the macros\n", pixels);
   return 0;
 }

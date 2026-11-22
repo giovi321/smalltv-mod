@@ -28,12 +28,12 @@ Eight envs: six published images, the loader, and `smalltv_noupdate`, which CI b
 pio run -e smalltv_lean
 ```
 
-The ESP8266 shares one 80 KB DRAM arena between static allocations and the heap, so a byte of static dropped is a byte the heap gains. Measured on `main` after v3.10.0 (`9d66ffd`):
+The ESP8266 shares one 80 KB DRAM arena between static allocations and the heap, so a byte of static dropped is a byte the heap gains. Measured on 3.11.0 with the YCbCr tables in flash (see below):
 
 | Build | Static RAM | Heap gained |
 |-------|-----------|-------------|
-| `smalltv` | 57,156 B | baseline |
-| `smalltv_lean` | 48,832 B | 8,324 B |
+| `smalltv` | 50,340 B | baseline |
+| `smalltv_lean` | 42,028 B | 8,312 B |
 
 Lean compiles out Home Assistant, the usage meter and theme clocks. Since 3.5.0 the Home Assistant screen store (5,792 bytes) and the MQTT client with its 768-byte receive buffer are no longer static in either image: `haBoot()` (`src/features/ha/HaBoot.cpp`) takes them from the heap at boot, and only when a broker host is set. A standard device with the host blank therefore keeps that memory too, without the lean image.
 
@@ -58,7 +58,7 @@ The six `WITH_*` flags in `src/config.h` each default to 1 and can be set to 0 i
 | `WITH_USAGE=0` | The Claude usage meter and its mascot | 1,168 B |
 | `WITH_NOTIFY=0` | Notification overlays | 1,052 B |
 
-Each figure is that one flag measured on its own against the 57,156-byte standard build above. Combining flags does not add up exactly, because the features share some code and string data: the three flags of the lean image save 8,312 B one by one, and lean saves 8,324 B. The Home Assistant figure leaves out its screen store and MQTT client, which come from the heap at boot only when a broker host is set (see above).
+Each figure is that one flag measured on its own against the 50,340-byte standard build above. Combining flags does not add up exactly, because the features share some code and string data: the three flags of the lean image save 8,312 B one by one, and lean saves 8,312 B as well. The Home Assistant figure leaves out its screen store and MQTT client, which come from the heap at boot only when a broker host is set (see above).
 
 Every feature is guarded at the module level, so dropping one takes its code, its settings handling, and its web UI tab with it. The tab disappears because `/api/config` reports the compiled-in features and the UI hides what is missing, which means a slim build needs no separate web UI.
 

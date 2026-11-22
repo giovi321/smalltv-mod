@@ -55,8 +55,8 @@ UPSTREAM = {
     SOURCE: "342d946717361402f7cf2d1af437ee796deadbcbe7bcfe84a29debff3d9d0f65",
 }
 PATCHED = {
-    HEADER: "b62a602c0e46243e3e40e63cd8c87577797278e2dce90f360964f7a94cf25631",
-    SOURCE: "61bff9d421e33c88a031d5d34991d90d2a73cb5045a46d09573a943a19415194",
+    HEADER: "b3a15bcb4acf560f61ac6365b211bf80fb5d8c6238e07cefb3dd0ad1cde20f98",
+    SOURCE: "d4de87dd5d7e29d5b84476bc565b71c917c3e58c7dd77041681aac1a5394833b",
 }
 
 TABLES = ("Y2I16", "CR2R16", "CR2G16", "CB2G16", "CB2B16",
@@ -66,14 +66,17 @@ HEADER_ANCHOR = "\nstatic const int16_t Y2I16[]"
 HEADER_PRELUDE = """
 // smalltv-mod (tools/patch_gfx_ycbcr.py): on the ESP8266 these tables are kept
 // in flash instead of DRAM, and read with pgm_read_word (flash allows only
-// 32-bit loads). Elsewhere nothing changes.
+// 32-bit loads). _S16 reads the int16_t tables, _U16 the uint16_t ones.
+// Elsewhere nothing changes.
 #if defined(ESP8266)
 #include <pgmspace.h>
 #define GFX_YCBCR_TABLE PROGMEM
-#define GFX_YCBCR_READ(t, i) ((__typeof__((t)[0]))pgm_read_word(&(t)[i]))
+#define GFX_YCBCR_READ_S16(t, i) ((int16_t)pgm_read_word(&(t)[i]))
+#define GFX_YCBCR_READ_U16(t, i) ((uint16_t)pgm_read_word(&(t)[i]))
 #else
 #define GFX_YCBCR_TABLE
-#define GFX_YCBCR_READ(t, i) ((t)[i])
+#define GFX_YCBCR_READ_S16(t, i) ((t)[i])
+#define GFX_YCBCR_READ_U16(t, i) ((t)[i])
 #endif
 """
 
@@ -88,16 +91,16 @@ SOURCE_OLD = """      pxR = CR2R16[pxCr];
       pxY = Y2I16[*yData++];
       _data16.value = CLIPRBE[pxY + pxR] | CLIPGBE[pxY + pxG] | CLIPBBE[pxY + pxB];
 """
-SOURCE_NEW = """      pxR = GFX_YCBCR_READ(CR2R16, pxCr);
-      pxG = -GFX_YCBCR_READ(CB2G16, pxCb) - GFX_YCBCR_READ(CR2G16, pxCr);
-      pxB = GFX_YCBCR_READ(CB2B16, pxCb);
+SOURCE_NEW = """      pxR = GFX_YCBCR_READ_S16(CR2R16, pxCr);
+      pxG = -GFX_YCBCR_READ_S16(CB2G16, pxCb) - GFX_YCBCR_READ_S16(CR2G16, pxCr);
+      pxB = GFX_YCBCR_READ_S16(CB2B16, pxCb);
 
-      pxY = GFX_YCBCR_READ(Y2I16, *yData++);
-      _data16.value = GFX_YCBCR_READ(CLIPRBE, pxY + pxR) | GFX_YCBCR_READ(CLIPGBE, pxY + pxG) | GFX_YCBCR_READ(CLIPBBE, pxY + pxB);
+      pxY = GFX_YCBCR_READ_S16(Y2I16, *yData++);
+      _data16.value = GFX_YCBCR_READ_U16(CLIPRBE, pxY + pxR) | GFX_YCBCR_READ_U16(CLIPGBE, pxY + pxG) | GFX_YCBCR_READ_U16(CLIPBBE, pxY + pxB);
       write(_data16.lsb);
       write(_data16.msb);
-      pxY = GFX_YCBCR_READ(Y2I16, *yData++);
-      _data16.value = GFX_YCBCR_READ(CLIPRBE, pxY + pxR) | GFX_YCBCR_READ(CLIPGBE, pxY + pxG) | GFX_YCBCR_READ(CLIPBBE, pxY + pxB);
+      pxY = GFX_YCBCR_READ_S16(Y2I16, *yData++);
+      _data16.value = GFX_YCBCR_READ_U16(CLIPRBE, pxY + pxR) | GFX_YCBCR_READ_U16(CLIPGBE, pxY + pxG) | GFX_YCBCR_READ_U16(CLIPBBE, pxY + pxB);
 """
 
 
