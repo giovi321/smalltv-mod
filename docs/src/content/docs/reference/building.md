@@ -28,14 +28,16 @@ Eight envs: six published images, the loader, and `smalltv_noupdate`, which CI b
 pio run -e smalltv_lean
 ```
 
-The ESP8266 shares one 80 KB DRAM arena between static allocations and the heap, so a byte of static dropped is a byte the heap gains. Measured on `main` after v3.10.0 (`9d66ffd`):
+The ESP8266 shares one 80 KB DRAM arena between static allocations and the heap, so a byte of static dropped is a byte the heap gains. Measured on 3.11.0 with the YCbCr tables in flash (see below):
 
 | Build | Static RAM | Heap gained |
 |-------|-----------|-------------|
-| `smalltv` | 57,156 B | baseline |
-| `smalltv_lean` | 48,832 B | 8,324 B |
+| `smalltv` | 50,340 B | baseline |
+| `smalltv_lean` | 42,028 B | 8,312 B |
 
 Lean compiles out Home Assistant, the usage meter and theme clocks. Since 3.5.0 the Home Assistant screen store (5,792 bytes) and the MQTT client with its 768-byte receive buffer are no longer static in either image: `haBoot()` (`src/features/ha/HaBoot.cpp`) takes them from the heap at boot, and only when a broker host is set. A standard device with the host blank therefore keeps that memory too, without the lean image.
+
+Both ESP8266 images keep Arduino_GFX's YCbCr lookup tables (6,804 bytes) in flash rather than DRAM. The library declares them as plain `static const` arrays, which the ESP8266 copies into DRAM, and its virtual `writeYCbCrPixels` keeps them although the firmware never calls it. `tools/patch_gfx_ycbcr.py`, a `pre:` script of the ESP8266 envs, patches the installed library before each build: the tables get `PROGMEM` and the function reads them with `pgm_read_word`. It checks the hash of each file first and stops the build if the library is not the pinned 1.6.9, so a version bump needs a new look at the patch. CI checks that no table is left in DRAM (`python3 tools/ci_checks.py ycbcr`).
 
 That headroom decides whether the HTTPS fetches run at all. The radar (`features/radar/RadarClient.cpp`) and a cash.ch quote (`features/ticker/StockClient.cpp`) skip their fetch unless a 16,000-byte contiguous block is available, which is what the BearSSL handshake allocates. A Yahoo quote skips its fetch unless the free heap is at least its receive buffer plus 12,000 bytes. All of them refuse quietly rather than crash, so a device below the threshold shows an empty scope or a blank ticker with no error. On a busy LAN, or over a weak link where retransmissions keep the WiFi queues full, the standard build can sit under both.
 
@@ -49,14 +51,14 @@ The six `WITH_*` flags in `src/config.h` each default to 1 and can be set to 0 i
 
 | Flag | Drops | Static RAM saved on the ESP8266 |
 |------|-------|--------------------------------|
-| `WITH_THEME=0` | Theme clocks | 5,348 B |
+| `WITH_THEME=0` | Theme clocks | 5,328 B |
 | `WITH_TICKER=0` | The stock and crypto ticker | 3,292 B |
 | `WITH_HA=0` | Home Assistant screens over MQTT | 1,796 B |
-| `WITH_RADAR=0` | The plane radar | 1,336 B |
+| `WITH_RADAR=0` | The plane radar | 1,320 B |
 | `WITH_USAGE=0` | The Claude usage meter and its mascot | 1,168 B |
-| `WITH_NOTIFY=0` | Notification overlays | 1,052 B |
+| `WITH_NOTIFY=0` | Notification overlays | 1,036 B |
 
-Each figure is that one flag measured on its own against the 57,156-byte standard build above. Combining flags does not add up exactly, because the features share some code and string data: the three flags of the lean image save 8,312 B one by one, and lean saves 8,324 B. The Home Assistant figure leaves out its screen store and MQTT client, which come from the heap at boot only when a broker host is set (see above).
+Each figure is that one flag measured on its own against the 50,340-byte standard build above. Combining flags does not add up exactly, because the features share some code and string data: the three flags of the lean image save 8,292 B one by one, and lean saves 8,312 B. The Home Assistant figure leaves out its screen store and MQTT client, which come from the heap at boot only when a broker host is set (see above).
 
 Every feature is guarded at the module level, so dropping one takes its code, its settings handling, and its web UI tab with it. The tab disappears because `/api/config` reports the compiled-in features and the UI hides what is missing, which means a slim build needs no separate web UI.
 
