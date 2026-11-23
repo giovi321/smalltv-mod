@@ -142,6 +142,7 @@ jobs:
           node tests/theme/test_webui.js
           node tests/theme/test_webui_poll.js
           node tests/theme/test_webui_carousel.js
+          node tests/theme/test_webui_crash.js
 
       # Sunrise and sunset worked out on the device, the dimming curve and its
       # overlap with night mode. The settings test needs ArduinoJson (from
@@ -241,6 +242,8 @@ jobs:
         run: |
           c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc tests/test_crash_record.cpp -o /tmp/smalltv-crash-tests
           /tmp/smalltv-crash-tests
+          c++ -std=c++11 -Wall -Wextra -Werror -g tests/test_crash_wiring.cpp -o /tmp/smalltv-crash-wiring
+          /tmp/smalltv-crash-wiring
 
       # The ESP8266 backlight runs on the hardware sigma-delta generator, not
       # the core's software PWM. The plan (which level, which duty) is native
