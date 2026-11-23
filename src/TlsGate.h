@@ -14,12 +14,13 @@
 
 // Heap one HTTPS fetch takes beyond its receive buffer: the handshake, the
 // request, the reply and its parse, with the SDK's own buffers meanwhile.
-// Measured on a SmallTV-ultra (standard image + UMM_STATS_FULL, theme
-// released, Yahoo at a 512 B receive buffer, 39 fetches: 18 full handshakes,
-// 21 resumed): free heap before the fetch minus the lowest point during it,
-// largest 15,504 B with the buffer, so 15,000 B without it. Resumption saves
-// almost nothing (15,464 B full). #135 has the table.
-#define TLS_HANDSHAKE_COST 15000u
+// Measured on a SmallTV-ultra as free heap before the fetch minus the lowest
+// point during it, Yahoo at a 512 B receive buffer (standard image +
+// UMM_STATS_FULL): on 3.10.0 with the theme released, largest 15,504 B over
+// 39 fetches (resumption saves almost nothing); on 3.12.0 + #141 with a theme
+// in the carousel, largest 16,208 B over 31 fetches of a 1d chart at 15m
+// candles. 16,208 B less the buffer, rounded up. #135 has the tables.
+#define TLS_HANDSHAKE_COST 15700u
 // The largest single allocation of that fetch, measured on the same run: the
 // 6,200 B BearSSL stack thunk, in every fetch. Plus the allocator's header,
 // rounded up.
