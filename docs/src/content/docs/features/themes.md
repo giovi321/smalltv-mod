@@ -1160,9 +1160,18 @@ settings no longer name the theme (no later boot tries it again), and
 which the Status tab shows as a "Theme" line. The device does not restart. A
 theme that is running is never dropped later because a request used some heap.
 Choosing the theme again, installing or removing it clears the message.
+A theme that has passed the checks since the boot is a different case when a
+settings save, a web request or a carousel page change released it and it is
+loaded again at the next frame: if the heap of that moment is too short, the
+cause is that moment and not the theme. The screen shows the message, the
+settings stay as they are, and the theme is tried again at the next page change
+or boot.
 `tools/make_oom_theme.py` writes test packages of any size, with an optional
 data source. Its default, 32 layers of 65 characters, is the size that crashed
-a plain device before these checks, and is refused by the first one.
+a plain 3.9.0 device. Since #139 and #141 gave the heap about 8.5 KB back, that
+package leaves about 8 KB and is let through; 32 layers of 128 characters is
+the package that the first check refuses (the numbers are in the pull request
+of this check).
 
 **Choosing a theme is saved after it has loaded.** `POST /api/themes/select`
 changes the live selection at once (the screen, `/api/themes` and

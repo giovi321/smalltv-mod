@@ -138,8 +138,17 @@ constexpr size_t RunningBudget = 3840;
 // 14,680 and 15,536 B. So a theme leaves about 15 KB minus its running bytes.
 // Low and high bound that range, with a little room. This is a model for the
 // tie below, not a device guarantee.
-constexpr size_t DeviceFreeLow = 14600;
-constexpr size_t DeviceFreeHigh = 15600;
+//
+// Moved for main 5124f57 (an ESTIMATE, not a device read). Since the range
+// above was measured, #139 and #141 took buffers off the static RAM: the
+// static RAM of env smalltv is 48,288 B on 5124f57 against 57,156 B on
+// a210299 (8,868 B less), and the two pull requests measured 8,520 B to
+// about 8.9 KB more free heap on a device. The low end takes 8,400 B of that,
+// the high end 8,900 B. A probe image (PROBE commit, probeBefore/probeAdd/
+// probeAfter in /api/status) reads the real numbers on a device; if they
+// differ, move these two.
+constexpr size_t DeviceFreeLow = 14600 + 8400;
+constexpr size_t DeviceFreeHigh = 15600 + 8900;
 // run.sh builds this test without -malign-double (T56), so its "running" is
 // up to 0.6 KB under the device's: the examples are charged that much more.
 constexpr size_t AlignDoubleSlack = 600;
