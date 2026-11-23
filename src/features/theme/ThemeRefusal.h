@@ -47,4 +47,17 @@ inline bool afterRefusal(Selection& current, bool hasPrev, uint8_t prevMode, con
   return true;
 }
 
+// STUB: what the code does today, a refusal always goes to afterRefusal().
+class PassedTheme {
+ public:
+  void loadStarts(const char*) {}
+  void passed(const char*) {}
+  void forget() {}
+  bool reload() const { return false; }
+  bool refused(Selection& current, bool hasPrev, uint8_t prevMode, const std::string& prevId,
+               const std::string& refusedId, uint8_t themeMode) {
+    return afterRefusal(current, hasPrev, prevMode, prevId, refusedId, themeMode);
+  }
+};
+
 }  // namespace smalltv

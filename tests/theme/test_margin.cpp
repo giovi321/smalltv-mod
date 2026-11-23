@@ -434,6 +434,98 @@ static void testRefusalNeverLeavesTheRefusedTheme() {
         }
 }
 
+// ---- a reload is not a first load -------------------------------------------------
+//
+// A running theme is dropped (release()) when a web request, a carousel page
+// change or a save needs the heap, and loaded again at the next frame through
+// the same checks. If that reload is refused, the cause is the heap of this
+// moment (a buffer of another page, a request), not the theme: it passed
+// before. The settings must stay as they are. Only a first load of a theme
+// (a boot, a new pick, a reinstall) may take it out of the settings.
+
+static void testReloadRefusalKeepsTheStoredSelection() {
+  PassedTheme h;
+  h.loadStarts("big");                       // the first load of this boot
+  CHECK(!h.reload());
+  h.passed("big");                           // it passed its memory check
+  h.loadStarts("big");                       // released for a request, loaded again
+  CHECK(h.reload());
+  Selection stored = sel("big", kTheme);
+  CHECK(!h.refused(stored, false, 0, "", "big", kTheme));
+  CHECK(stored.themeId == "big" && stored.mode == kTheme);
+  // The same in a carousel: the tick and the id stay.
+  Selection car = sel("big", kCarousel, true);
+  CHECK(!h.refused(car, false, 0, "", "big", kTheme));
+  CHECK(car.themeId == "big" && car.carouselTheme && car.mode == kCarousel);
+  // It is still a reload after a refused reload: a later refusal leaves the settings alone too.
+  h.loadStarts("big");
+  CHECK(h.reload());
+}
+
+static void testFirstLoadRefusalStillClearsTheSelection() {
+  PassedTheme h;
+  h.loadStarts("big");
+  Selection s = sel("big", kTheme);
+  CHECK(h.refused(s, false, 0, "", "big", kTheme));
+  CHECK(s.themeId.empty());                  // the rule of the refusal stays for a first load
+  // A refusal with a previous selection goes back to it, as before.
+  PassedTheme g;
+  g.loadStarts("big");
+  Selection t = sel("big", kTheme);
+  CHECK(g.refused(t, true, kStocks, "pixel-room", "big", kTheme));
+  CHECK(t.mode == kStocks && t.themeId == "pixel-room");
+}
+
+static void testTheNetAfterAFirstPassStillClears() {
+  // The theme passed, then the first fetched values made the texts longer and
+  // the net refused it. That load was a first load: the setting is saved, and
+  // would be refused at every boot, so it is cleared.
+  PassedTheme h;
+  h.loadStarts("big");
+  h.passed("big");
+  Selection s = sel("big", kTheme);
+  CHECK(h.refused(s, false, 0, "", "big", kTheme));
+  CHECK(s.themeId.empty());
+  h.loadStarts("big");                       // a later try is a first load again
+  CHECK(!h.reload());
+}
+
+static void testAReloadIsOfTheSameThemeOnly() {
+  PassedTheme h;
+  h.loadStarts("a");
+  h.passed("a");
+  h.loadStarts("b");
+  CHECK(!h.reload());                        // another theme: a first load
+  Selection s = sel("b", kTheme);
+  CHECK(h.refused(s, false, 0, "", "b", kTheme));
+  CHECK(s.themeId.empty());
+  h.loadStarts("a");                         // back to the theme that passed
+  CHECK(h.reload());
+}
+
+static void testNewPickOrReinstallMakesItAFirstLoad() {
+  PassedTheme h;
+  h.loadStarts("big");
+  h.passed("big");
+  h.forget();                                // select, install or delete (forgetRefusal)
+  h.loadStarts("big");
+  CHECK(!h.reload());
+  Selection s = sel("big", kTheme);
+  CHECK(h.refused(s, false, 0, "", "big", kTheme));
+  CHECK(s.themeId.empty());
+}
+
+static void testPassedIsCheapToRepeat() {
+  // checkMargin() reports the pass at every frame once the watch is over.
+  PassedTheme h;
+  for (int i = 0; i < 1000; ++i) h.passed("big");
+  h.loadStarts("big");
+  CHECK(h.reload());
+  h.passed("");                              // no id: nothing passed
+  h.loadStarts("");
+  CHECK(!h.reload());
+}
+
 // ---- constants ---------------------------------------------------------------
 
 static void testConstants() {
@@ -628,6 +720,42 @@ static void testAcceptWiring() {
   CHECK(mode.find("extern void appThemeAccepted(") != std::string::npos);
 }
 
+// A reload after release() goes through the checks again; a refusal there must
+// not reach the settings (testReloadRefusalKeepsTheStoredSelection).
+static void testReloadWiring() {
+  const std::string mode = slurp("src/features/theme/ThemeMode.cpp");
+  const std::string head = slurp("src/features/theme/ThemeMode.h");
+  const std::string service = body(mode, "void ThemeMode::service(");
+  CHECK(head.find("smalltv::PassedTheme passedTheme_;") != std::string::npos);
+  CHECK(head.find("#include \"ThemeRefusal.h\"") != std::string::npos);
+  // A load says what it is before the first check can refuse it.
+  CHECK(before(service, "passedTheme_.loadStarts(s.themeId.c_str());", "refusedBeforeBuild("));
+  CHECK(before(service, "attempted_ = true;", "passedTheme_.loadStarts("));
+  // The pass is noted where the watch ends, next to the old selection being forgotten.
+  const std::string check = body(mode, "ThemeMode::checkMargin(");
+  CHECK(before(check, "if (!marginWatch_.active())", "passedTheme_.passed(loadedId_.c_str());"));
+  // The refusal of a reload leaves the settings alone: no hook call, no refusal text.
+  const std::string refuse = body(mode, "ThemeMode::refuseForMemory(");
+  CHECK(refuse.find("if (passedTheme_.reload()) return;") != std::string::npos);
+  CHECK(before(refuse, "if (passedTheme_.reload()) return;", "appThemeRefused("));
+  CHECK(before(refuse, "if (passedTheme_.reload()) return;", "refusal_ = "));
+  CHECK(before(refuse, "if (passedTheme_.reload()) return;", "refusedId_ = "));
+  CHECK(before(refuse, "pending_.drop();", "if (passedTheme_.reload()) return;"));
+  // The screen still says why (error_), so the message is drawn.
+  CHECK(before(refuse, "error_ = ", "if (passedTheme_.reload()) return;"));
+  CHECK(before(refuse, "messageDrawn_ = false;", "if (passedTheme_.reload()) return;"));
+  // A first-load refusal forgets the pass: the next try is a first load again.
+  CHECK(before(refuse, "if (passedTheme_.reload()) return;", "passedTheme_.forget();"));
+  // The pass outlives unload() (carousel and mode switches unload the theme).
+  const std::string unload = body(mode, "void ThemeMode::unload()");
+  CHECK(!unload.empty() && unload.find("passedTheme_") == std::string::npos);
+  // A new pick, an install or a delete is a new try.
+  const size_t fAt = head.find("void forgetRefusal(");
+  const size_t fEnd = head.find("}", fAt);   // the function is a few lines in the class
+  CHECK(fAt != std::string::npos && fEnd != std::string::npos);
+  CHECK(head.substr(fAt, fEnd - fAt).find("passedTheme_.forget();") != std::string::npos);
+}
+
 static void testWebWiring() {
   const std::string web = slurp("src/features/theme/ThemeWeb.cpp");
   const std::string select = body(web, "void selectTheme()");
@@ -707,11 +835,18 @@ int main() {
   testRefusalKeepsTheCarouselTickWhenAThemeIsRestored();
   testRefusalLeavesAnotherSelectionAlone();
   testRefusalNeverLeavesTheRefusedTheme();
+  testReloadRefusalKeepsTheStoredSelection();
+  testFirstLoadRefusalStillClearsTheSelection();
+  testTheNetAfterAFirstPassStillClears();
+  testAReloadIsOfTheSameThemeOnly();
+  testNewPickOrReinstallMakesItAFirstLoad();
+  testPassedIsCheapToRepeat();
   testConstants();
   testModeWiring();
   testBuildWiring();
   testSelectWiring();
   testAcceptWiring();
+  testReloadWiring();
   testWebWiring();
   testAppWiring();
   testStatusWiring();
