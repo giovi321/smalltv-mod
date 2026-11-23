@@ -11,7 +11,7 @@
 // (raw little-endian RGB565, 240x240) and a line to OUT/timeline.csv:
 // "index,ms,label". simulate.py turns them into PNGs and an animated GIF.
 //
-//   sim TILES_DIR OUT_DIR lat lon rangeKm animSec uiScale [outage] [wind=FROM,KMH]
+//   sim TILES_DIR OUT_DIR lat lon rangeKm animSec uiScale [outage] [wind=FROM,KMH] [windunit=N]
 // wind=FROM,KMH turns the wind arrow on (cloud level) and answers the
 // Open-Meteo request with that wind (direction it comes from, in degrees).
 #include <ArduinoJson.h>
@@ -116,7 +116,7 @@ static void runFor(Settings& s, uint32_t ms, const char* label) {
 
 int main(int argc, char** argv) {
   if (argc < 8) {
-    fprintf(stderr, "usage: %s TILES_DIR OUT_DIR lat lon rangeKm animSec uiScale [outage] [wind=FROM,KMH]\n", argv[0]);
+    fprintf(stderr, "usage: %s TILES_DIR OUT_DIR lat lon rangeKm animSec uiScale [outage] [wind=FROM,KMH] [windunit=N]\n", argv[0]);
     return 2;
   }
   // The heap is not simulated: report a healthy ESP8266 one, above the
@@ -126,9 +126,11 @@ int main(int argc, char** argv) {
   g_out = argv[2];
   bool outage = false;
   float windFrom = -1, windKmh = 0;
+  int windUnit = 0;
   for (int i = 8; i < argc; i++) {
     std::string a = argv[i];
     if (a == "outage") outage = true;
+    else if (a.rfind("windunit=", 0) == 0) windUnit = atoi(a.c_str() + 9);
     else if (a.rfind("wind=", 0) == 0 && sscanf(a.c_str() + 5, "%f,%f", &windFrom, &windKmh) == 2) {
       char m[200];
       snprintf(m, sizeof m, "\"wind_speed_850hPa\":%.1f,\"wind_direction_850hPa\":%.0f,"
@@ -158,6 +160,7 @@ int main(int argc, char** argv) {
   s.rain.animSec = (uint16_t)atoi(argv[6]);
   s.rain.uiScale = (uint8_t)atoi(argv[7]);
   if (!g_wind.empty()) s.rain.wind = 1;   // cloud level
+  s.rain.windUnit = (uint8_t)windUnit;
 
   // ---- boot, as main.cpp's setup() draws it (Net.cpp's progress lines) ----
   simGfxBegin();

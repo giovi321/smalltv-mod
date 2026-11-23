@@ -201,6 +201,7 @@ struct RainSettings {
   bool     showCities;    // nearby cities as reference dots
   uint8_t  uiScale;       // text/city marker size: 0 = small, 1 = medium, 2 = large
   uint8_t  wind;          // wind arrow: RAIN_WIND_OFF, _CLOUDS (850 hPa) or _GROUND (10 m)
+  uint8_t  windUnit;      // wind speed unit: RAIN_WUNIT_AUTO (follows unitsMi), _KMH, _MPH, _KN, _MS
 
   void setDefaults();
   void toJson(JsonObject o) const;

@@ -484,11 +484,13 @@ static bool drawWind(const Settings& s, Arduino_GFX* gfx, uint8_t ht) {
   dlArrowOp(gfx, cx, cy, half, heading, false, C_WHITE);
 
   char num[8];
-  const float v = s.rain.unitsMi ? kmh * 0.621371f : kmh;
-  snprintf_P(num, sizeof num, PSTR("%d"), (int)lroundf(v));
+  snprintf_P(num, sizeof num, PSTR("%d"), rainWindSpeedIn(kmh, s.rain.windUnit, s.rain.unitsMi));
   const int ty = cy + half + 4;
   textOutlined(gfx, 3, ty, num, ht, C_WHITE);
-  const RainStr unit(s.rain.unitsMi ? PSTR("mph") : PSTR("km/h"));
+  static const char kUnits[] PROGMEM = "km/h\0mph\0kn\0m/s";   // rainWindUnitLabel order
+  PGM_P u = kUnits;
+  for (uint8_t k = rainWindUnitLabel(s.rain.windUnit, s.rain.unitsMi); k; k--) while (pgm_read_byte(u++)) {}
+  const RainStr unit(u);
   textOutlined(gfx, 3 + gfxTextW(num, ht) + 4, ty + 8 * ht - 8, unit, 1, C_RAIN_TEXT);   // bottom-aligned
   return true;
 }

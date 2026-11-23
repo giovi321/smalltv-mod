@@ -131,6 +131,22 @@ static void testRainSlice() {
   t.setDefaults();
   t.rain.fromJson(out.as<JsonObjectConst>());
   CHECK(t.rain.wind == 2, "wind round-trips through export and import");
+
+  // The wind speed unit: follows the distances by default, clamped, round-trips.
+  CHECK(s.rain.windUnit == 0, "wind unit follows the distances by default");
+  apply(s, "{\"rain\":{\"windUnit\":2}}");
+  CHECK(s.rain.windUnit == 2, "wind unit mph");
+  apply(s, "{\"rain\":{\"wind\":1}}");
+  CHECK(s.rain.windUnit == 2, "wind unit kept by a save without it");
+  apply(s, "{\"rain\":{\"windUnit\":7}}");
+  CHECK(s.rain.windUnit == 4, "wind unit clamped to m/s");
+  s.rain.windUnit = 3;
+  JsonDocument out2;
+  s.rain.toJson(out2.to<JsonObject>());
+  Settings u;
+  u.setDefaults();
+  u.rain.fromJson(out2.as<JsonObjectConst>());
+  CHECK(u.rain.windUnit == 3, "wind unit round-trips through export and import");
 }
 
 int main() {

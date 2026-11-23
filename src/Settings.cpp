@@ -500,6 +500,7 @@ void RainSettings::setDefaults() {
   showCities = true;
   uiScale = 1;            // medium
   wind = 0;               // opt in: one more third-party request per poll
+  windUnit = 0;           // as the distances: km/h, or mph with miles
 }
 
 void RainSettings::toJson(JsonObject o) const {
@@ -513,6 +514,7 @@ void RainSettings::toJson(JsonObject o) const {
   o[F("showCities")] = showCities;
   o["uiScale"]    = uiScale;
   o[F("wind")]       = wind;
+  o[F("windUnit")]   = windUnit;
 }
 
 void RainSettings::fromJson(JsonObjectConst o) {
@@ -530,6 +532,7 @@ void RainSettings::fromJson(JsonObjectConst o) {
   if (o[F("showCities")].is<bool>()) showCities = o[F("showCities")];
   if (o["uiScale"].is<int>())     uiScale = constrain((int)o["uiScale"], 0, 2);
   if (o[F("wind")].is<int>())        wind = constrain((int)o[F("wind")], 0, 2);   // RAIN_WIND_*
+  if (o[F("windUnit")].is<int>())    windUnit = constrain((int)o[F("windUnit")], 0, 4);   // RAIN_WUNIT_*
 }
 
 // ===========================================================================

@@ -854,6 +854,14 @@ int main() {
       const int ex = (a.s1x + a.s2x) / 2 - 100, ey = (a.s1y + a.s2y) / 2 - 100;
       CHECK(tx * bx + ty * by < tx * tx + ty * ty && tx * ex + ty * ey < 0, msg);
     }
+    // The speed in each unit (fetched in km/h), auto following the distances.
+    CHECK(rainWindSpeedIn(39.1f, RAIN_WUNIT_AUTO, false) == 39 && rainWindSpeedIn(39.1f, RAIN_WUNIT_AUTO, true) == 24 &&
+          rainWindSpeedIn(39.1f, RAIN_WUNIT_KMH, true) == 39 && rainWindSpeedIn(39.1f, RAIN_WUNIT_MPH, false) == 24 &&
+          rainWindSpeedIn(39.1f, RAIN_WUNIT_KN, false) == 21 && rainWindSpeedIn(39.1f, RAIN_WUNIT_MS, false) == 11,
+          "wind speed units");
+    CHECK(rainWindUnitLabel(RAIN_WUNIT_AUTO, false) == 0 && rainWindUnitLabel(RAIN_WUNIT_AUTO, true) == 1 &&
+          rainWindUnitLabel(RAIN_WUNIT_KN, false) == 2 && rainWindUnitLabel(RAIN_WUNIT_MS, true) == 3 &&
+          rainWindUnitLabel(9, false) == 0, "wind unit labels");
     CHECK(rainWindValueOk(0, 0) && rainWindValueOk(360, 500) && !rainWindValueOk(-1, 5) &&
           !rainWindValueOk(10, -0.1f) && !rainWindValueOk(10, 501) && !rainWindValueOk(NAN, 5), "wind value bounds");
   }

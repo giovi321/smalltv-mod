@@ -19,6 +19,27 @@
 #define RAIN_WIND_GROUND 2   // 10 m above ground
 #define RAIN_WIND_LEVELS 2   // levels fetched (clouds, ground), index = setting - 1
 
+// The unit of the speed under the arrow (RainSettings::windUnit). The speed
+// is fetched in km/h and converted for display only.
+#define RAIN_WUNIT_AUTO 0    // km/h, or mph when the distances are in miles
+#define RAIN_WUNIT_KMH  1
+#define RAIN_WUNIT_MPH  2
+#define RAIN_WUNIT_KN   3    // knots
+#define RAIN_WUNIT_MS   4    // metres per second
+
+// km/h -> the chosen unit (auto resolved with unitsMi), rounded to a whole number.
+inline int rainWindSpeedIn(float kmh, uint8_t unit, bool unitsMi) {
+  if (unit == RAIN_WUNIT_AUTO) unit = unitsMi ? RAIN_WUNIT_MPH : RAIN_WUNIT_KMH;
+  const float f = unit == RAIN_WUNIT_MPH ? 0.621371f : unit == RAIN_WUNIT_KN ? 0.539957f
+                : unit == RAIN_WUNIT_MS ? 1.0f / 3.6f : 1.0f;
+  return (int)lroundf(kmh * f);
+}
+// Its label: 0 km/h, 1 mph, 2 kn, 3 m/s (the caller keeps the strings in flash).
+inline uint8_t rainWindUnitLabel(uint8_t unit, bool unitsMi) {
+  if (unit == RAIN_WUNIT_AUTO) unit = unitsMi ? RAIN_WUNIT_MPH : RAIN_WUNIT_KMH;
+  return unit >= RAIN_WUNIT_KMH && unit <= RAIN_WUNIT_MS ? unit - 1 : 0;
+}
+
 // A value as Open-Meteo sends it, accepted only within bounds: a direction in
 // 0..360 and a speed in 0..RAIN_WIND_MAX_KMH. Anything else (missing, NaN,
 // out of range) means no arrow for that level.
