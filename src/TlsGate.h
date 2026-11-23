@@ -26,10 +26,12 @@
 #define TLS_LARGEST_BLOCK   6400u
 
 // True when a handshake with an `rxBuf`-byte receive buffer fits and still
-// leaves WifiReserveFreeHeap (WifiReserve.h). A theme kept loaded beside the
-// caller (the carousel keeps it across pages) is released first when the heap
-// is short; it reloads when its page is shown again. Records what it saw for /api/status.
-bool tlsHeapReady(uint32_t rxBuf);
+// leaves WifiReserveFreeHeap (WifiReserve.h), and the largest block holds
+// `needBlock` (a host with a heavier handshake asks for more). A theme kept
+// loaded beside the caller (the carousel keeps it across pages) is released
+// first when the heap is short; it reloads when its page is shown again.
+// Records what it saw for /api/status.
+bool tlsHeapReady(uint32_t rxBuf, uint32_t needBlock = TLS_LARGEST_BLOCK);
 
 // What the last check saw, and how many handshakes it skipped since boot.
 // `free` is 0 until the first check.

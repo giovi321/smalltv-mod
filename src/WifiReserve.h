@@ -10,7 +10,6 @@
 #pragma once
 #include <stdint.h>
 
-// Lowest clean run (~4 KB) plus 1 KB of room.
+// Lowest clean run (~4 KB) plus 1 KB of room. There is no block figure: the
+// largest block did not separate clean runs from crashes.
 constexpr uint32_t WifiReserveFreeHeap = 5120;
-// Just under the lowest clean block; the same as ParseLargestBlock.
-constexpr uint32_t WifiReserveLargestBlock = 1536;

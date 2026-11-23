@@ -8,9 +8,6 @@
 static StockData g_stocks[MAX_SYMBOLS];
 static uint8_t   g_count = 0;
 
-// main.cpp: frees a carousel theme kept loaded, when the heap is short.
-extern void appReleaseForTls(uint32_t needFree, uint32_t needBlock);
-
 static bool     g_refreshing = false;
 static uint8_t  g_fetchIdx = 0;
 
@@ -451,29 +448,52 @@ enum ParseKind : uint8_t { PARSE_WEBHOOK, PARSE_YAHOO, PARSE_CASH_QUOTE, PARSE_C
 // cash.ch is the only host we let negotiate ECDHE, and only the first handshake
 // pays for it: this session resumes the rest for ~23 h.
 static TlsSession g_cashSession;
-// Yahoo sends session tickets too: later fetches resume instead of repeating
-// the RSA key exchange.
+// cash.ch's ECDHE handshake needs this much in one block, on top of the TLS
+// gate (the check it had before the gate, kept).
+static const uint32_t CASH_LARGEST_BLOCK = 16000;
+// Yahoo keeps the session ID of the last handshake: later fetches resume
+// instead of repeating the RSA key exchange.
 static TlsSession g_yahooSession;
 
 // Yahoo's receive buffer. Yahoo honours TLS max_fragment_length with the
 // static-RSA suites, so 512 B is enough (1.5 KB less heap per handshake than
 // 2048). Probed like OtaUpdate.cpp's probeMfln(): a host that does not accept
-// 512 keeps the old 2048. A yes is kept for the boot; a no is asked again up
-// to three times, since a probe can also fail on a dropped connection. The
-// ESP32 ignores the size.
-static uint16_t yahooRxBuf() {
+// 512 gets the old 2048. A no is asked again up to three times, since a probe
+// can also fail on a dropped connection. A yes holds until a handshake at 512
+// fails (yahooMflnFailed()): servers do stop offering MFLN (#140), and the
+// next fetch then probes again. The ESP32 ignores the size.
+static bool    g_yahooMfln = false;
+static uint8_t g_yahooProbes = 0;
+
+// The buffer to check the heap for before the probe, without touching the
+// network: 512 until the probes have said no. The probe only gives the same
+// or 2048, which is checked again then.
+static uint16_t yahooRxGuess() {
 #if defined(SMALLTV_FAMILY_ESP8266)
-  static bool mfln = false;
-  static uint8_t probes = 0;
-  if (!mfln && probes < 3) {
-    probes++;
-    mfln = BearSSL::WiFiClientSecure::probeMaxFragmentLength(YAHOO_CHART_HOST1, 443, 512);
-  }
-  return mfln ? 512 : 2048;
+  return (g_yahooMfln || g_yahooProbes < 3) ? 512 : 2048;
 #else
   return 2048;
 #endif
 }
+
+static uint16_t yahooRxBuf() {
+#if defined(SMALLTV_FAMILY_ESP8266)
+  if (!g_yahooMfln && g_yahooProbes < 3) {
+    g_yahooProbes++;
+    g_yahooMfln = BearSSL::WiFiClientSecure::probeMaxFragmentLength(YAHOO_CHART_HOST1, 443, 512);
+  }
+  return g_yahooMfln ? 512 : 2048;
+#else
+  return 2048;
+#endif
+}
+
+#if defined(SMALLTV_FAMILY_ESP8266)
+static void yahooMflnFailed() {
+  g_yahooMfln = false;
+  g_yahooProbes = 0;
+}
+#endif
 
 static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, StockData& d) {
   bool https = url.startsWith("https://");
@@ -481,27 +501,36 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
   d.lowHeap = false;
 
   std::unique_ptr<NetClient> client;
+  uint16_t rx = 0;
   if (https) {
     // Per-source TLS shaping (ESP8266; the ESP32 ignores the hints):
     //  - cash.ch: must do ECDHE. Keep it cheap — 512 B buffers (it honors MFLN)
-    //    and session resumption, and require a large CONTIGUOUS free block up
-    //    front so a fragmented heap skips the fetch instead of crashing inside
-    //    the handshake. The full cipher list (default) is left on for it.
+    //    and session resumption. The full cipher list (default) is left on.
     //  - Yahoo / GitHub / webhook: forced to the cheap static-RSA suites, so
     //    those handshakes stay as light as the old BASIC build.
+    // Every source passes the TLS gate first: total heap and largest block,
+    // with room left for the Wi-Fi SDK (TlsGate.h). Short: skipped like any
+    // failed fetch, retried on the backoff, and shown as "not enough memory
+    // for HTTPS" rather than a fetch error.
     if (cash) {
-      appReleaseForTls(16000, 16000);   // a carousel theme kept loaded holds this heap (#134)
-      if (platformMaxFreeBlock() < 16000) { d.lowHeap = true; return false; }   // largest contiguous block, not total
-      client.reset(platformMakeSecureClient(512, &g_cashSession, 512, /*cheapCiphers=*/false));
+      // The ECDHE math also needs a large CONTIGUOUS block, so a fragmented
+      // heap skips the fetch instead of crashing inside the handshake.
+      rx = 512;
+      if (!tlsHeapReady(rx, CASH_LARGEST_BLOCK)) { d.lowHeap = true; return false; }
+      client.reset(platformMakeSecureClient(rx, &g_cashSession, 512, /*cheapCiphers=*/false));
     } else {
       // raw.githubusercontent.com sends a ~4 KB cert record and won't negotiate
       // MFLN, so it needs a bigger receive buffer than Yahoo's small records.
-      uint16_t rx = (kind == PARSE_GITHUB) ? GH_QUOTES_RXBUF
-                  : (kind == PARSE_YAHOO)  ? yahooRxBuf() : 2048;
-      // Total and largest block, with room left for the Wi-Fi SDK (TlsGate.h).
-      // Short: skipped like any failed fetch, retried on the backoff, and
-      // shown as "not enough memory for HTTPS" rather than a fetch error.
+      rx = (kind == PARSE_GITHUB) ? GH_QUOTES_RXBUF
+         : (kind == PARSE_YAHOO)  ? yahooRxGuess() : 2048;
       if (!tlsHeapReady(rx)) { d.lowHeap = true; return false; }
+      if (kind == PARSE_YAHOO) {
+        // The MFLN probe opens a connection of its own, so it runs only once
+        // the gate has passed; a no means 2048, checked again.
+        const uint16_t probed = yahooRxBuf();
+        if (probed > rx && !tlsHeapReady(probed)) { d.lowHeap = true; return false; }
+        rx = probed;
+      }
       client.reset(platformMakeSecureClient(rx, (kind == PARSE_YAHOO) ? &g_yahooSession : nullptr,
                                             512, /*cheapCiphers=*/true));
     }
@@ -529,6 +558,10 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
 
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
+#if defined(SMALLTV_FAMILY_ESP8266)
+    // No connection at 512 B records: Yahoo may have stopped offering MFLN.
+    if (kind == PARSE_YAHOO && rx == 512 && code == HTTPC_ERROR_CONNECTION_FAILED) yahooMflnFailed();
+#endif
     http.end();
     return false;
   }
@@ -558,6 +591,10 @@ static bool stepSymbol(const Settings& s, StockData& d) {
   if (d.source == SRC_YAHOO) {
     if (g_fetchPhase == 0) {
       if (fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST1, d.symbol), PARSE_YAHOO, d)) return true;
+      // Skipped by the TLS gate: the mirror would only run the gate and the
+      // theme release again a tick later. One check per cycle; the backoff
+      // tries again.
+      if (d.lowHeap) { d.error = true; return true; }
       g_fetchPhase = 1;                 // transient drop: retry the mirror next tick
       return false;
     }
@@ -568,6 +605,7 @@ static bool stepSymbol(const Settings& s, StockData& d) {
   if (d.source == SRC_CASH) {
     if (g_fetchPhase == 0) {            // quote: price + day change (~200 B)
       if (fetchUrl(s, buildCashQuoteUrl(d.symbol), PARSE_CASH_QUOTE, d)) { g_fetchPhase = 2; return false; }
+      if (d.lowHeap) { d.error = true; return true; }   // gate skip: as for Yahoo above
       g_fetchPhase = 1;                 // retry the quote next tick
       return false;
     }
