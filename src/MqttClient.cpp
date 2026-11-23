@@ -29,39 +29,49 @@ extern void appRelease();
 #define MQTT_SAVE_RETRY_MS 30000UL
 
 static Settings*    S = nullptr;
-static WiFiClient   g_tcp;
-// The client and its receive buffer (MQTT_MAX_PACKET_SIZE bytes, taken by its
-// constructor) come from mqttAlloc() at boot, only when Home Assistant is
-// wanted. Null otherwise: mqttLoop(), mqttConnected() and mqttPublish() check.
+
+// Everything the connection needs, from mqttAlloc() at boot and only when
+// Home Assistant is wanted, so an image with it compiled in but off does not
+// pay for it (#134): the socket, the client and its receive buffer
+// (MQTT_MAX_PACKET_SIZE bytes, taken by its constructor), the broker snapshot
+// and the topics.
+struct MqttHeap {
+  WiFiClient   tcp;    // before `mqtt`, which is built on it
+  PubSubClient mqtt;
+
+  // Snapshot of what the current connection (or attempt) was made with; a save
+  // from the web UI that changes any of it forces a reconnect.
+  char     connHost[MAX_HA_HOST_LEN] = "";
+  uint16_t connPort = 0;
+  char     connUser[MAX_HA_USER_LEN] = "";
+  char     connPass[MAX_HA_PASS_LEN] = "";
+
+  // Topics built once from the hostname at mqttBegin(): a hostname change comes
+  // with a WiFi change, which reboots, so they can't go stale within a boot.
+  char availTopic[96];    // smalltv/<hostname>/availability (also the LWT)
+  char screenSub[104];    // smalltv/<hostname>/screen/+
+  char stateTopic[104];   // smalltv/<hostname>/brightness
+  char setTopic[112];     // smalltv/<hostname>/brightness/set
+  char discTopic[128];    // homeassistant/number/smalltv_<hostname>_brightness/config
+
+  MqttHeap() : mqtt(tcp) {}
+};
+static MqttHeap* H = nullptr;
+// &H->mqtt, or null: mqttLoop(), mqttConnected() and mqttPublish() check it.
 static PubSubClient* g_mqtt = nullptr;
 
 static uint32_t g_backoffMs   = MQTT_RETRY_MIN_MS;
 static uint32_t g_nextAttempt = 0;
-
-// Snapshot of what the current connection (or attempt) was made with; a save
-// from the web UI that changes any of it forces a reconnect.
-static char     g_connHost[MAX_HA_HOST_LEN] = "";
-static uint16_t g_connPort = 0;
-static char     g_connUser[MAX_HA_USER_LEN] = "";
-static char     g_connPass[MAX_HA_PASS_LEN] = "";
-
-// Topics built once from the hostname at mqttBegin(): a hostname change comes
-// with a WiFi change, which reboots, so they can't go stale within a boot.
-static char g_availTopic[96];    // smalltv/<hostname>/availability (also the LWT)
-static char g_screenSub[104];    // smalltv/<hostname>/screen/+
-static char g_stateTopic[104];   // smalltv/<hostname>/brightness
-static char g_setTopic[112];     // smalltv/<hostname>/brightness/set
-static char g_discTopic[128];    // homeassistant/number/smalltv_<hostname>_brightness/config
 
 static int      g_pubBrightness = -1;   // last value sent to the state topic
 static bool     g_haOnline = false;     // HA announced a restart: re-announce
 static DebouncedSave g_save(MQTT_SAVE_DEBOUNCE_MS, MQTT_SAVE_RETRY_MS);   // brightness/set
 
 static bool brokerChanged() {
-  return g_connPort != S->ha.brokerPort
-      || strncmp(g_connHost, S->ha.brokerHost.c_str(), MAX_HA_HOST_LEN)
-      || strncmp(g_connUser, S->ha.brokerUser.c_str(), MAX_HA_USER_LEN)
-      || strncmp(g_connPass, S->ha.brokerPass.c_str(), MAX_HA_PASS_LEN);
+  return H->connPort != S->ha.brokerPort
+      || strncmp(H->connHost, S->ha.brokerHost.c_str(), MAX_HA_HOST_LEN)
+      || strncmp(H->connUser, S->ha.brokerUser.c_str(), MAX_HA_USER_LEN)
+      || strncmp(H->connPass, S->ha.brokerPass.c_str(), MAX_HA_PASS_LEN);
 }
 
 // Retained plain-integer state publish. g_pubBrightness is only updated on a
@@ -69,7 +79,7 @@ static bool brokerChanged() {
 static void publishState() {
   char buf[4];
   snprintf(buf, sizeof(buf), "%u", (unsigned)S->brightness);
-  if (g_mqtt->publish(g_stateTopic, buf, /*retained=*/true))
+  if (g_mqtt->publish(H->stateTopic, buf, /*retained=*/true))
     g_pubBrightness = (int)S->brightness;
 }
 
@@ -85,10 +95,10 @@ static void publishDiscovery() {
     "\"min\":0,\"max\":100,\"step\":1,\"mode\":\"auto\","
     "\"avty_t\":\"%s\",\"pl_avail\":\"online\",\"pl_not_avail\":\"offline\","
     "\"dev\":{\"ids\":\"smalltv_%s\",\"name\":\"SmallTV %s\",\"mf\":\"SmallTV\"}}",
-    S->hostname.c_str(), g_setTopic, g_stateTopic, g_availTopic,
+    S->hostname.c_str(), H->setTopic, H->stateTopic, H->availTopic,
     S->hostname.c_str(), S->hostname.c_str());
   if (n < 0 || (size_t)n >= sizeof(payload)) return;
-  g_mqtt->publish(g_discTopic, payload, /*retained=*/true);
+  g_mqtt->publish(H->discTopic, payload, /*retained=*/true);
 }
 
 // Brightness command: a plain integer 0..100 (NOT JSON). Non-numeric payloads
@@ -115,7 +125,7 @@ static void onBrightnessSet(const uint8_t* payload, unsigned int len) {
 }
 
 static void onMessage(char* topic, uint8_t* payload, unsigned int len) {
-  if (!strcmp(topic, g_setTopic)) { onBrightnessSet(payload, len); return; }
+  if (!strcmp(topic, H->setTopic)) { onBrightnessSet(payload, len); return; }
   // HA announces its restart as "online" on homeassistant/status: the config
   // and state re-send runs from the loop, not from inside this callback.
   if (!strcmp(topic, "homeassistant/status")) {
@@ -130,34 +140,37 @@ static void onMessage(char* topic, uint8_t* payload, unsigned int len) {
 }
 
 bool mqttAlloc() {
-  if (g_mqtt) return true;
+  if (H) return true;
   // The nothrow form: this core has no exceptions, and a plain `new` that
   // fails panics.
-  g_mqtt = new (std::nothrow) PubSubClient(g_tcp);
+  H = new (std::nothrow) MqttHeap();
   // PubSubClient's constructor takes its buffer with malloc and says nothing
   // when that fails: the buffer size reads 0. Without the buffer every
   // message would be dropped, so that counts as no memory.
-  if (g_mqtt && !g_mqtt->getBufferSize()) {
-    delete g_mqtt;
-    g_mqtt = nullptr;
+  if (H && !H->mqtt.getBufferSize()) {
+    delete H;
+    H = nullptr;
   }
-  if (!g_mqtt) return false;
+  if (!H) return false;
+  g_mqtt = &H->mqtt;
   g_mqtt->setCallback(onMessage);
   return true;
 }
 
 void mqttFree() {
-  delete g_mqtt;
+  delete H;
+  H = nullptr;
   g_mqtt = nullptr;
 }
 
 void mqttBegin(Settings& s) {
   S = &s;
-  snprintf(g_availTopic, sizeof(g_availTopic), "smalltv/%s/availability", S->hostname.c_str());
-  snprintf(g_screenSub, sizeof(g_screenSub), "smalltv/%s/screen/+", S->hostname.c_str());
-  snprintf(g_stateTopic, sizeof(g_stateTopic), "smalltv/%s/brightness", S->hostname.c_str());
-  snprintf(g_setTopic, sizeof(g_setTopic), "smalltv/%s/brightness/set", S->hostname.c_str());
-  snprintf(g_discTopic, sizeof(g_discTopic),
+  if (!H) return;   // Home Assistant off at boot: no topics to build
+  snprintf(H->availTopic, sizeof(H->availTopic), "smalltv/%s/availability", S->hostname.c_str());
+  snprintf(H->screenSub, sizeof(H->screenSub), "smalltv/%s/screen/+", S->hostname.c_str());
+  snprintf(H->stateTopic, sizeof(H->stateTopic), "smalltv/%s/brightness", S->hostname.c_str());
+  snprintf(H->setTopic, sizeof(H->setTopic), "smalltv/%s/brightness/set", S->hostname.c_str());
+  snprintf(H->discTopic, sizeof(H->discTopic),
            "homeassistant/number/smalltv_%s_brightness/config", S->hostname.c_str());
 }
 
@@ -190,7 +203,7 @@ void mqttLoop() {
   // here is what turns a cleared broker host into a clean disconnect.
   if (!S->ha.brokerHost.length()) {
     if (g_mqtt->connected()) g_mqtt->disconnect();
-    g_connHost[0] = 0;    // counts as "changed" when a host is set again
+    H->connHost[0] = 0;    // counts as "changed" when a host is set again
     return;
   }
 
@@ -229,31 +242,31 @@ void mqttLoop() {
   if (g_backoffMs < MQTT_RETRY_MAX_MS / 2) g_backoffMs *= 2;
   else g_backoffMs = MQTT_RETRY_MAX_MS;
 
-  strlcpy(g_connHost, S->ha.brokerHost.c_str(), sizeof(g_connHost));
-  g_connPort = S->ha.brokerPort;
-  strlcpy(g_connUser, S->ha.brokerUser.c_str(), sizeof(g_connUser));
-  strlcpy(g_connPass, S->ha.brokerPass.c_str(), sizeof(g_connPass));
+  strlcpy(H->connHost, S->ha.brokerHost.c_str(), sizeof(H->connHost));
+  H->connPort = S->ha.brokerPort;
+  strlcpy(H->connUser, S->ha.brokerUser.c_str(), sizeof(H->connUser));
+  strlcpy(H->connPass, S->ha.brokerPass.c_str(), sizeof(H->connPass));
 
-  g_mqtt->setServer(g_connHost, g_connPort);
+  g_mqtt->setServer(H->connHost, H->connPort);
   // PubSubClient::connect() registers the LWT (retained "offline") and does a
   // synchronous TCP connect — a dead broker IP can stall the loop for the
   // TCP timeout here, once per backoff interval.
   if (!g_mqtt->connect(S->hostname.c_str(),
-                      g_connUser[0] ? g_connUser : nullptr,
-                      g_connPass[0] ? g_connPass : nullptr,
-                      g_availTopic, 0, true, "offline")) {
+                      H->connUser[0] ? H->connUser : nullptr,
+                      H->connPass[0] ? H->connPass : nullptr,
+                      H->availTopic, 0, true, "offline")) {
     return;
   }
 
   g_backoffMs = MQTT_RETRY_MIN_MS;
   // Both availability messages are retained, so a `mosquitto_sub -C 1` always
   // gets the current state immediately (docs verify it that way).
-  g_mqtt->publish(g_availTopic, "online", /*retained=*/true);
+  g_mqtt->publish(H->availTopic, "online", /*retained=*/true);
   // Brightness entity: discovery config + current state, both retained.
   publishDiscovery();
   publishState();
-  g_mqtt->subscribe(g_screenSub);
-  g_mqtt->subscribe(g_setTopic);
+  g_mqtt->subscribe(H->screenSub);
+  g_mqtt->subscribe(H->setTopic);
   g_mqtt->subscribe("homeassistant/status");
   g_mqtt->loop();
 }

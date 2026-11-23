@@ -28,14 +28,20 @@ Eight envs: six published images, the loader, and `smalltv_noupdate`, which CI b
 pio run -e smalltv_lean
 ```
 
-The ESP8266 shares one 80 KB DRAM arena between static allocations and the heap, so a byte of static dropped is a byte the heap gains. Measured on 3.12.0:
+The ESP8266 shares one 80 KB DRAM arena between static allocations and the heap, so a byte of static dropped is a byte the heap gains. Measured after 3.12.0, with the feature buffers below on the heap:
 
 | Build | Static RAM | Heap gained |
 |-------|-----------|-------------|
-| `smalltv` | 50,400 B | baseline |
-| `smalltv_lean` | 42,088 B | 8,312 B |
+| `smalltv` | 48,288 B | baseline |
+| `smalltv_lean` | 41,048 B | 7,240 B |
 
 Lean compiles out Home Assistant, the usage meter and theme clocks. Since 3.5.0 the Home Assistant screen store (5,792 bytes) and the MQTT client with its 768-byte receive buffer are no longer static in either image: `haBoot()` (`src/features/ha/HaBoot.cpp`) takes them from the heap at boot, and only when a broker host is set. A standard device with the host blank therefore keeps that memory too, without the lean image.
+
+Three more buffers come from the heap only while their feature is used, so a standard image with the feature switched off keeps that memory as well:
+
+- the radar's aircraft list and TLS session (about 1 KB), while the radar is the mode or ticked in the carousel;
+- the MQTT `WiFiClient`, the broker snapshot and the topic buffers (672 B), with the MQTT client above;
+- the usage mascot's 400-byte diff buffer, from the first time the mascot is drawn until a save switches the usage page off.
 
 Both ESP8266 images keep Arduino_GFX's YCbCr lookup tables (6,804 bytes) in flash rather than DRAM. The library declares them as plain `static const` arrays, which the ESP8266 copies into DRAM, and its virtual `writeYCbCrPixels` keeps them although the firmware never calls it. `tools/patch_gfx_ycbcr.py`, a `pre:` script of the ESP8266 envs, patches the installed library before each build: the tables get `PROGMEM` and the function reads them with `pgm_read_word`. It checks the hash of each file first and stops the build if the library is not the pinned 1.6.9, so a version bump needs a new look at the patch. CI checks that no table is left in DRAM (`python3 tools/ci_checks.py ycbcr`).
 
@@ -51,14 +57,14 @@ The six `WITH_*` flags in `src/config.h` each default to 1 and can be set to 0 i
 
 | Flag | Drops | Static RAM saved on the ESP8266 |
 |------|-------|--------------------------------|
-| `WITH_THEME=0` | Theme clocks | 5,328 B |
-| `WITH_TICKER=0` | The stock and crypto ticker | 3,292 B |
-| `WITH_HA=0` | Home Assistant screens over MQTT | 1,796 B |
-| `WITH_RADAR=0` | The plane radar | 1,320 B |
-| `WITH_USAGE=0` | The Claude usage meter and its mascot | 1,168 B |
-| `WITH_NOTIFY=0` | Notification overlays | 1,036 B |
+| `WITH_THEME=0` | Theme clocks | 5,340 B |
+| `WITH_TICKER=0` | The stock and crypto ticker | 3,284 B |
+| `WITH_HA=0` | Home Assistant screens over MQTT | 1,124 B |
+| `WITH_RADAR=0` | The plane radar | 372 B |
+| `WITH_USAGE=0` | The Claude usage meter and its mascot | 768 B |
+| `WITH_NOTIFY=0` | Notification overlays | 1,048 B |
 
-Each figure is that one flag measured on its own against the 50,340-byte standard build of 3.11.0 with the YCbCr tables in flash, before the rain radar added 60 B. Combining flags does not add up exactly, because the features share some code and string data: the three flags of the lean image save 8,292 B one by one, and lean saves 8,312 B. The Home Assistant figure leaves out its screen store and MQTT client, which come from the heap at boot only when a broker host is set (see above).
+Each figure is that one flag measured on its own against the 48,288-byte standard build above. Combining flags does not add up exactly, because the features share some code and string data: the three flags of the lean image save 7,232 B one by one, and lean saves 7,240 B. The Home Assistant figure leaves out its screen store and MQTT client, which come from the heap at boot only when a broker host is set (see above).
 
 Every feature is guarded at the module level, so dropping one takes its code, its settings handling, and its web UI tab with it. The tab disappears because `/api/config` reports the compiled-in features and the UI hides what is missing, which means a slim build needs no separate web UI.
 
