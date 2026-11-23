@@ -458,19 +458,30 @@ static TlsSession g_yahooSession;
 // Yahoo's receive buffer. Yahoo honours TLS max_fragment_length with the
 // static-RSA suites, so 512 B is enough (1.5 KB less heap per handshake than
 // 2048). Probed like OtaUpdate.cpp's probeMfln(): a host that does not accept
-// 512 gets the old 2048. A no is asked again up to three times, since a probe
-// can also fail on a dropped connection. A yes holds until a handshake at 512
-// fails (yahooMflnFailed()): servers do stop offering MFLN (#140), and the
-// next fetch then probes again. The ESP32 ignores the size.
-static bool    g_yahooMfln = false;
-static uint8_t g_yahooProbes = 0;
+// 512 gets the old 2048. The ESP32 ignores the size.
+//  - A no is asked again up to three times in a row, since a probe also fails
+//    on a dropped connection; after that once an hour, so an outage does not
+//    leave Yahoo at 2048 (1.5 KB more for the gate) for the rest of the boot.
+//  - A yes holds until a fetch at 512 fails (yahooMflnFailed()): servers do
+//    stop offering MFLN (#140), and the next fetch then probes again.
+#if defined(SMALLTV_FAMILY_ESP8266)
+static const uint32_t YAHOO_REPROBE_MS = 60UL * 60UL * 1000UL;
+static bool     g_yahooMfln = false;
+static uint8_t  g_yahooProbes = 0;     // failed probes in a row, up to 3
+static uint32_t g_yahooProbeMs = 0;    // millis() of the last probe
+
+static bool yahooMayProbe() {
+  if (g_yahooMfln) return false;
+  return g_yahooProbes < 3 || (uint32_t)(millis() - g_yahooProbeMs) >= YAHOO_REPROBE_MS;
+}
+#endif
 
 // The buffer to check the heap for before the probe, without touching the
-// network: 512 until the probes have said no. The probe only gives the same
-// or 2048, which is checked again then.
+// network: 512 while a probe is due or MFLN is known. The probe only gives
+// the same or 2048, which is checked again then.
 static uint16_t yahooRxGuess() {
 #if defined(SMALLTV_FAMILY_ESP8266)
-  return (g_yahooMfln || g_yahooProbes < 3) ? 512 : 2048;
+  return (g_yahooMfln || yahooMayProbe()) ? 512 : 2048;
 #else
   return 2048;
 #endif
@@ -478,9 +489,11 @@ static uint16_t yahooRxGuess() {
 
 static uint16_t yahooRxBuf() {
 #if defined(SMALLTV_FAMILY_ESP8266)
-  if (!g_yahooMfln && g_yahooProbes < 3) {
-    g_yahooProbes++;
+  if (yahooMayProbe()) {
+    g_yahooProbeMs = millis();
     g_yahooMfln = BearSSL::WiFiClientSecure::probeMaxFragmentLength(YAHOO_CHART_HOST1, 443, 512);
+    if (g_yahooMfln)             g_yahooProbes = 0;
+    else if (g_yahooProbes < 3)  g_yahooProbes++;
   }
   return g_yahooMfln ? 512 : 2048;
 #else
@@ -489,9 +502,12 @@ static uint16_t yahooRxBuf() {
 }
 
 #if defined(SMALLTV_FAMILY_ESP8266)
+// A fetch at 512 B failed. The session goes too: a resumed handshake fits in
+// 512 B records even when the server no longer limits the reply's.
 static void yahooMflnFailed() {
   g_yahooMfln = false;
   g_yahooProbes = 0;
+  g_yahooSession = TlsSession();
 }
 #endif
 
@@ -559,8 +575,10 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
 #if defined(SMALLTV_FAMILY_ESP8266)
-    // No connection at 512 B records: Yahoo may have stopped offering MFLN.
-    if (kind == PARSE_YAHOO && rx == 512 && code == HTTPC_ERROR_CONNECTION_FAILED) yahooMflnFailed();
+    // Any transport error at 512 B records (connect, or a read that hit a
+    // record too large for the buffer: -4, -5, -11 as in #140): Yahoo may have
+    // stopped offering MFLN. Costs at most one extra probe after a failure.
+    if (kind == PARSE_YAHOO && rx == 512 && code < 0) yahooMflnFailed();
 #endif
     http.end();
     return false;
