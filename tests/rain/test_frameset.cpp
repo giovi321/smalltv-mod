@@ -13,6 +13,7 @@
 #include "Settings.h"
 #include "RainClient.h"
 #include "RainPng.h"
+#include "RainWind.h"
 
 uint32_t g_fakeMillis = 1000;
 FakeFs   g_fs;
@@ -84,7 +85,30 @@ static std::set<uint32_t> g_tileFail;  // tile times answered with 500
 static size_t g_tilePad = 0;           // bytes added after "TILE <time>" (a bigger tile)
 static const uint32_t kStep = 600;
 
+// ---- scripted Open-Meteo (the wind arrow) ----------------------------------
+// An answer as the service sends it (Brest, 2026-11-23): integer and decimal
+// numbers, the units object the filter must drop.
+static const char kWindAnswer[] =
+    "{\"latitude\":48.39,\"longitude\":-4.4900002,\"generationtime_ms\":0.17,\"utc_offset_seconds\":0,"
+    "\"timezone\":\"GMT\",\"timezone_abbreviation\":\"GMT\",\"elevation\":47.0,\"current_units\":{\"time\":"
+    "\"iso8601\",\"interval\":\"seconds\",\"wind_speed_850hPa\":\"km/h\",\"wind_direction_850hPa\":\"°\","
+    "\"wind_speed_10m\":\"km/h\",\"wind_direction_10m\":\"°\"},\"current\":{\"time\":\"2026-11-23T06:15\","
+    "\"interval\":900,\"wind_speed_850hPa\":39.1,\"wind_direction_850hPa\":306,\"wind_speed_10m\":1.6,"
+    "\"wind_direction_10m\":333}}";
+static int g_windCode = 200;
+static std::string g_windBody = kWindAnswer;
+static size_t windRequests() {
+  size_t n = 0;
+  for (auto& u : g_net.log) if (u.find("open-meteo") != std::string::npos) n++;
+  return n;
+}
+
 static int serve(const std::string& url, std::string& body) {
+  if (url.find("api.open-meteo.com") != std::string::npos) {
+    if (g_windCode != 200) return g_windCode;
+    body = g_windBody;
+    return 200;
+  }
   if (url.find("weather-maps.json") != std::string::npos) {
     if (g_listCode != 200) return g_listCode;
     body = "{\"version\":\"2.0\",\"generated\":" + std::to_string(g_newest + 30) +
@@ -724,6 +748,169 @@ int main() {
     g_net.noLength = false;
     g_tilePad = 0;
     CHECK(rainStage() == RAIN_OK && rainCount() == 13 && rainFrameTime(12) == g_newest, "no length: a tile under the reserved size is kept");
+  }
+
+  // 18. The wind arrow: one Open-Meteo request per poll, before the frame
+  //     list, only while the arrow is on; its failures never touch the radar;
+  //     values out of bounds, oversized or redirected answers are refused,
+  //     and an answer ages out like the radar.
+  {
+    char st[32];
+    int16_t dir = -1;
+    float kmh = -1;
+    CHECK(!rainWindNow(s, dir, kmh) && windRequests() == 0, "wind off: no request, no arrow");
+    s.rain.wind = RAIN_WIND_CLOUDS;
+    g_net.log.clear();
+    poll(s, "wind on");
+    CHECK(rainStage() == RAIN_OK && rainCount() == 13, "wind on: the radar poll is unchanged");
+    CHECK(windRequests() == 1, "wind on: one request per poll");
+    const std::string url = g_net.log.empty() ? "" : g_net.log[0];
+    char want[256];
+    snprintf(want, sizeof want, "http://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f&current="
+             "wind_speed_850hPa,wind_direction_850hPa,wind_speed_10m,wind_direction_10m&wind_speed_unit=kmh",
+             rainLat(s), rainLon(s));
+    CHECK(url == want && rainLat(s) != roundf(rainLat(s) * 100) / 100,
+          "wind: plain HTTP, position rounded to 2 decimals, before the frame list");
+    CHECK(g_net.redirectGets == 0, "wind: redirects not followed");
+    CHECK(rainWindNow(s, dir, kmh) && dir == 306 && fabsf(kmh - 39.1f) < 0.01f, "wind: cloud level read");
+    CHECK(std::string(rainWindStageName(st, sizeof st)) == "ok" && rainWindHttp() == 200, "wind: status ok");
+    s.rain.wind = RAIN_WIND_GROUND;      // the other level comes with the same answer
+    // 1.6 km/h at the ground: no meaningful direction, no arrow (and nothing in /api/status).
+    CHECK(!rainWindNow(s, dir, kmh), "wind: ground level under 2 km/h, no arrow");
+    s.rain.wind = RAIN_WIND_CLOUDS;
+
+    // A failed request: the radar goes on, the last good wind stays until it ages out.
+    for (int code : {500, 301, -1}) {
+      g_windCode = code;
+      poll(s, "wind request fails");
+      CHECK(rainStage() == RAIN_OK && !rainError(), "wind failure: radar unaffected");
+      CHECK(rainWindNow(s, dir, kmh) && dir == 306, "wind failure: the last good wind kept");
+    }
+    CHECK(std::string(rainWindStageName(st, sizeof st)) == "connect failed", "wind failure: reported");
+    CHECK(g_net.redirectGets == 0, "wind: a 301 is not followed");
+    g_windCode = 200;
+
+    // Ages out like the radar: past the refresh period plus RAIN_STALE_SEC.
+    g_fakeMillis += (s.rain.pollSec + RAIN_STALE_SEC) * 1000UL + 1000;
+    CHECK(!rainWindNow(s, dir, kmh), "wind: too old, no arrow");
+
+    // Values out of bounds, or missing, drop their level only.
+    auto answer = [](const std::string& cur) { return "{\"current\":{" + cur + "}}"; };
+    g_windBody = answer("\"wind_speed_850hPa\":-1,\"wind_direction_850hPa\":400,"
+                        "\"wind_speed_10m\":12.5,\"wind_direction_10m\":90");
+    poll(s, "wind cloud level out of bounds");
+    CHECK(!rainWindNow(s, dir, kmh), "wind: cloud level out of bounds, no arrow");
+    s.rain.wind = RAIN_WIND_GROUND;
+    CHECK(rainWindNow(s, dir, kmh) && dir == 90 && fabsf(kmh - 12.5f) < 0.01f, "wind: the ground level still read");
+    s.rain.wind = RAIN_WIND_CLOUDS;
+    g_windBody = answer("\"wind_speed_850hPa\":null,\"wind_direction_850hPa\":null,"
+                        "\"wind_speed_10m\":9000,\"wind_direction_10m\":\"N\"");
+    poll(s, "wind values unusable");
+    CHECK(std::string(rainWindStageName(st, sizeof st)) == "parse failed", "wind: no usable level, parse failed");
+    g_windBody = answer("\"wind_speed_850hPa\":20,\"wind_direction_850hPa\":360,"
+                        "\"wind_speed_10m\":0,\"wind_direction_10m\":0");
+    poll(s, "wind at 360");
+    CHECK(rainWindNow(s, dir, kmh) && dir == 0 && fabsf(kmh - 20.0f) < 0.01f, "wind: 360 is north");
+
+    // Oversized: announced, or without a length (the body runs to the close).
+    g_windBody = kWindAnswer;
+    g_windBody.insert(g_windBody.size() - 1, std::string(RAIN_WIND_MAX_BYTES, ' '));
+    g_net.noLength = true;
+    poll(s, "wind answer too long");
+    g_net.noLength = false;
+    CHECK(std::string(rainWindStageName(st, sizeof st)) == "parse failed", "wind: an answer past the cap is refused");
+    CHECK(rainWindNow(s, dir, kmh) && dir == 0, "wind: the last good wind kept");
+    g_windBody = kWindAnswer;
+    g_net.sizeOverride = RAIN_WIND_MAX_BYTES + 1;
+    poll(s, "wind announced too long");
+    g_net.sizeOverride = -2;
+    CHECK(std::string(rainWindStageName(st, sizeof st)) == "http error", "wind: an answer announced past the cap is refused");
+    CHECK(rainStage() == RAIN_OK && rainCount() == 13, "wind: oversized answers leave the radar alone");
+    g_net.noLength = true;               // the real service: no Content-Length
+    poll(s, "wind without a length");
+    g_net.noLength = false;
+    CHECK(rainWindNow(s, dir, kmh) && dir == 306, "wind: an answer without a length is read");
+
+    // The home moves (PR #142 review): the old place's wind is dropped at
+    // once, so a failed first request at the new place shows no arrow.
+    {
+      CHECK(rainWindNow(s, dir, kmh), "wind: an arrow before the move");
+      const float lat0 = s.rain.lat, lon0 = s.rain.lon;
+      s.rain.lat = 43.30f;
+      s.rain.lon = 5.37f;
+      rainInit(s);                       // what RainMode::invalidate does on a change of home
+      CHECK(!rainWindNow(s, dir, kmh) && rainWindOkMs() == 0 && !rainWindTried(), "wind: dropped with the old home");
+      g_windCode = 500;
+      poll(s, "wind fails after a move");
+      CHECK(!rainWindNow(s, dir, kmh), "wind: a failed request after a move shows no arrow");
+      g_windCode = 200;
+      poll(s, "wind after a move");
+      CHECK(rainWindNow(s, dir, kmh) && dir == 306, "wind: the new place's wind");
+      s.rain.lat = lat0;
+      s.rain.lon = lon0;
+      rainInit(s);
+      poll(s, "back home");
+      CHECK(rainStage() == RAIN_OK && rainWindNow(s, dir, kmh), "wind: back home, radar and arrow");
+    }
+
+    // Turned on while a fetch runs (PR #142 review): the running fetch makes
+    // the wind request between two of its steps, the arrow comes with it.
+    {
+      s.rain.wind = RAIN_WIND_OFF;
+      poll(s, "wind off before the switch");
+      g_newest += 2 * kStep;             // two new frames: the next fetch has frame steps
+      g_fakeMillis += (s.rain.pollSec + RAIN_STALE_SEC) * 1000UL + 1000;   // the old wind is gone
+      CHECK(!rainWindNow(s, dir, kmh), "wind: none before the switch");
+      g_net.log.clear();
+      rainForceRefresh();
+      rainService(s);                    // the fetch starts
+      rainService(s);                    // the frame list
+      CHECK(rainFetching() && windRequests() == 0, "wind: a fetch running without the wind step");
+      s.rain.wind = RAIN_WIND_CLOUDS;    // the save; rainForceRefresh() is ignored during a fetch
+      rainForceRefresh();
+      rainService(s);                    // the wind, before the next frame
+      CHECK(windRequests() == 1 && g_net.log.back().find("open-meteo") != std::string::npos,
+            "wind: requested within the running fetch");
+      CHECK(rainWindNow(s, dir, kmh), "wind: the arrow comes with the running fetch");
+      for (int i = 0; i < 40 && rainFetching(); i++) { rainService(s); g_fakeMillis += 25000; checkConsistent("wind mid-fetch"); }
+      CHECK(rainStage() == RAIN_OK && windRequests() == 1 && rainFrameTime(rainCount() - 1) == g_newest,
+            "wind: one request, and the fetch ends with the new frames");
+    }
+
+    // Turned off: no more requests, no arrow.
+    s.rain.wind = RAIN_WIND_OFF;
+    g_net.log.clear();
+    poll(s, "wind off again");
+    CHECK(windRequests() == 0 && !rainWindNow(s, dir, kmh), "wind off: no request, no arrow");
+
+    // The arrow points where the wind goes (its direction is where it comes from).
+    struct { int from, heading, sx, sy; } cases[] = {
+      {0, 180, 0, 1}, {90, 270, -1, 0}, {180, 0, 0, -1}, {270, 90, 1, 0}, {306, 126, 1, 1}, {360, 180, 0, 1}, {45, 225, -1, 1},
+    };
+    for (auto& c : cases) {
+      char msg[80];
+      snprintf(msg, sizeof msg, "arrow for a wind from %d", c.from);
+      const int h = rainWindHeading((float)c.from);
+      RainArrow a;
+      rainWindArrow(100, 100, 11, h, a);
+      auto sgn = [](int v) { return (v > 0) - (v < 0); };
+      CHECK(h == c.heading && sgn(a.tipX - 100) == c.sx && sgn(a.tipY - 100) == c.sy, msg);
+      // The head's base sits behind the tip, the shaft's tail behind the base.
+      const int tx = a.tipX - 100, ty = a.tipY - 100;
+      const int bx = (a.b1x + a.b2x) / 2 - 100, by = (a.b1y + a.b2y) / 2 - 100;
+      const int ex = (a.s1x + a.s2x) / 2 - 100, ey = (a.s1y + a.s2y) / 2 - 100;
+      CHECK(tx * bx + ty * by < tx * tx + ty * ty && tx * ex + ty * ey < 0, msg);
+    }
+    // The speed in each unit (fetched in km/h), auto following the distances.
+    CHECK(rainWindSpeedIn(39.1f, RAIN_WUNIT_AUTO, false) == 39 && rainWindSpeedIn(39.1f, RAIN_WUNIT_AUTO, true) == 24 &&
+          rainWindSpeedIn(39.1f, RAIN_WUNIT_KMH, true) == 39 && rainWindSpeedIn(39.1f, RAIN_WUNIT_MPH, false) == 24 &&
+          rainWindSpeedIn(39.1f, RAIN_WUNIT_KN, false) == 21 && rainWindSpeedIn(39.1f, RAIN_WUNIT_MS, false) == 11,
+          "wind speed units");
+    CHECK(rainWindUnitLabel(RAIN_WUNIT_AUTO, false) == 0 && rainWindUnitLabel(RAIN_WUNIT_AUTO, true) == 1 &&
+          rainWindUnitLabel(RAIN_WUNIT_KN, false) == 2 && rainWindUnitLabel(RAIN_WUNIT_MS, true) == 3 &&
+          rainWindUnitLabel(9, false) == 0, "wind unit labels");
+    CHECK(rainWindValueOk(0, 0) && rainWindValueOk(360, 500) && !rainWindValueOk(-1, 5) &&
+          !rainWindValueOk(10, -0.1f) && !rainWindValueOk(10, 501) && !rainWindValueOk(NAN, 5), "wind value bounds");
   }
 
   // The names checked against the stages above: most of them were reached.

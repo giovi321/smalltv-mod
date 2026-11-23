@@ -338,6 +338,16 @@ static void handleStatus() {
   rn.minBlk = rainMinBlk();
   rn.minWhere = rainMinWhere();
   rn.fsFree = rainFsFree();
+  char windStage[32];
+  if (rainWindTried()) {
+    rn.windTried = true;
+    rn.windStage = rainWindStageName(windStage, sizeof windStage);
+    rn.windHttp = rainWindHttp();
+    if (rainWindOkMs()) { rn.windHasOk = true; rn.windOkAgo = (millis() - rainWindOkMs()) / 1000; }
+    int16_t dir;
+    float kmh;
+    if (rainWindNow(*S, dir, kmh)) { rn.windDir = dir; rn.windKmh = (uint16_t)lroundf(kmh); }
+  }
   smalltv::writeStatusRain(out, rn);
 #endif
   smalltv::writeStatusEnd(out);

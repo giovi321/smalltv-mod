@@ -24,7 +24,10 @@ Options: `--range` (km, default 50), `--anim` (s per frame, default 3), `--ui`
 (text & city size 0/1/2, default 1), `--tiles DIR` (reuse downloaded tiles),
 `--speed` (GIF speed-up of device time, default 8), `--preview FILE` (save the
 most colourful radar screen, 2x — how `docs/public/assets/rain-preview.png`
-is made).
+is made), `--wind FROM,KMH` (turn the wind arrow on, answering the Open-Meteo
+request with that wind: the direction it comes from, in degrees, and its
+speed), `--wind-unit N` (its speed unit: 0 as the distances, 1 km/h, 2 mph,
+3 knots, 4 m/s).
 
 Output: `screens/NNNN.png` (every distinct screen, 2x), `screens/timeline.csv`
 (device time of each), `screens.gif` (the timeline, sped up) and

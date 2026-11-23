@@ -10,6 +10,8 @@
 //      output covers about twice the range ring.
 //   3. The custom decoder (RainPng.cpp) crops, upscales and quantizes each
 //      frame into /rain/t<time>.raw (240x240, 8-bit indices, 57,600 B).
+//   0. With the wind arrow on (rain.wind), first the current wind at the
+//      home position from Open-Meteo (fetchWind), one small JSON.
 //
 // Frame files are named by their radar timestamp, so a frame and its time
 // can never disagree. Consecutive lists overlap by all but one or two
@@ -36,6 +38,7 @@
 #include <memory>
 #include <new>
 #include "RainPng.h"
+#include "RainWind.h"
 #if !defined(WITH_RAIN) || WITH_RAIN   // compiled out with -D WITH_RAIN=0
 
 // All the state of the rain client lives in one RainState, allocated while
@@ -93,7 +96,7 @@ struct RainState {
   // Heap low-water mark of the current (or last) fetch, sampled in the
   // download loop, the decoder and between steps: the web server only
   // answers between steps, when the peak is already over. minWhere says
-  // which part of the fetch hit the lowest largest-block: 'L' list,
+  // which part of the fetch hit the lowest largest-block: 'W' wind, 'L' list,
   // 'D' download, 'X' decode, 'S' between steps.
   uint32_t  decodeMs = 0;           // last tile decode, ms
   bool      smallMem = false;       // last tile decoded in the small-memory mode
@@ -112,6 +115,16 @@ struct RainState {
   RainPending* pending = nullptr;   // its list (see RainPending)
   uint8_t      pendingCount = 0;
   String       host;                // its tile host
+
+  // The wind (rain.wind on): the last good answer, per level (clouds, ground;
+  // RAIN_WIND_LEVELS). A failed request keeps it: it ages out instead
+  // (rainWindNow).
+  int16_t   windDir[RAIN_WIND_LEVELS] = {-1, -1};   // from, degrees; -1 = none
+  uint16_t  windKmh10[RAIN_WIND_LEVELS] = {0, 0};   // speed, km/h x 10
+  uint32_t  windOkMs = 0;           // millis() of the last good answer (0 = never)
+  RainStage windStage = RAIN_IDLE;  // outcome of the last wind request
+  int       windHttp = 0;
+  bool      windDone = false;       // the running fetch made its wind request
 };
 static RainState* S = nullptr;
 
@@ -248,8 +261,7 @@ static const char kStageNames[] PROGMEM =
     "no frames in feed\0png decode failed\0out of memory\0filesystem error\0"
     "storage full\0low memory, tile skipped\0decode too slow, tile skipped\0ok";
 static_assert(RAIN_OK == 13, "kStageNames follows RainStage");
-const char* rainStageName(char* buf, size_t n) {
-  const RainStage st = rainStage();
+static const char* stageName(RainStage st, char* buf, size_t n) {
   uint8_t k = (uint8_t)st <= RAIN_OK ? (uint8_t)st : 0;
   PGM_P p = kStageNames;
   while (k--) while (pgm_read_byte(p++)) {}
@@ -257,6 +269,7 @@ const char* rainStageName(char* buf, size_t n) {
   buf[n - 1] = 0;
   return buf;
 }
+const char* rainStageName(char* buf, size_t n) { return stageName(rainStage(), buf, n); }
 
 static void timePath(char* out, size_t n, uint32_t time) {
   snprintf_P(out, n, PSTR(RAIN_DIR "/t%lu.raw"), (unsigned long)time);
@@ -338,6 +351,13 @@ void rainInit(const Settings& s) {
   S->lastHttp = 0;
   S->lastTryMs = 0;
   S->lastUrl = String();
+  // The wind is the old location's too (rainInit runs on a change of home):
+  // never shown over the new one, even if the next wind request fails.
+  for (uint8_t l = 0; l < RAIN_WIND_LEVELS; l++) { S->windDir[l] = -1; S->windKmh10[l] = 0; }
+  S->windOkMs = 0;
+  S->windStage = RAIN_IDLE;
+  S->windHttp = 0;
+  S->windDone = false;
   // /rain is created by the first fetch (rainService), not here: rainInit
   // runs at boot for every image, rain on or off.
 }
@@ -451,6 +471,116 @@ static bool fetchFrameList(const Settings& s) {
   S->listOkMs = millis();
   return true;
 }
+
+// ---- the wind: one GET to Open-Meteo ----------------------------------------
+// The answer has no Content-Length (HTTP/1.0, the body runs to the close):
+// the parser reads it through this cap, so a server that never stops costs
+// RAIN_WIND_MAX_BYTES at most, then the JSON fails to parse.
+class CappedStream : public Stream {
+ public:
+  CappedStream(Stream& in, size_t cap) : in_(in), left_(cap) {}
+  int available() override { return left_ ? in_.available() : 0; }
+  int read() override {
+    if (!left_) return -1;
+    int c = in_.read();
+    if (c >= 0) left_--;
+    return c;
+  }
+  int peek() override { return left_ ? in_.peek() : -1; }
+  size_t write(uint8_t) override { return 0; }
+ private:
+  Stream& in_;
+  size_t  left_;
+};
+
+// Both levels are asked for in one request (the setting picks the one shown,
+// so changing it needs no new request), in km/h (miles are a display matter).
+// A level missing from the answer or out of bounds is dropped on its own;
+// with neither level usable the answer counts as a parse failure.
+static bool fetchWind(const Settings& s) {
+  String url = scheme() + F(RAIN_WIND_HOST) + F(RAIN_WIND_PATH);
+  url += F("?latitude=");
+  url += String(rainLat(s), RAIN_COORD_DECIMALS);   // rounded, as for the tiles
+  url += F("&longitude=");
+  url += String(rainLon(s), RAIN_COORD_DECIMALS);
+  url += F("&current=wind_speed_850hPa,wind_direction_850hPa,wind_speed_10m,wind_direction_10m"
+           "&wind_speed_unit=kmh");
+
+  WiFiClient client;
+  std::unique_ptr<HTTPClient> httpOwner(newHttp());
+  if (!httpOwner) { S->windStage = RAIN_NO_MEM; return false; }
+  HTTPClient& http = *httpOwner;
+  http.useHTTP10(true);   // never chunked: the body as it is, up to the close
+  http.setTimeout(s.httpTimeout);
+  http.setReuse(false);
+  if (!http.begin(client, url)) { S->windStage = RAIN_CONNECT_FAIL; return false; }
+  url = String();
+  http.addHeader(F("Accept"), F("application/json"));
+  http.setUserAgent(F(RAIN_USER_AGENT));
+  http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);   // as for RainViewer
+
+  int code = http.GET();
+  S->windHttp = code;
+  if (code != HTTP_CODE_OK) {
+    http.end();
+    S->windStage = (code < 0) ? RAIN_CONNECT_FAIL : RAIN_HTTP_ERROR;
+    return false;
+  }
+  int len = http.getSize();
+  if (len > RAIN_WIND_MAX_BYTES) { http.end(); S->windStage = RAIN_HTTP_ERROR; return false; }
+
+  JsonDocument filter;
+  {
+    JsonObject f = filter[F("current")].to<JsonObject>();
+    f[F("wind_speed_850hPa")] = true;
+    f[F("wind_direction_850hPa")] = true;
+    f[F("wind_speed_10m")] = true;
+    f[F("wind_direction_10m")] = true;
+  }
+  JsonDocument doc;
+  CappedStream body(http.getStream(), RAIN_WIND_MAX_BYTES);
+  DeserializationError err = deserializeJson(doc, body, DeserializationOption::Filter(filter));
+  http.end();
+  if (err) { S->windStage = RAIN_PARSE_FAIL; return false; }
+
+  JsonObjectConst cur = doc[F("current")].as<JsonObjectConst>();
+  int16_t dir[RAIN_WIND_LEVELS];
+  uint16_t kmh10[RAIN_WIND_LEVELS];
+  bool any = false;
+  for (uint8_t l = 0; l < RAIN_WIND_LEVELS; l++) {
+    JsonVariantConst d = l ? cur[F("wind_direction_10m")] : cur[F("wind_direction_850hPa")];
+    JsonVariantConst v = l ? cur[F("wind_speed_10m")] : cur[F("wind_speed_850hPa")];
+    dir[l] = -1;
+    kmh10[l] = 0;
+    if (!d.is<float>() || !v.is<float>()) continue;   // missing or null
+    const float df = d.as<float>(), vf = v.as<float>();
+    if (!rainWindValueOk(df, vf)) continue;
+    dir[l] = (int16_t)(lroundf(df) % 360);
+    kmh10[l] = (uint16_t)lroundf(vf * 10.0f);
+    any = true;
+  }
+  if (!any) { S->windStage = RAIN_PARSE_FAIL; return false; }
+  for (uint8_t l = 0; l < RAIN_WIND_LEVELS; l++) { S->windDir[l] = dir[l]; S->windKmh10[l] = kmh10[l]; }
+  S->windOkMs = millis();
+  S->windStage = RAIN_OK;
+  return true;
+}
+
+bool rainWindNow(const Settings& s, int16_t& dirFrom, float& kmh) {
+  // Same rule as the arrow everywhere (screen and /api/status).
+  if (!S || s.rain.wind == RAIN_WIND_OFF || s.rain.wind > RAIN_WIND_LEVELS || !S->windOkMs) return false;
+  if (millis() - S->windOkMs > ((uint32_t)s.rain.pollSec + RAIN_STALE_SEC) * 1000UL) return false;
+  const uint8_t l = s.rain.wind - 1;
+  if (S->windDir[l] < 0) return false;
+  if (S->windKmh10[l] < (uint16_t)lroundf(RAIN_WIND_MIN_KMH * 10.0f)) return false;   // no meaningful direction
+  dirFrom = S->windDir[l];
+  kmh = S->windKmh10[l] / 10.0f;
+  return true;
+}
+uint32_t rainWindOkMs() { return S ? S->windOkMs : 0; }
+int      rainWindHttp() { return S ? S->windHttp : 0; }
+bool     rainWindTried() { return S && S->windStage != RAIN_IDLE; }
+const char* rainWindStageName(char* buf, size_t n) { return stageName(S ? S->windStage : RAIN_IDLE, buf, n); }
 
 // ---- small-memory decode: the pixel history on LittleFS ---------------------
 // One file per segment (/rain/h<seg>), written whole and closed, so a read
@@ -877,13 +1007,26 @@ void rainService(const Settings& s) {
     S->stage = RAIN_FETCHING;
     heapReset();
     rainHeapSample();
+    S->windDone = false;
     S->step = STEP_LIST;
-    return;   // the list goes out on the next call: the screen animates first
+    return;   // the requests go out on the next calls: the screen animates first
   }
 
   // One step per call: the main loop animates the screen in between.
   S->heapPhase = 'S';
   rainHeapSample();
+  // The wind, once per fetch, in a step of its own: first, before the list;
+  // or, when the arrow is turned on during a fetch, between two steps of it
+  // (the arrow then appears within this fetch, not the next one). A failure
+  // only costs the arrow (the last good wind ages out), never the radar.
+  if (s.rain.wind != RAIN_WIND_OFF && !S->windDone) {
+    S->windDone = true;
+    S->heapPhase = 'W';
+    fetchWind(s);
+    rainHeapSample();
+    S->heapPhase = 'S';
+    return;
+  }
   if (S->step == STEP_LIST) {
     // /rain exists only while rain is in use (created here, deleted by
     // rainRemoveAll()).

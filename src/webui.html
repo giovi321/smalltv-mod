@@ -382,7 +382,12 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <label>Text &amp; city size</label>
    <select id="rainUiScale"><option value="0">Small</option><option value="1">Medium</option><option value="2">Large</option></select>
    <div class="chk" style="margin-top:12px"><input id="rainShowCities" type="checkbox"><label>Nearby cities as reference markers (France &amp; Europe)</label></div>
-   <small class="hint">Weather data by RainViewer — personal use only.</small>
+   <label>Wind arrow</label>
+   <select id="rainWind"><option value="0">Off</option><option value="1">Cloud level (where the rain goes)</option><option value="2">Ground (10 m)</option></select>
+   <label>Wind speed unit</label>
+   <select id="rainWindUnit"><option value="0">As the distances (km/h or mph)</option><option value="1">km/h</option><option value="2">mph</option><option value="3">knots</option><option value="4">m/s</option></select>
+   <small class="hint">An arrow under the range shows where the wind blows now (the current wind, the same over every frame of the loop), with its speed: at cloud level (~1,500 m, the wind that moves the rain) or at the ground. One more request per refresh, to Open-Meteo.</small>
+   <small class="hint">Weather data by RainViewer — personal use only. Wind data by Open-Meteo (CC BY 4.0).</small>
   </div>
  </section>
 
@@ -649,6 +654,8 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('rainAnimSec',rn.animSec||8);
  sc('rainShowCities',rn.showCities!==false);
  sv('rainUiScale',rn.uiScale!=null?rn.uiScale:1);
+ sv('rainWind',rn.wind||0);
+ sv('rainWindUnit',rn.windUnit||0);
  var au=c.auth||{};
  sv('authUser',au.user||'admin'); authShow(!!au.passSet);
  var ap=$('apPass'); if(ap){ap.value='';ap.placeholder=c.apPassSet?'(unchanged)':'(open)';}
@@ -810,7 +817,8 @@ function collect(){
   var rn={useDevice:gc('rainUseDevice'), lat:parseFloat(gv('rainLat'))||0, lon:parseFloat(gv('rainLon'))||0,
    rangeKm:parseInt(gv('rainRangeKm'))||50, unitsMi:gv('rainUnitsMi')==='true',
    pollSec:parseInt(gv('rainPollSec'))||900, animSec:parseInt(gv('rainAnimSec'))||8,
-   showCities:gc('rainShowCities'), uiScale:parseInt(gv('rainUiScale'))||0};
+   showCities:gc('rainShowCities'), uiScale:parseInt(gv('rainUiScale'))||0,
+   wind:parseInt(gv('rainWind'))||0, windUnit:parseInt(gv('rainWindUnit'))||0};
   o.rain=rn;
  }
  return o;
