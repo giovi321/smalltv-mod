@@ -117,9 +117,9 @@ int main() {
   failedPoll(s, "{\"ac\":[" + local + "],\"nested\":" + nested + "}", "TooDeep");
   poll(s, "{\"nested\":{\"ac\":[" + near + "]},\"note\":\"ac\"}");
   assert(radarError() && radarStage() == RADAR_NO_AC && radarCount() == 1);
-  // Total and contiguous headroom both protect the ESP8266, independently.
+  // Total heap reserve and contiguous allocation fit are checked independently.
   ESP.heap = 4096; failedPoll(s, feed("aircraft", local), "NoMemory"); ESP.heap = 100000;
-  ESP.maxBlock = 1535; failedPoll(s, feed("aircraft", local), "NoMemory");
+  ESP.maxBlock = 1; failedPoll(s, feed("aircraft", local), "NoMemory");
   ESP.maxBlock = 4500; poll(s, feed("aircraft", local)); assert(!radarError()); ESP.maxBlock = 100000;
   HTTPClient::status = 503; poll(s, "");
   assert(radarStage() == RADAR_HTTP_ERROR && radarLastHttp() == 503 && !radarParseError()[0]);

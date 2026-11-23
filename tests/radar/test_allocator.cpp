@@ -48,15 +48,15 @@ int main() {
   assert(a.reallocate(p, 0) == nullptr && a.used() == 0);
   a.deallocate(nullptr);
   // A fragmented heap can still satisfy the parser and Wi-Fi independently.
-  // The largest-block floor is not another total-free-heap reserve.
+  // A small allocation fits even when no 1,536-byte block remains.
   heapBytes = WifiReserveFreeHeap + 128 + h;
-  maxBlockBytes = 1536;
+  maxBlockBytes = 128 + h;
   RadarJsonAllocator fragmented(4096, WifiReserveFreeHeap, freeHeap, allocate,
-                                reallocate, free, maxBlock, 1536);
+                                reallocate, free, maxBlock);
   void* block = fragmented.allocate(128);
   assert(block && fragmented.used() == 128 + h);
   fragmented.deallocate(block);
-  // Each threshold rejects one byte below its boundary independently.
+  // Each check rejects one byte below its boundary independently.
   --heapBytes;
   assert(!fragmented.allocate(128) && fragmented.used() == 0);
   ++heapBytes;
@@ -71,8 +71,8 @@ int main() {
   block = fragmented.allocate(2048);
   assert(block && fragmented.used() == 2048 + h);
   fragmented.deallocate(block);
-  // A growing realloc must preserve both floors and its original block on failure.
-  maxBlockBytes = 1536;
+  // Growing realloc preserves total headroom, contiguous fit and data on failure.
+  maxBlockBytes = 128 + h;
   block = fragmented.allocate(64);
   assert(block);
   memset(block, 0x5a, 64);

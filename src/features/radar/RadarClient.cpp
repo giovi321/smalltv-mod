@@ -332,13 +332,10 @@ __attribute__((noinline)) static bool parseAdsb(const Settings& s, Stream& strea
   // Bound one aircraft, the field filter, and fixed candidate storage together.
   // No allocation grows with the aircraft count, on either ESP family.
 #if defined(SMALLTV_FAMILY_ESP8266)
-  // The shared SDK reserve is total heap. Keep the parser's block floor
-  // independent, so fragmentation does not require allocation + reserve in
-  // one block. PR #135 deliberately has no shared largest-block constant.
-  constexpr size_t ParserLargestBlockFloor = 1536;
+  // Keep the measured SDK reserve in total heap; only the actual parser
+  // allocation, including its header, needs to fit in the largest block.
   RadarJsonAllocator allocator(4 * 1024, WifiReserveFreeHeap, radarFreeHeap,
-                               malloc, realloc, free, radarMaxBlock,
-                               ParserLargestBlockFloor);
+                               malloc, realloc, free, radarMaxBlock);
 #else
   RadarJsonAllocator allocator(4 * 1024);
 #endif

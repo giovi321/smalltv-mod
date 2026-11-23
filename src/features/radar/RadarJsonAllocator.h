@@ -18,11 +18,9 @@ class RadarJsonAllocator : public ArduinoJson::Allocator {
   using Deallocate = void (*)(void*);
   RadarJsonAllocator(size_t limit, size_t reserve = 0, FreeHeap freeHeap = nullptr,
                      Allocate alloc = malloc, Reallocate reallocFn = realloc,
-                     Deallocate freeFn = free, FreeHeap maxBlock = nullptr,
-                     size_t maxBlockFloor = 0)
+                     Deallocate freeFn = free, FreeHeap maxBlock = nullptr)
       : limit_(limit), reserve_(reserve), freeHeap_(freeHeap),
-        alloc_(alloc), realloc_(reallocFn), free_(freeFn), maxBlock_(maxBlock),
-        maxBlockFloor_(maxBlockFloor) {}
+        alloc_(alloc), realloc_(reallocFn), free_(freeFn), maxBlock_(maxBlock) {}
 
   void* allocate(size_t size) override {
     if (!size || !fits(size, 0)) return nullptr;
@@ -72,9 +70,9 @@ class RadarJsonAllocator : public ArduinoJson::Allocator {
     }
     if (maxBlock_) {
       size_t largest = maxBlock_();
-      // Fragmentation needs its own floor; the Wi-Fi total-free reserve
-      // does not also need to fit contiguously beside this allocation.
-      if (bytes > largest || largest < maxBlockFloor_) return false;
+      // Only this allocation must fit contiguously; the Wi-Fi reserve
+      // applies to total free heap, not the largest block.
+      if (bytes > largest) return false;
     }
     return true;
   }
@@ -84,5 +82,4 @@ class RadarJsonAllocator : public ArduinoJson::Allocator {
   Reallocate realloc_;
   Deallocate free_;
   FreeHeap maxBlock_;
-  size_t maxBlockFloor_;
 };

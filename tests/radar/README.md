@@ -9,7 +9,7 @@ installs no packages and makes no network requests.
   cases: split chunks, packet gaps, extensions/trailers, truncation, slow-body
   and scalar header deadlines, and millis wraparound.
 - `test_allocator.cpp` checks allocation/reallocation accounting, alignment,
-  overflow, allocation failure and the total heap reserve and independent contiguous-block floor.
+  overflow, allocation failure and the total heap reserve and contiguous allocation fit.
 - `fixtures/aircraft.json` is a small synthetic readsb/dump1090 receiver sample.
 - `test_client.cpp` compiles the actual client with deterministic network and
   heap stand-ins, including radar/carousel storage release and reacquisition.
@@ -48,8 +48,8 @@ are outside this budget. Internal realloc may briefly hold both old and
 replacement blocks; the ESP8266 reserve check allows for the full replacement.
 An oversized retained field or key can still report `NoMemory`. On ESP8266,
 allocation leaves `WifiReserveFreeHeap` (5,120 B) in total free heap. The largest
-block must independently fit the allocation and meet a 1,536 B floor; that
-floor is not added to every allocation. This is a conservative guard, not proof against every
+block must fit the allocation, including allocator metadata. There is no
+additional largest-block reserve. These checks are not proof against every
 reset or asynchronous SDK allocation failure.
 
 Only top-level decoded `ac` / `aircraft` keys select arrays. An array-valued
