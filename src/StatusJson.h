@@ -94,8 +94,16 @@ struct StatusRain {
   uint32_t decodeMs = 0;              // last tile decode, left out when 0
   bool smallMem = false;              // ... in the small-memory mode (written when decodeMs is)
   uint32_t minHeap = 0, minBlk = 0;   // heap low-water mark of the last fetch, left out when 0
-  char minWhere = 0;                  // where minBlk was hit: L list, D download, X decode, S between steps
+  char minWhere = 0;                  // where minBlk was hit: W wind, L list, D download, X decode, S between steps
   uint32_t fsFree = 0;                // LittleFS free bytes at the last room check, left out when 0
+  // The wind arrow's request, as "wind":{...}, left out until one was made.
+  bool windTried = false;
+  const char* windStage = "";
+  int windHttp = 0;                   // left out when 0
+  bool windHasOk = false;
+  uint32_t windOkAgo = 0;
+  int16_t windDir = -1;               // the arrow on screen: wind FROM, degrees; left out (with
+  uint16_t windKmh = 0;               // its speed) when no arrow is shown
 };
 
 namespace statusout {
@@ -243,6 +251,16 @@ template <class Out> void writeStatusRain(Out& out, const StatusRain& r) {
   if (r.minBlk)   member(out, PSTR(",\"minBlk\":"), r.minBlk);
   if (r.minWhere) { char w[2] = {r.minWhere, 0}; member(out, PSTR(",\"minWhere\":"), (const char*)w); }
   if (r.fsFree)   member(out, PSTR(",\"fsFree\":"), r.fsFree);
+  if (r.windTried) {
+    member(out, PSTR(",\"wind\":{\"stage\":"), r.windStage);
+    if (r.windHttp) member(out, PSTR(",\"http\":"), r.windHttp);
+    if (r.windHasOk) member(out, PSTR(",\"okAgo\":"), r.windOkAgo);
+    if (r.windDir >= 0) {
+      member(out, PSTR(",\"dir\":"), r.windDir);
+      member(out, PSTR(",\"kmh\":"), r.windKmh);
+    }
+    jsonout::raw(out, PSTR("}"));
+  }
   jsonout::raw(out, PSTR("}"));
 }
 

@@ -11,7 +11,9 @@
 // (raw little-endian RGB565, 240x240) and a line to OUT/timeline.csv:
 // "index,ms,label". simulate.py turns them into PNGs and an animated GIF.
 //
-//   sim TILES_DIR OUT_DIR lat lon rangeKm animSec uiScale [outage]
+//   sim TILES_DIR OUT_DIR lat lon rangeKm animSec uiScale [outage] [wind=FROM,KMH]
+// wind=FROM,KMH turns the wind arrow on (cloud level) and answers the
+// Open-Meteo request with that wind (direction it comes from, in degrees).
 #include <ArduinoJson.h>
 #include <cstdio>
 #include <cstdlib>
@@ -56,8 +58,15 @@ static bool readFile(const std::string& p, std::string& out) {
   return true;
 }
 
+static std::string g_wind;   // the Open-Meteo "current" members, empty = arrow off
+
 static int serve(const std::string& url, std::string& body) {
   if (g_providerDown) { g_fakeMillis += 5000; return -1; }   // connection refused after a timeout
+  if (url.find("open-meteo") != std::string::npos) {
+    g_fakeMillis += kListMs;
+    body = "{\"current\":{" + g_wind + "}}";
+    return 200;
+  }
   if (url.find("weather-maps.json") != std::string::npos) {
     g_fakeMillis += kListMs;
     return readFile(g_tiles + "/weather-maps.json", body) ? 200 : 404;
@@ -107,7 +116,7 @@ static void runFor(Settings& s, uint32_t ms, const char* label) {
 
 int main(int argc, char** argv) {
   if (argc < 8) {
-    fprintf(stderr, "usage: %s TILES_DIR OUT_DIR lat lon rangeKm animSec uiScale [outage]\n", argv[0]);
+    fprintf(stderr, "usage: %s TILES_DIR OUT_DIR lat lon rangeKm animSec uiScale [outage] [wind=FROM,KMH]\n", argv[0]);
     return 2;
   }
   // The heap is not simulated: report a healthy ESP8266 one, above the
@@ -115,7 +124,18 @@ int main(int argc, char** argv) {
   ESP.freeHeap = 24000;
   g_tiles = argv[1];
   g_out = argv[2];
-  const bool outage = argc > 8 && std::string(argv[8]) == "outage";
+  bool outage = false;
+  float windFrom = -1, windKmh = 0;
+  for (int i = 8; i < argc; i++) {
+    std::string a = argv[i];
+    if (a == "outage") outage = true;
+    else if (a.rfind("wind=", 0) == 0 && sscanf(a.c_str() + 5, "%f,%f", &windFrom, &windKmh) == 2) {
+      char m[200];
+      snprintf(m, sizeof m, "\"wind_speed_850hPa\":%.1f,\"wind_direction_850hPa\":%.0f,"
+               "\"wind_speed_10m\":%.1f,\"wind_direction_10m\":%.0f", windKmh, windFrom, windKmh, windFrom);
+      g_wind = m;
+    }
+  }
   std::string idx;
   if (!readFile(g_tiles + "/tiles.txt", idx)) { fprintf(stderr, "sim: no tiles.txt in %s\n", argv[1]); return 1; }
   for (size_t p = 0; p < idx.size();) {
@@ -137,6 +157,7 @@ int main(int argc, char** argv) {
   s.rain.rangeKm = (uint16_t)atoi(argv[5]);
   s.rain.animSec = (uint16_t)atoi(argv[6]);
   s.rain.uiScale = (uint8_t)atoi(argv[7]);
+  if (!g_wind.empty()) s.rain.wind = 1;   // cloud level
 
   // ---- boot, as main.cpp's setup() draws it (Net.cpp's progress lines) ----
   simGfxBegin();

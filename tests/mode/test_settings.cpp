@@ -110,6 +110,27 @@ static void testRainSlice() {
   // lat/lon survive a save that does not carry them.
   CHECK(fabsf(s.rain.lat - 52.3676f) < 0.0001f, "lat kept");
   CHECK(fabsf(s.rain.lon - 4.9041f) < 0.0001f, "lon kept");
+
+  // The wind arrow: opt in, three levels, clamped, kept by a partial save,
+  // and in the export (toJson) so an import brings it back.
+  CHECK(s.rain.wind == 0, "wind arrow off by default");
+  apply(s, "{\"rain\":{\"wind\":1}}");
+  CHECK(s.rain.wind == 1, "wind at cloud level");
+  apply(s, "{\"rain\":{\"rangeKm\":30}}");
+  CHECK(s.rain.wind == 1, "wind kept by a save without it");
+  apply(s, "{\"rain\":{\"wind\":9}}");
+  CHECK(s.rain.wind == 2, "wind clamped to the ground level");
+  apply(s, "{\"rain\":{\"wind\":-3}}");
+  CHECK(s.rain.wind == 0, "wind clamped to off");
+  apply(s, "{\"rain\":{\"wind\":true}}");
+  CHECK(s.rain.wind == 0, "a non-number leaves it alone");
+  s.rain.wind = 2;
+  JsonDocument out;
+  s.rain.toJson(out.to<JsonObject>());
+  Settings t;
+  t.setDefaults();
+  t.rain.fromJson(out.as<JsonObjectConst>());
+  CHECK(t.rain.wind == 2, "wind round-trips through export and import");
 }
 
 int main() {

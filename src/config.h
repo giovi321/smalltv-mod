@@ -449,6 +449,18 @@
                                            // (the download then stops at this size)
 #define RAIN_PNG_MAX       262144          // a tile announced larger is refused
 
+// Wind arrow (opt in, rain.wind): the current wind at the home position from
+// Open-Meteo (no API key, CC BY 4.0), over plain HTTP like the radar (no TLS
+// heap peak), one request per poll, position rounded as for the tiles. The
+// answer (~0.5 KB, no Content-Length over HTTP/1.0) is read at most up to
+// RAIN_WIND_MAX_BYTES. No arrow under RAIN_WIND_MIN_KMH (a direction without
+// meaning), nor once the last good answer is older than the refresh period
+// plus RAIN_STALE_SEC.
+#define RAIN_WIND_HOST      "api.open-meteo.com"
+#define RAIN_WIND_PATH      "/v1/forecast"
+#define RAIN_WIND_MAX_BYTES 1024
+#define RAIN_WIND_MIN_KMH   2.0f
+
 // Defaults (lat/lon 0,0 is the "not set yet" sentinel -> shows a prompt).
 #define DEFAULT_RAIN_LAT       0.0f
 #define DEFAULT_RAIN_LON       0.0f

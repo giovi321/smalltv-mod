@@ -24,6 +24,12 @@ bool            rainFetching();         // a fetch is in progress
 // clock is not set.
 bool            rainStale(uint32_t pollSec, uint32_t nowUnix);
 
+// The wind arrow (rain.wind): the wind of the chosen level, as it comes
+// (direction FROM, degrees from north) with its speed in km/h. False: the
+// arrow is off, there is no usable answer yet, or the last one is older than
+// the refresh period plus RAIN_STALE_SEC.
+bool            rainWindNow(const Settings& s, int16_t& dirFrom, float& kmh);
+
 // ---- diagnostics, reported by /api/status ---------------------------------
 enum RainStage : uint8_t {
   RAIN_IDLE = 0,      // no poll has run yet
@@ -52,9 +58,15 @@ uint8_t     rainCropK();                // centre crop used by the last poll
 uint32_t    rainLastTryMs();            // millis() of the last attempt
 const char* rainLastUrl();              // URL of the last attempt ("" = none)
 // Heap low-water mark of the current/last fetch (0 = no fetch yet) and the
-// part of it that hit the lowest largest block ('L','D','X','S').
+// part of it that hit the lowest largest block ('W','L','D','X','S').
 uint32_t    rainDecodeMs();            // duration of the last tile decode
 bool        rainSmallMem();            // it ran in the small-memory mode (2 KB ring + LittleFS)
 uint32_t    rainMinHeap();
+// The wind request: millis() of the last good answer (0 = never), last HTTP
+// status, whether one was made, and its outcome as a RainStage name.
+uint32_t    rainWindOkMs();
+int         rainWindHttp();
+bool        rainWindTried();
+const char* rainWindStageName(char* buf, size_t n);
 uint32_t    rainMinBlk();
 char        rainMinWhere();

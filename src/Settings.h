@@ -200,6 +200,7 @@ struct RainSettings {
   bool     unitsMi;       // show distances in miles instead of km
   bool     showCities;    // nearby cities as reference dots
   uint8_t  uiScale;       // text/city marker size: 0 = small, 1 = medium, 2 = large
+  uint8_t  wind;          // wind arrow: RAIN_WIND_OFF, _CLOUDS (850 hPa) or _GROUND (10 m)
 
   void setDefaults();
   void toJson(JsonObject o) const;

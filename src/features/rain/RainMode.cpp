@@ -9,6 +9,7 @@
 #include "Clock.h"
 #include "RainClient.h"
 #include "rain_cities.h"
+#include "RainWind.h"
 #if !defined(WITH_RAIN) || WITH_RAIN   // compiled out with -D WITH_RAIN=0
 
 RainMode g_rainMode;
@@ -39,7 +40,8 @@ static const int RR = 112;                 // outer ring radius, px
 // exactly as when they were drawn on the panel one after the other.
 // Without a frame (black screen), or without heap for the list, the layers
 // are drawn on the panel directly.
-#define RAIN_OV_MAX 16          // texts on screen: 13 at most (2 header, N, 6 cities, 3 timeline, credit)
+#define RAIN_OV_MAX 18          // texts on screen: 17 at most (2 header, N, 6 cities, 3 timeline,
+                                // 2 wind speed, 2 credits)
 #define RAIN_OV_LEN 24
 #define RAIN_DL_MAX 96          // shapes + texts (city markers can exceed 24 when crowded)
 struct OvText {
@@ -48,12 +50,13 @@ struct OvText {
   uint8_t  size, len;
   char     s[RAIN_OV_LEN];
 };
-enum DlType : uint8_t { DL_CIRCLE, DL_FILLCIRCLE, DL_VLINE, DL_HLINE, DL_DIAMOND, DL_RRECT, DL_TEXT };
+enum DlType : uint8_t { DL_CIRCLE, DL_FILLCIRCLE, DL_VLINE, DL_HLINE, DL_DIAMOND, DL_RRECT, DL_ARROW, DL_TEXT };
 struct DlOp {
   DlType   type;
   uint8_t  text;               // DL_TEXT: index into Overlay::t
   uint16_t color;
   int16_t  x, y, w, h, r;      // per type, as the Arduino_GFX call takes them
+                               // (DL_ARROW: centre x/y, r to the tip, w heading, h outline)
   int16_t  y0, y1;             // rows the op can touch: skipped by the bands outside
 };
 struct Overlay {
@@ -74,9 +77,11 @@ struct RainView {
   float    fetchLat = 0.0f;
   float    fetchLon = 0.0f;
   int16_t  fetchRange = -1;
+  uint8_t  wind = RAIN_WIND_OFF;     // rain.wind at the last init / save
   uint32_t renderedOk = 0xFFFFFFFF;
   bool     renderedError = false;
   bool     renderedStale = false;
+  uint32_t renderedWind = 0;         // rainWindOkMs() on screen, 0 = no arrow
   bool     needRender = true;
   uint8_t  animIdx = 0;              // frame shown in the loop
   uint32_t nextAnimMs = 0;
@@ -143,6 +148,21 @@ static void dlDiamond(Arduino_GFX* gfx, int x, int y, int h, uint16_t c) {
   gfx->drawLine(x, y + h, x - h, y, c);
 }
 
+// The wind arrow (RainWind.h): head and shaft as filled triangles. The
+// outline op draws the same shape in black, moved by one pixel in each of
+// the 8 directions: a 1 px black rim around the white arrow drawn over it.
+static void dlArrow(Arduino_GFX* gfx, const DlOp& o) {
+  RainArrow a;
+  rainWindArrow(o.x, o.y, o.r, o.w, a);
+  for (int dy = -1; dy <= 1; dy++)
+    for (int dx = -1; dx <= 1; dx++) {
+      if ((dx || dy) != (o.h != 0)) continue;   // outline: the 8 moves; arrow: in place
+      gfx->fillTriangle(a.tipX + dx, a.tipY + dy, a.b1x + dx, a.b1y + dy, a.b2x + dx, a.b2y + dy, o.color);
+      gfx->fillTriangle(a.s1x + dx, a.s1y + dy, a.s2x + dx, a.s2y + dy, a.s3x + dx, a.s3y + dy, o.color);
+      gfx->fillTriangle(a.s1x + dx, a.s1y + dy, a.s3x + dx, a.s3y + dy, a.s4x + dx, a.s4y + dy, o.color);
+    }
+}
+
 static void dlOne(Arduino_GFX* gfx, const DlOp& o) {   // shapes only (texts: ovDraw)
   switch (o.type) {
     case DL_CIRCLE:     gfx->drawCircle(o.x, o.y, o.r, o.color); break;
@@ -151,6 +171,7 @@ static void dlOne(Arduino_GFX* gfx, const DlOp& o) {   // shapes only (texts: ov
     case DL_HLINE:      gfx->drawFastHLine(o.x, o.y, o.w, o.color); break;
     case DL_DIAMOND:    dlDiamond(gfx, o.x, o.y, o.r, o.color); break;
     case DL_RRECT:      gfx->drawRoundRect(o.x, o.y, o.w, o.h, o.r, o.color); break;
+    case DL_ARROW:      dlArrow(gfx, o); break;
     case DL_TEXT:       break;
   }
 }
@@ -187,6 +208,10 @@ static void dlHLine(Arduino_GFX* g, int x, int y, int w, uint16_t c)      { dlOp
 static void dlDiamondOp(Arduino_GFX* g, int x, int y, int h, uint16_t c)  { dlOp(g, DL_DIAMOND, x, y, 0, 0, h, c, y - h, y + h); }
 static void dlRoundRect(Arduino_GFX* g, int x, int y, int w, int h, int r, uint16_t c) {
   dlOp(g, DL_RRECT, x, y, w, h, r, c, y, y + h - 1);
+}
+
+static void dlArrowOp(Arduino_GFX* g, int x, int y, int r, int heading, bool outline, uint16_t c) {
+  dlOp(g, DL_ARROW, x, y, heading, outline ? 1 : 0, r, c, y - r - 1, y + r + 1);
 }
 
 static void textOutlined(Arduino_GFX* gfx, int x, int y, const char* str, uint8_t size, uint16_t color) {
@@ -442,6 +467,32 @@ static void drawCities(const Settings& s, Arduino_GFX* gfx) {
   }
 }
 
+// ---- the wind arrow, under the range header ---------------------------------
+// Where the rain is heading (the arrow points downwind), and the wind speed
+// under it: the number at the header size, the unit small. Nothing while the
+// wind is off, unknown, too old, or too light to have a direction.
+// True when drawn (the Open-Meteo credit goes with it).
+static bool drawWind(const Settings& s, Arduino_GFX* gfx, uint8_t ht) {
+  int16_t dir;
+  float kmh;
+  if (!rainWindNow(s, dir, kmh) || kmh < RAIN_WIND_MIN_KMH) return false;
+  const int half = ht >= 2 ? 11 : 7;           // px from the centre to the tip
+  const int cx = 4 + half;
+  const int cy = 3 + 8 * ht + 4 + half;        // just under the range header
+  const int heading = rainWindHeading(dir);
+  dlArrowOp(gfx, cx, cy, half, heading, true, C_BLACK);
+  dlArrowOp(gfx, cx, cy, half, heading, false, C_WHITE);
+
+  char num[8];
+  const float v = s.rain.unitsMi ? kmh * 0.621371f : kmh;
+  snprintf_P(num, sizeof num, PSTR("%d"), (int)lroundf(v));
+  const int ty = cy + half + 4;
+  textOutlined(gfx, 3, ty, num, ht, C_WHITE);
+  const RainStr unit(s.rain.unitsMi ? PSTR("mph") : PSTR("km/h"));
+  textOutlined(gfx, 3 + gfxTextW(num, ht) + 4, ty + 8 * ht - 8, unit, 1, C_RAIN_TEXT);   // bottom-aligned
+  return true;
+}
+
 // ---- the timeline at the bottom: T-2h -> now --------------------------------
 static void drawTimeline(const Settings& s, Arduino_GFX* gfx, uint8_t animIdx) {
   uint8_t n = rainCount();
@@ -515,6 +566,7 @@ static void drawLayers(const Settings& s, Arduino_GFX* gfx, uint8_t animIdx, uin
   if (s.rain.unitsMi) snprintf_P(hdr, sizeof hdr, PSTR("%d mi"), (int)lroundf(s.rain.rangeKm * 0.621371f));
   else                 snprintf_P(hdr, sizeof hdr, PSTR("%d km"), s.rain.rangeKm);
   textOutlined(gfx, 3, 3, hdr, ht, C_RAIN_TEXT);
+  const bool wind = drawWind(s, gfx, ht);
 
   if (n > 0) {
     char ft[10];
@@ -551,6 +603,8 @@ static void drawLayers(const Settings& s, Arduino_GFX* gfx, uint8_t animIdx, uin
   // and crowd the timeline pill.
   const RainStr credit(PSTR("RainViewer"));
   textOutlined(gfx, TFT_WIDTH - gfxTextW(credit, 1) - 2, TFT_HEIGHT - 9, credit, 1, C_GRAY);
+  // The wind's source (CC BY 4.0), bottom-left after the error dot.
+  if (wind) textOutlined(gfx, 14, TFT_HEIGHT - 9, RAIN_P("Open-Meteo"), 1, C_GRAY);
   if (rainError()) dlFillCircle(gfx, 6, TFT_HEIGHT - 7, 4, C_RED);
 }
 
@@ -610,6 +664,7 @@ static bool viewInit(const Settings& s) {
   V->fetchLat = rainLat(s);
   V->fetchLon = rainLon(s);
   V->fetchRange = (int16_t)lroundf((float)s.rain.rangeKm);
+  V->wind = s.rain.wind;
   V->renderedOk = 0xFFFFFFFF;
   V->renderedError = false;
   V->needRender = true;
@@ -659,7 +714,11 @@ void RainMode::invalidate(const Settings& s) {
     rainInit(s);
     rainForceRefresh();
     V->animIdx = 0;
+  } else if (s.rain.wind != RAIN_WIND_OFF && V->wind == RAIN_WIND_OFF) {
+    rainForceRefresh();   // the arrow just turned on: poll now, not in up to an hour
+                          // (frames already on disk are not downloaded again)
   }
+  V->wind = s.rain.wind;
   V->renderedOk = 0xFFFFFFFF;
   V->needRender = true;
 }
@@ -688,10 +747,16 @@ void RainMode::service(const Settings& s) {
   uint32_t ok = rainLastOkMs();
   bool err = rainError();
   bool stale = rainStaleNow(s);       // flips with time alone, checked every tick
-  if (ok != V->renderedOk || err != V->renderedError || stale != V->renderedStale) {
+  int16_t wdir;
+  float wkmh;
+  // A new wind answer, or the arrow ageing out: repaint (a set of one frame
+  // does not animate).
+  uint32_t wind = rainWindNow(s, wdir, wkmh) ? rainWindOkMs() : 0;
+  if (ok != V->renderedOk || err != V->renderedError || stale != V->renderedStale || wind != V->renderedWind) {
     V->renderedOk = ok;
     V->renderedError = err;
     V->renderedStale = stale;
+    V->renderedWind = wind;
     V->needRender = true;
   }
 

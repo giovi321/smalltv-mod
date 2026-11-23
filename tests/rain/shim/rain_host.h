@@ -20,6 +20,9 @@ class Stream {
  public:
   virtual ~Stream() {}
   virtual int read() = 0;
+  virtual int available() { return 0; }
+  virtual int peek() { return -1; }
+  virtual size_t write(uint8_t) { return 0; }
   size_t readBytes(char* buf, size_t n) {
     size_t i = 0;
     for (; i < n; i++) { int c = read(); if (c < 0) break; buf[i] = (char)c; }

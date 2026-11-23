@@ -103,6 +103,7 @@ def main():
     ap.add_argument("--out", required=True, help="output directory (emptied first)")
     ap.add_argument("--tiles", help="tile directory: reused if it holds tiles, else filled (default OUT-tiles)")
     ap.add_argument("--outage", action="store_true", help="then simulate RainViewer going away")
+    ap.add_argument("--wind", help="turn the wind arrow on with this wind: FROM,KMH (direction it comes from)")
     ap.add_argument("--speed", type=float, default=8.0, help="GIF speed-up of device time, default 8")
     ap.add_argument("--preview", help="also save the most colourful radar screen (2x) to this PNG")
     a = ap.parse_args()
@@ -117,7 +118,7 @@ def main():
     screens = os.path.join(a.out, "screens")
     os.makedirs(screens)
     subprocess.run([exe, tiles, screens, str(a.lat), str(a.lon), str(a.range), str(a.anim), str(a.ui)]
-                   + (["outage"] if a.outage else []), check=True)
+                   + (["outage"] if a.outage else []) + (["wind=" + a.wind] if a.wind else []), check=True)
 
     rows = [l.split(",", 2) for l in open(os.path.join(screens, "timeline.csv")).read().splitlines()]
     imgs = []
