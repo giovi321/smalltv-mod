@@ -5,6 +5,7 @@
 #include "ThemePackage.h"
 #include "ThemeData.h"
 #include "ThemeMargin.h"
+#include "ThemeRefusal.h"
 #include "ThemeSelection.h"
 #include <LittleFS.h>
 #include <memory>
@@ -85,6 +86,7 @@ class ThemeMode : public DisplayMode {
   void forgetRefusal() {
     refusal_ = "";
     refusedId_ = "";
+    passedTheme_.forget();
   }
   // The select request picked this theme but did not save the setting: it is
   // saved once the theme has loaded and passed the memory check, so a crash
@@ -103,6 +105,9 @@ class ThemeMode : public DisplayMode {
   bool fetchWatched_ = false;   // the first fetched values of this load restarted the watch
 #endif
   smalltv::PendingSelection pending_;
+  // Which theme passed its memory check since the boot: a refusal of its
+  // reload leaves the settings alone (ThemeRefusal.h). Survives unload().
+  smalltv::PassedTheme passedTheme_;
   bool hasPrev_ = false;
   uint8_t prevMode_ = 0;
   String prevId_;

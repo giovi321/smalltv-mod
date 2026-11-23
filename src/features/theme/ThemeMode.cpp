@@ -15,8 +15,10 @@ ThemeMode g_themeMode;
 // and passed (ThemeSelection.h). On every board.
 extern void appThemeAccepted();
 #if defined(SMALLTV_FAMILY_ESP8266)
-// main.cpp: puts the settings right after a refusal and saves them.
-extern void appThemeRefused(bool hasPrev, uint8_t prevMode, const String& prevId, const String& refusedId);
+// main.cpp: puts the settings right after a refusal and saves them. The
+// history says whether the refused load was a reload of a theme that passed:
+// then the settings stay (ThemeRefusal.h).
+extern void appThemeRefused(smalltv::PassedTheme& history, bool hasPrev, uint8_t prevMode, const String& prevId, const String& refusedId);
 #endif
 namespace {
 // Adapts the portable engine's Display interface to this device's actual
@@ -161,13 +163,20 @@ __attribute__((noinline)) void ThemeMode::refuseForMemory() {
   dataCursor_ = 0;
   engine_.setValues({});
   engine_.setTheme(smalltv::Theme{}, millis());
-  refusal_ = "not enough memory to run this theme";
-  refusedId_ = loadedId_;
-  error_ = refusal_;
+  // The screen says why in every case. The refusal is kept (GET /api/themes,
+  // /api/status) only when the settings change with it: the refusal of a
+  // reload of a theme that passed leaves them alone, and the theme is tried
+  // again at the next invalidate() or boot.
+  const char* const text = "not enough memory to run this theme";
+  error_ = text;
+  if (!passedTheme_.reload()) {
+    refusal_ = text;
+    refusedId_ = loadedId_;
+  }
   messageDrawn_ = false;
   keepData_ = false;
   pending_.drop();   // a refused theme is never saved
-  appThemeRefused(hasPrev_, prevMode_, prevId_, refusedId_);
+  appThemeRefused(passedTheme_, hasPrev_, prevMode_, prevId_, refusedId_);
   hasPrev_ = false;
 }
 // The check before the engine builds the theme (ThemeMargin.h, tooBigToBuild):
@@ -192,7 +201,10 @@ __attribute__((noinline)) bool ThemeMode::refusedBeforeBuild(smalltv::Theme& the
 __attribute__((noinline)) bool ThemeMode::checkMargin() {
   const smalltv::MarginLimits limits{WifiReserveFreeHeap, ParseLargestBlock};
   if (!marginWatch_.check(millis(), ESP.getFreeHeap(), platformMaxFreeBlock(), limits)) {
-    if (!marginWatch_.active()) hasPrev_ = false;   // the load passed its test: the old selection no longer applies
+    if (!marginWatch_.active()) {
+      hasPrev_ = false;   // the load passed its test: the old selection no longer applies
+      passedTheme_.passed(loadedId_.c_str());   // a refusal of its reload will leave the settings alone
+    }
     return false;
   }
   refuseForMemory();
@@ -218,6 +230,10 @@ void ThemeMode::service(const Settings& s) {
   }
   if (!attempted_ && loadFits) {
     attempted_ = true;
+#if defined(SMALLTV_FAMILY_ESP8266)
+    // Is this a reload of a theme that passed? Said before any check can refuse it.
+    passedTheme_.loadStarts(s.themeId.c_str());
+#endif
     std::string error;
     smalltv::Theme theme;
     // After a refusal the setting no longer names the theme; say why instead.

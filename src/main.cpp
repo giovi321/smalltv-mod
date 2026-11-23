@@ -329,10 +329,11 @@ void appReleaseForTls(uint32_t needFree, uint32_t needBlock) {
 // Called by ThemeMode after it dropped a theme for lack of memory (ThemeMargin.h):
 // put the settings back to the previous mode, or at least take the theme out of
 // them, and save, so no boot loads it again. Called from the loop with the theme
-// already dropped, so the heap for the save is there (as in MqttClient).
-void appThemeRefused(bool hasPrev, uint8_t prevMode, const String& prevId, const String& refusedId) {
+// already dropped, so the heap for the save is there (as in MqttClient). The
+// refusal of a reload of a theme that passed changes nothing (ThemeRefusal.h).
+void appThemeRefused(smalltv::PassedTheme& history, bool hasPrev, uint8_t prevMode, const String& prevId, const String& refusedId) {
   smalltv::Selection sel{g_settings.themeId.c_str(), g_settings.mode, g_settings.carouselTheme};
-  if (!smalltv::afterRefusal(sel, hasPrev, prevMode, prevId.c_str(), refusedId.c_str(), MODE_THEME)) return;
+  if (!history.refused(sel, hasPrev, prevMode, prevId.c_str(), refusedId.c_str(), MODE_THEME)) return;
   g_settings.themeId = sel.themeId.c_str();
   g_settings.mode = sel.mode;
   g_settings.carouselTheme = sel.carouselTheme;

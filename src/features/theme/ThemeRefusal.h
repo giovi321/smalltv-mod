@@ -47,17 +47,39 @@ inline bool afterRefusal(Selection& current, bool hasPrev, uint8_t prevMode, con
   return true;
 }
 
-// STUB: what the code does today, a refusal always goes to afterRefusal().
+// Which theme has passed its memory check since the boot, so a later load of
+// it is known to be a reload.
+//
+// A running theme is dropped (release()) for a web request, a save or a
+// carousel page change, and loaded again at the next frame through the same
+// checks. If that reload is refused, the cause is the heap of this moment, not
+// the theme: it passed before. A refusal of a reload leaves the settings alone
+// (the theme is tried again at the next invalidate(), or at the next boot).
+// A first load (a boot, a new pick, an install or delete of the theme) that is
+// refused still goes to afterRefusal().
 class PassedTheme {
  public:
-  void loadStarts(const char*) {}
-  void passed(const char*) {}
-  void forget() {}
-  bool reload() const { return false; }
+  // A load of `id` is about to start: is it a reload of the theme that passed?
+  void loadStarts(const char* id) { reload_ = !id_.empty() && id_ == id; }
+  bool reload() const { return reload_; }
+  // `id` has loaded and passed the check (asked again at every frame after).
+  void passed(const char* id) {
+    if (id_ != id) id_ = id;
+  }
+  // A new pick, an install or a delete of the theme, or a refusal of it: the
+  // next load is a first load.
+  void forget() { id_.clear(); }
+  // The settings after a refusal; true when they changed and are to be saved.
   bool refused(Selection& current, bool hasPrev, uint8_t prevMode, const std::string& prevId,
                const std::string& refusedId, uint8_t themeMode) {
+    if (reload_) return false;
+    if (id_ == refusedId) forget();   // a refusal of another theme leaves the pass of this one
     return afterRefusal(current, hasPrev, prevMode, prevId, refusedId, themeMode);
   }
+
+ private:
+  std::string id_;
+  bool reload_ = false;
 };
 
 }  // namespace smalltv

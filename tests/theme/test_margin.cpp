@@ -734,18 +734,20 @@ static void testReloadWiring() {
   // The pass is noted where the watch ends, next to the old selection being forgotten.
   const std::string check = body(mode, "ThemeMode::checkMargin(");
   CHECK(before(check, "if (!marginWatch_.active())", "passedTheme_.passed(loadedId_.c_str());"));
-  // The refusal of a reload leaves the settings alone: no hook call, no refusal text.
+  // The refusal of a reload leaves the settings alone: the hook is given the
+  // history and its rule answers "nothing to save"; and no refusal text is kept
+  // (it would stay in /api/themes after the theme loads again).
   const std::string refuse = body(mode, "ThemeMode::refuseForMemory(");
-  CHECK(refuse.find("if (passedTheme_.reload()) return;") != std::string::npos);
-  CHECK(before(refuse, "if (passedTheme_.reload()) return;", "appThemeRefused("));
-  CHECK(before(refuse, "if (passedTheme_.reload()) return;", "refusal_ = "));
-  CHECK(before(refuse, "if (passedTheme_.reload()) return;", "refusedId_ = "));
-  CHECK(before(refuse, "pending_.drop();", "if (passedTheme_.reload()) return;"));
-  // The screen still says why (error_), so the message is drawn.
-  CHECK(before(refuse, "error_ = ", "if (passedTheme_.reload()) return;"));
-  CHECK(before(refuse, "messageDrawn_ = false;", "if (passedTheme_.reload()) return;"));
-  // A first-load refusal forgets the pass: the next try is a first load again.
-  CHECK(before(refuse, "if (passedTheme_.reload()) return;", "passedTheme_.forget();"));
+  CHECK(refuse.find("appThemeRefused(passedTheme_, hasPrev_, prevMode_, prevId_, refusedId_);") != std::string::npos);
+  CHECK(mode.find("extern void appThemeRefused(smalltv::PassedTheme& history, ") != std::string::npos);
+  CHECK(refuse.find("if (!passedTheme_.reload()) {") != std::string::npos);
+  CHECK(before(refuse, "if (!passedTheme_.reload()) {", "refusal_ = text;"));
+  CHECK(before(refuse, "if (!passedTheme_.reload()) {", "refusedId_ = loadedId_;"));
+  CHECK(before(refuse, "refusedId_ = loadedId_;", "appThemeRefused("));
+  // The screen says why in both cases (error_), so the message is drawn.
+  CHECK(before(refuse, "error_ = text;", "if (!passedTheme_.reload()) {"));
+  CHECK(before(refuse, "messageDrawn_ = false;", "appThemeRefused("));
+  CHECK(before(refuse, "pending_.drop();", "appThemeRefused("));
   // The pass outlives unload() (carousel and mode switches unload the theme).
   const std::string unload = body(mode, "void ThemeMode::unload()");
   CHECK(!unload.empty() && unload.find("passedTheme_") == std::string::npos);
@@ -772,15 +774,18 @@ static void testAppWiring() {
   const std::string app = slurp("src/main.cpp");
   const std::string hook = body(app, "void appThemeRefused(");
   CHECK(!hook.empty());
-  CHECK(hook.find("afterRefusal(") != std::string::npos);
-  CHECK(before(hook, "afterRefusal(", "saveSettings(g_settings)"));
+  // The rule is PassedTheme::refused(): it answers false (nothing to save) for
+  // the refusal of a reload, else it is afterRefusal().
+  CHECK(hook.find("history.refused(sel, ") != std::string::npos);
+  CHECK(hook.find("smalltv::PassedTheme& history") != std::string::npos);
+  CHECK(before(hook, "history.refused(", "saveSettings(g_settings)"));
   // What the check decided goes back into the settings, all three fields, and
   // only then is it saved (a hook that saves the old values changes nothing).
-  CHECK(before(hook, "afterRefusal(", "g_settings.themeId = sel.themeId.c_str();"));
+  CHECK(before(hook, "history.refused(", "g_settings.themeId = sel.themeId.c_str();"));
   CHECK(before(hook, "g_settings.themeId = sel.themeId.c_str();", "saveSettings(g_settings)"));
-  CHECK(before(hook, "afterRefusal(", "g_settings.mode = sel.mode;"));
+  CHECK(before(hook, "history.refused(", "g_settings.mode = sel.mode;"));
   CHECK(before(hook, "g_settings.mode = sel.mode;", "saveSettings(g_settings)"));
-  CHECK(before(hook, "afterRefusal(", "g_settings.carouselTheme = sel.carouselTheme;"));
+  CHECK(before(hook, "history.refused(", "g_settings.carouselTheme = sel.carouselTheme;"));
   CHECK(before(hook, "g_settings.carouselTheme = sel.carouselTheme;", "saveSettings(g_settings)"));
   CHECK(before(hook, "saveSettings(g_settings)", "appInvalidate();"));
   CHECK(hook.find("restart") == std::string::npos && hook.find("Restart") == std::string::npos);
