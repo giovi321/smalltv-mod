@@ -775,7 +775,8 @@ int main() {
     CHECK(rainWindNow(s, dir, kmh) && dir == 306 && fabsf(kmh - 39.1f) < 0.01f, "wind: cloud level read");
     CHECK(std::string(rainWindStageName(st, sizeof st)) == "ok" && rainWindHttp() == 200, "wind: status ok");
     s.rain.wind = RAIN_WIND_GROUND;      // the other level comes with the same answer
-    CHECK(rainWindNow(s, dir, kmh) && dir == 333 && fabsf(kmh - 1.6f) < 0.01f, "wind: ground level read");
+    // 1.6 km/h at the ground: no meaningful direction, no arrow (and nothing in /api/status).
+    CHECK(!rainWindNow(s, dir, kmh), "wind: ground level under 2 km/h, no arrow");
     s.rain.wind = RAIN_WIND_CLOUDS;
 
     // A failed request: the radar goes on, the last good wind stays until it ages out.
@@ -829,6 +830,52 @@ int main() {
     poll(s, "wind without a length");
     g_net.noLength = false;
     CHECK(rainWindNow(s, dir, kmh) && dir == 306, "wind: an answer without a length is read");
+
+    // The home moves (PR #142 review): the old place's wind is dropped at
+    // once, so a failed first request at the new place shows no arrow.
+    {
+      CHECK(rainWindNow(s, dir, kmh), "wind: an arrow before the move");
+      const float lat0 = s.rain.lat, lon0 = s.rain.lon;
+      s.rain.lat = 43.30f;
+      s.rain.lon = 5.37f;
+      rainInit(s);                       // what RainMode::invalidate does on a change of home
+      CHECK(!rainWindNow(s, dir, kmh) && rainWindOkMs() == 0 && !rainWindTried(), "wind: dropped with the old home");
+      g_windCode = 500;
+      poll(s, "wind fails after a move");
+      CHECK(!rainWindNow(s, dir, kmh), "wind: a failed request after a move shows no arrow");
+      g_windCode = 200;
+      poll(s, "wind after a move");
+      CHECK(rainWindNow(s, dir, kmh) && dir == 306, "wind: the new place's wind");
+      s.rain.lat = lat0;
+      s.rain.lon = lon0;
+      rainInit(s);
+      poll(s, "back home");
+      CHECK(rainStage() == RAIN_OK && rainWindNow(s, dir, kmh), "wind: back home, radar and arrow");
+    }
+
+    // Turned on while a fetch runs (PR #142 review): the running fetch makes
+    // the wind request between two of its steps, the arrow comes with it.
+    {
+      s.rain.wind = RAIN_WIND_OFF;
+      poll(s, "wind off before the switch");
+      g_newest += 2 * kStep;             // two new frames: the next fetch has frame steps
+      g_fakeMillis += (s.rain.pollSec + RAIN_STALE_SEC) * 1000UL + 1000;   // the old wind is gone
+      CHECK(!rainWindNow(s, dir, kmh), "wind: none before the switch");
+      g_net.log.clear();
+      rainForceRefresh();
+      rainService(s);                    // the fetch starts
+      rainService(s);                    // the frame list
+      CHECK(rainFetching() && windRequests() == 0, "wind: a fetch running without the wind step");
+      s.rain.wind = RAIN_WIND_CLOUDS;    // the save; rainForceRefresh() is ignored during a fetch
+      rainForceRefresh();
+      rainService(s);                    // the wind, before the next frame
+      CHECK(windRequests() == 1 && g_net.log.back().find("open-meteo") != std::string::npos,
+            "wind: requested within the running fetch");
+      CHECK(rainWindNow(s, dir, kmh), "wind: the arrow comes with the running fetch");
+      for (int i = 0; i < 40 && rainFetching(); i++) { rainService(s); g_fakeMillis += 25000; checkConsistent("wind mid-fetch"); }
+      CHECK(rainStage() == RAIN_OK && windRequests() == 1 && rainFrameTime(rainCount() - 1) == g_newest,
+            "wind: one request, and the fetch ends with the new frames");
+    }
 
     // Turned off: no more requests, no arrow.
     s.rain.wind = RAIN_WIND_OFF;

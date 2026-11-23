@@ -25,9 +25,10 @@ bool            rainFetching();         // a fetch is in progress
 bool            rainStale(uint32_t pollSec, uint32_t nowUnix);
 
 // The wind arrow (rain.wind): the wind of the chosen level, as it comes
-// (direction FROM, degrees from north) with its speed in km/h. False: the
-// arrow is off, there is no usable answer yet, or the last one is older than
-// the refresh period plus RAIN_STALE_SEC.
+// (direction FROM, degrees from north) with its speed in km/h: the arrow on
+// screen, and what /api/status reports. False: the arrow is off, there is no
+// usable answer for this location yet, the last one is older than the
+// refresh period plus RAIN_STALE_SEC, or the wind is under RAIN_WIND_MIN_KMH.
 bool            rainWindNow(const Settings& s, int16_t& dirFrom, float& kmh);
 
 // ---- diagnostics, reported by /api/status ---------------------------------

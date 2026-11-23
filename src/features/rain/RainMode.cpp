@@ -470,12 +470,13 @@ static void drawCities(const Settings& s, Arduino_GFX* gfx) {
 // ---- the wind arrow, under the range header ---------------------------------
 // Where the rain is heading (the arrow points downwind), and the wind speed
 // under it: the number at the header size, the unit small. Nothing while the
-// wind is off, unknown, too old, or too light to have a direction.
+// wind is off, unknown, too old, or too light to have a direction
+// (rainWindNow).
 // True when drawn (the Open-Meteo credit goes with it).
 static bool drawWind(const Settings& s, Arduino_GFX* gfx, uint8_t ht) {
   int16_t dir;
   float kmh;
-  if (!rainWindNow(s, dir, kmh) || kmh < RAIN_WIND_MIN_KMH) return false;
+  if (!rainWindNow(s, dir, kmh)) return false;
   const int half = ht >= 2 ? 11 : 7;           // px from the centre to the tip
   const int cx = 4 + half;
   const int cy = 3 + 8 * ht + 4 + half;        // just under the range header
@@ -718,7 +719,8 @@ void RainMode::invalidate(const Settings& s) {
     V->animIdx = 0;
   } else if (s.rain.wind != RAIN_WIND_OFF && V->wind == RAIN_WIND_OFF) {
     rainForceRefresh();   // the arrow just turned on: poll now, not in up to an hour
-                          // (frames already on disk are not downloaded again)
+                          // (frames already on disk are not downloaded again); a
+                          // running fetch picks up the wind step itself (rainService)
   }
   V->wind = s.rain.wind;
   V->renderedOk = 0xFFFFFFFF;

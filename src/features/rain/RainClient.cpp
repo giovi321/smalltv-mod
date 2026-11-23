@@ -50,7 +50,7 @@
 // steps the main loop animates the screen (a step takes ~2-25 s: the list,
 // then one download + decode per frame). Without the split the screen froze
 // for ~4.5 min at boot (the web server and the rendering share one task).
-enum RainStep : uint8_t { STEP_IDLE, STEP_WIND, STEP_LIST, STEP_FRAME };
+enum RainStep : uint8_t { STEP_IDLE, STEP_LIST, STEP_FRAME };
 
 // The frames of the fetch in progress (kept between the JSON pass and the
 // download loop): MAX_RAIN_FRAMES entries allocated when the list step
@@ -124,6 +124,7 @@ struct RainState {
   uint32_t  windOkMs = 0;           // millis() of the last good answer (0 = never)
   RainStage windStage = RAIN_IDLE;  // outcome of the last wind request
   int       windHttp = 0;
+  bool      windDone = false;       // the running fetch made its wind request
 };
 static RainState* S = nullptr;
 
@@ -350,6 +351,13 @@ void rainInit(const Settings& s) {
   S->lastHttp = 0;
   S->lastTryMs = 0;
   S->lastUrl = String();
+  // The wind is the old location's too (rainInit runs on a change of home):
+  // never shown over the new one, even if the next wind request fails.
+  for (uint8_t l = 0; l < RAIN_WIND_LEVELS; l++) { S->windDir[l] = -1; S->windKmh10[l] = 0; }
+  S->windOkMs = 0;
+  S->windStage = RAIN_IDLE;
+  S->windHttp = 0;
+  S->windDone = false;
   // /rain is created by the first fetch (rainService), not here: rainInit
   // runs at boot for every image, rain on or off.
 }
@@ -559,10 +567,12 @@ static bool fetchWind(const Settings& s) {
 }
 
 bool rainWindNow(const Settings& s, int16_t& dirFrom, float& kmh) {
+  // Same rule as the arrow everywhere (screen and /api/status).
   if (!S || s.rain.wind == RAIN_WIND_OFF || s.rain.wind > RAIN_WIND_LEVELS || !S->windOkMs) return false;
   if (millis() - S->windOkMs > ((uint32_t)s.rain.pollSec + RAIN_STALE_SEC) * 1000UL) return false;
   const uint8_t l = s.rain.wind - 1;
   if (S->windDir[l] < 0) return false;
+  if (S->windKmh10[l] < (uint16_t)lroundf(RAIN_WIND_MIN_KMH * 10.0f)) return false;   // no meaningful direction
   dirFrom = S->windDir[l];
   kmh = S->windKmh10[l] / 10.0f;
   return true;
@@ -997,21 +1007,24 @@ void rainService(const Settings& s) {
     S->stage = RAIN_FETCHING;
     heapReset();
     rainHeapSample();
-    S->step = s.rain.wind != RAIN_WIND_OFF ? STEP_WIND : STEP_LIST;
+    S->windDone = false;
+    S->step = STEP_LIST;
     return;   // the requests go out on the next calls: the screen animates first
   }
 
   // One step per call: the main loop animates the screen in between.
   S->heapPhase = 'S';
   rainHeapSample();
-  if (S->step == STEP_WIND) {
-    // Its own step, before the list: a failure only costs the arrow (the
-    // last good wind ages out), never the radar.
+  // The wind, once per fetch, in a step of its own: first, before the list;
+  // or, when the arrow is turned on during a fetch, between two steps of it
+  // (the arrow then appears within this fetch, not the next one). A failure
+  // only costs the arrow (the last good wind ages out), never the radar.
+  if (s.rain.wind != RAIN_WIND_OFF && !S->windDone) {
+    S->windDone = true;
     S->heapPhase = 'W';
     fetchWind(s);
     rainHeapSample();
     S->heapPhase = 'S';
-    S->step = STEP_LIST;
     return;
   }
   if (S->step == STEP_LIST) {
