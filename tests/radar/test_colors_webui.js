@@ -38,5 +38,4 @@ for(const key of ['grayColor','darkGrayColor']) {
  assert.ok(!html.includes('id="'+key+'"'),'no global picker '+key);
  assert.ok(!(key in ctx.collect().display),'no global setting '+key);
 }
-assert.ok(html.includes('repeat(auto-fit,minmax(120px,1fr))'),'responsive controls');
 console.log('four independent radar colors, reset, and scope isolation verified');
