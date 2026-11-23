@@ -8,6 +8,7 @@
 // used below. Both ESP32 targets share the Arduino core 3.x branch.
 #pragma once
 #include "Target.h"
+#include "CrashRecord.h"
 #include <Arduino.h>
 #include <time.h>
 
@@ -165,17 +166,12 @@ void platformOnTimeSync(void (*cb)());
 // platformCrashRecordClear() or until power is really lost; no flash is
 // written. The ESP32 targets keep no record: platformCrashRecordGet() returns
 // false.
-struct PlatformCrashRecord {
-  char     reason[24];     // see crashReasonLabel() in CrashRecord.h
-  char     fw[16];         // FW_VERSION of the image that crashed
-  bool     hasRegisters;   // false for abort and stack overflow: the three below are not known
-  uint32_t exccause;       // Xtensa EXCCAUSE
-  uint32_t epc1;           // faulting PC, for addr2line
-  uint32_t excvaddr;       // faulting address
-  uint32_t uptimeS;        // seconds up before the crash, valid iff uptimeKnown
-  bool     uptimeKnown;    // false for the hardware watchdog (no callback runs)
-};
-// Call once at boot, before anything can reset the chip again.
+// The fields are described at CrashSnapshot (CrashRecord.h).
+typedef CrashSnapshot PlatformCrashRecord;
+// Call once at boot, before anything can reset the chip again. On the ESP8266
+// it also starts the 100 ms sampler of the heap lows.
 void platformCrashRecordBegin();
+// Start the lows over (after a status reply). No-op on the ESP32 targets.
+void platformCrashLowsReset();
 bool platformCrashRecordGet(PlatformCrashRecord& out);
 void platformCrashRecordClear();

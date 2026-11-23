@@ -26,6 +26,11 @@ static_assert(decltype(hasUpdateOff<StatusData>(0))::value, "StatusData has no g
 static_assert(!decltype(hasUpdateOff<StatusData>(0))::value, "StatusData carries githubUpdateOff in a build with the update on");
 #endif
 
+static void snap(CrashSnapshot& s, const char* reason, const char* fw) {
+  std::snprintf(s.reason, sizeof s.reason, "%s", reason);
+  std::snprintf(s.fw, sizeof s.fw, "%s", fw);
+}
+
 // wgStatusJson() as 3.2.1 had it (WgClient.cpp), for a build with and
 // without the tunnel.
 static void fillWg(JsonObject o, const StatusWg& w) {
@@ -334,17 +339,95 @@ int main() {
     checked++;
   }
   {  // lastCrash: after the 3.2.1 keys, registers left out when empty
-    StatusCrash k;
-    k.reason = "Exception"; k.fw = "3.2.1"; k.exccause = "0x1d"; k.epc = "0x40201234"; k.addr = "0x00000000";
-    k.hasUptime = true; k.uptime = 77;
+    // The writer reads the platform's record as it is (CrashSnapshot, CrashRecord.h): no copy
+    // into a second struct, and the register hex is written digit by digit.
+    CrashSnapshot k = {};
+    snap(k, "Exception", "3.2.1");
+    k.hasRegisters = true; k.exccause = 0x1d; k.epc1 = 0x40201234; k.excvaddr = 0;
+    k.uptimeKnown = true; k.uptimeS = 77;
     StringSink s1;
     { PieceWriter<5> out(s1); writeStatusCrash(out, k); out.flush(); }
     assert(s1.text == ",\"lastCrash\":{\"reason\":\"Exception\",\"fw\":\"3.2.1\",\"exccause\":\"0x1d\",\"epc\":\"0x40201234\",\"addr\":\"0x00000000\",\"uptime\":77}");
-    StatusCrash a;
-    a.reason = "Abort/out of memory"; a.fw = "3.2.1";
+    // registers are written whatever the values: a small cause is not padded, the addresses are 8 digits
+    CrashSnapshot r = {};
+    snap(r, "Exception", "3.2.1");
+    r.hasRegisters = true; r.exccause = 0; r.epc1 = 0xfedcba98; r.excvaddr = 0x00000a5f;
+    StringSink s1b;
+    { PieceWriter<128> out(s1b); writeStatusCrash(out, r); out.flush(); }
+    assert(s1b.text == ",\"lastCrash\":{\"reason\":\"Exception\",\"fw\":\"3.2.1\",\"exccause\":\"0x0\",\"epc\":\"0xfedcba98\",\"addr\":\"0x00000a5f\"}");
+    r.exccause = 0x1c0; r.excvaddr = 0x0;
+    StringSink s1c;
+    { PieceWriter<128> out(s1c); writeStatusCrash(out, r); out.flush(); }
+    assert(s1c.text == ",\"lastCrash\":{\"reason\":\"Exception\",\"fw\":\"3.2.1\",\"exccause\":\"0x1c0\",\"epc\":\"0xfedcba98\",\"addr\":\"0x00000000\"}");
+    // the digits agree with the printf the handler used before ("0x%x", "0x%08x") for every length
+    const uint32_t samples[] = {0, 1, 9, 10, 15, 16, 255, 256, 0xfff, 0x1000, 0xffff, 0x10000, 0xfffff, 0x100000,
+                                0xffffff, 0x1000000, 0xfffffff, 0x10000000, 0x7fffffff, 0x80000000u, 0xffffffffu, 0x40201abc};
+    for (uint32_t v : samples) {
+      r.exccause = v; r.epc1 = v; r.excvaddr = v;
+      char c[12], p[12];
+      std::snprintf(c, sizeof c, "0x%x", (unsigned)v);
+      std::snprintf(p, sizeof p, "0x%08x", (unsigned)v);
+      StringSink sv;
+      { PieceWriter<128> out(sv); writeStatusCrash(out, r); out.flush(); }
+      const std::string want = std::string(",\"lastCrash\":{\"reason\":\"Exception\",\"fw\":\"3.2.1\",\"exccause\":\"") + c +
+                               "\",\"epc\":\"" + p + "\",\"addr\":\"" + p + "\"}";
+      if (sv.text != want) { std::printf("FAIL register hex for 0x%x\n got  %s\n want %s\n", (unsigned)v, sv.text.c_str(), want.c_str()); return 1; }
+    }
+    {  // a minimum above 8 digits is cut at 8: the 12-byte buffer is never overrun
+      StringSink sh;
+      { PieceWriter<128> out(sh); statusout::hex(out, 0xabc, 20); out.flush(); }
+      assert(sh.text == "\"0x00000abc\"");
+    }
+    CrashSnapshot a = {};
+    snap(a, "Abort/out of memory", "3.2.1");
+    a.exccause = 28; a.epc1 = 0x40201234;   // not known for an abort (hasRegisters false): left out
     StringSink s2;
     { PieceWriter<128> out(s2); writeStatusCrash(out, a); out.flush(); }
     assert(s2.text == ",\"lastCrash\":{\"reason\":\"Abort/out of memory\",\"fw\":\"3.2.1\"}");
+    // with the measured detail: after the keys above, hex computed, unused trace slots left out
+    CrashSnapshot d = {};
+    snap(d, "Abort/out of memory", "3.2.1");
+    d.uptimeKnown = true; d.uptimeS = 91;
+    d.hasDetail = true; d.heap = 3456; d.hasBlock = true; d.maxBlock = 576;
+    d.failSize = 756; d.failAddr = 0x40201abc;
+    d.hasLows = true; d.lowHeap = 3000; d.lowBlk = 512;
+    d.trace[0] = 0x40201000; d.trace[1] = 0x4010ffff; d.more = 2;
+    StringSink s3;
+    { PieceWriter<7> out(s3); writeStatusCrash(out, d); out.flush(); }
+    assert(s3.text == ",\"lastCrash\":{\"reason\":\"Abort/out of memory\",\"fw\":\"3.2.1\",\"uptime\":91,\"heap\":3456,\"maxBlock\":576,"
+                      "\"failSize\":756,\"failAddr\":\"0x40201abc\",\"lowHeap\":3000,\"lowBlk\":512,"
+                      "\"trace\":[\"0x40201000\",\"0x4010ffff\"],\"more\":2}");
+    // unknown values are left out, never written as 0: no block, no failed allocation, no lows, no trace
+    CrashSnapshot e = {};
+    snap(e, "Exception", "3.2.1");
+    e.hasDetail = true; e.heap = 7000;
+    StringSink s4;
+    { PieceWriter<128> out(s4); writeStatusCrash(out, e); out.flush(); }
+    assert(s4.text == ",\"lastCrash\":{\"reason\":\"Exception\",\"fw\":\"3.2.1\",\"heap\":7000,\"trace\":[]}");   // no "more" key when 0
+    // A record taken from the hardware watchdog has no detail, but it still
+    // knows how many crashes came before it: "more" is written outside the
+    // detail block, whenever it is not 0 (review of #137, point 1).
+    CrashSnapshot h = {};
+    snap(h, "Hardware watchdog", "3.2.1");
+    h.hasRegisters = true; h.exccause = 28; h.epc1 = 0x40201234;
+    h.more = 2;
+    StringSink s5;
+    { PieceWriter<128> out(s5); writeStatusCrash(out, h); out.flush(); }
+    assert(s5.text == ",\"lastCrash\":{\"reason\":\"Hardware watchdog\",\"fw\":\"3.2.1\",\"exccause\":\"0x1c\","
+                      "\"epc\":\"0x40201234\",\"addr\":\"0x00000000\",\"more\":2}");
+    h.more = 1;   // the smallest non-zero count is written too
+    StringSink s6;
+    { PieceWriter<5> out(s6); writeStatusCrash(out, h); out.flush(); }
+    assert(s6.text.size() > 6 && s6.text.compare(s6.text.size() - 9, 9, "\"more\":1}") == 0);
+    h.more = 0;   // none before: no key
+    StringSink s7;
+    { PieceWriter<128> out(s7); writeStatusCrash(out, h); out.flush(); }
+    assert(s7.text.find("more") == std::string::npos);
+    // and a record with detail and a count: still once, at the end
+    d.more = 1;
+    StringSink s8;
+    { PieceWriter<128> out(s8); writeStatusCrash(out, d); out.flush(); }
+    assert(s8.text.size() > 9 && s8.text.compare(s8.text.size() - 9, 9, "\"more\":1}") == 0 && s8.text.find("more") == s8.text.rfind("more"));
   }
   {  // fetch: nothing before the first theme data fetch has ended, then the
      // count of refusals and how the last one ended
@@ -366,7 +449,7 @@ int main() {
     std::stringstream file;
     file << in.rdbuf();
     const std::string code = file.str();
-    const size_t crash = code.find("smalltv::writeStatusCrash(out, k);");
+    const size_t crash = code.find("smalltv::writeStatusCrash(out, cr);");
     const size_t fetch = code.find("statusFetch(out);");
     const size_t tickers = code.find("smalltv::writeStatusTickers(");
     assert(crash != std::string::npos && fetch != std::string::npos && tickers != std::string::npos && crash < fetch && fetch < tickers);

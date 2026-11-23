@@ -19,6 +19,7 @@
 // record, writeStatusFetch() if the build has themes, writeStatusTickers() if the build has
 // the ticker, writeStatusRadar() if it has the radar, and writeStatusEnd().
 #include "JsonStream.h"
+#include "CrashRecord.h"   // CrashSnapshot: the record of the last crash, written as it is
 
 namespace smalltv {
 // The Wi-Fi tunnel (WgClient.cpp). Where it is not built only the first five
@@ -50,14 +51,6 @@ struct StatusData {
   int bl = 0;                   // backlight level now, 0..255
   uint32_t heap = 0, maxblk = 0, contstk = 0, uptime = 0;
   StatusWg wg;
-};
-// The record of the last crash (Platform.h). Only written when there is one.
-// The register strings are left out when empty.
-struct StatusCrash {
-  const char *reason = "", *fw = "";
-  const char *exccause = "", *epc = "", *addr = "";
-  bool hasUptime = false;
-  uint32_t uptime = 0;
 };
 struct StatusTicker {
   const char* symbol = "";
@@ -116,6 +109,25 @@ template <class Out, class T> void member(Out& out, const char* key, T v) {
   jsonout::raw(out, key);
   jsonout::value(out, v);
 }
+// `"0x40201234"` as a JSON string, lower case, at least `minDigits` digits
+// (8: `"0x%08x"`, 1: `"0x%x"`). The digits are computed, not looked up or
+// formatted: no string constant takes RAM on the ESP8266, and no stack buffer
+// is bigger than the one value.
+template <class Out> void hex(Out& out, uint32_t v, unsigned minDigits = 8) {
+  unsigned n = 1;   // the digits of v without leading zeros
+  while (n < 8 && (v >> (4 * n))) n++;
+  if (n < minDigits) n = minDigits < 8 ? minDigits : 8;
+  char text[12];
+  text[0] = '"';
+  text[1] = '0';
+  text[2] = 'x';
+  for (unsigned i = 0; i < n; i++) {
+    const unsigned d = (v >> (4 * (n - 1 - i))) & 15;
+    text[3 + i] = char(d < 10 ? '0' + d : 'a' + d - 10);
+  }
+  text[3 + n] = '"';
+  out.write(reinterpret_cast<const uint8_t*>(text), 4 + n);
+}
 }
 
 // Everything up to and including "wg". No ArduinoJson document holds more
@@ -169,14 +181,49 @@ template <class Out> void writeStatusHead(Out& out, const StatusData& d) {
 }
 
 // `,"lastCrash":{...}`, added after the 3.2.1 keys: nothing that read the reply before reads it.
-template <class Out> void writeStatusCrash(Out& out, const StatusCrash& k) {
+// The record is read where it is, no copy of it is made: the registers are
+// written as hex digits here (the cause as `0x%x`, the addresses as `0x%08x`),
+// and each detail value is left out when it was not measured, never made up as 0.
+template <class Out> void writeStatusCrash(Out& out, const CrashSnapshot& k) {
   using statusout::member;
-  member(out, PSTR(",\"lastCrash\":{\"reason\":"), k.reason);
-  member(out, PSTR(",\"fw\":"), k.fw);
-  if (k.exccause[0]) member(out, PSTR(",\"exccause\":"), k.exccause);
-  if (k.epc[0]) member(out, PSTR(",\"epc\":"), k.epc);
-  if (k.addr[0]) member(out, PSTR(",\"addr\":"), k.addr);
-  if (k.hasUptime) member(out, PSTR(",\"uptime\":"), k.uptime);
+  const char* const reason = k.reason;   // not the array: member() takes a const char* here
+  const char* const fw = k.fw;
+  member(out, PSTR(",\"lastCrash\":{\"reason\":"), reason);
+  member(out, PSTR(",\"fw\":"), fw);
+  if (k.hasRegisters) {
+    jsonout::raw(out, PSTR(",\"exccause\":"));
+    statusout::hex(out, k.exccause, 1);
+    jsonout::raw(out, PSTR(",\"epc\":"));
+    statusout::hex(out, k.epc1);
+    jsonout::raw(out, PSTR(",\"addr\":"));
+    statusout::hex(out, k.excvaddr);
+  }
+  if (k.uptimeKnown) member(out, PSTR(",\"uptime\":"), k.uptimeS);
+  if (k.hasDetail) {   // added after 3.5.0; the keys above are unchanged
+    member(out, PSTR(",\"heap\":"), k.heap);
+    if (k.hasBlock) member(out, PSTR(",\"maxBlock\":"), k.maxBlock);
+    if (k.failSize) {
+      member(out, PSTR(",\"failSize\":"), k.failSize);
+      jsonout::raw(out, PSTR(",\"failAddr\":"));
+      statusout::hex(out, k.failAddr);
+    }
+    if (k.hasLows) {
+      member(out, PSTR(",\"lowHeap\":"), k.lowHeap);
+      member(out, PSTR(",\"lowBlk\":"), k.lowBlk);
+    }
+    jsonout::raw(out, PSTR(",\"trace\":["));
+    bool first = true;
+    for (uint32_t t : k.trace) {
+      if (!t) continue;
+      if (!first) jsonout::raw(out, PSTR(","));
+      first = false;
+      statusout::hex(out, t);
+    }
+    jsonout::raw(out, PSTR("]"));
+  }
+  // Outside the detail block: a record made from the hardware watchdog has no
+  // detail but still knows how many crashes came before it.
+  if (k.more) member(out, PSTR(",\"more\":"), k.more);
   jsonout::raw(out, PSTR("}"));
 }
 

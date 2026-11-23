@@ -294,19 +294,7 @@ static void handleStatus() {
   smalltv::PieceWriter<128> out(sink);
   smalltv::writeStatusHead(out, d);
   PlatformCrashRecord cr;   // last crash, kept in RTC memory until cleared or power-cycled
-  if (platformCrashRecordGet(cr)) {
-    char cause[12], epc[12], addr[12];
-    snprintf(cause, sizeof cause, "0x%x", (unsigned)cr.exccause);
-    snprintf(epc, sizeof epc, "0x%08x", (unsigned)cr.epc1);
-    snprintf(addr, sizeof addr, "0x%08x", (unsigned)cr.excvaddr);
-    smalltv::StatusCrash k;
-    k.reason = cr.reason;
-    k.fw = cr.fw;
-    if (cr.hasRegisters) { k.exccause = cause; k.epc = epc; k.addr = addr; }
-    k.hasUptime = cr.uptimeKnown;
-    k.uptime = cr.uptimeS;
-    smalltv::writeStatusCrash(out, k);
-  }
+  if (platformCrashRecordGet(cr)) smalltv::writeStatusCrash(out, cr);   // the record as it is: no second copy on the stack
 #if WITH_THEME
   statusFetch(out);
 #endif
@@ -367,6 +355,8 @@ static void handleStatus() {
   // up; otherwise the web server writes the last chunk (a chunked reply only:
   // an HTTP/1.0 reply just ends when the connection closes).
   if (smalltv::endReply(out, sink) && !server.requestIsHttp10()) server.sendContent("", 0);
+  // The lows a crash records are not reset here: they cover the time since
+  // boot or since the last crash clear, however often the status is read.
 }
 
 // Fingerprint of everything network-identity related: the WiFi list and the
@@ -490,6 +480,7 @@ static void handleReboot() {
 static void handleCrashClear() {
   if (!requireAuth()) return;
   platformCrashRecordClear();
+  platformCrashLowsReset();   // a new record starts with new lows
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
