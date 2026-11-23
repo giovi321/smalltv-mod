@@ -24,6 +24,7 @@ import datetime as dt
 import decimal
 import json
 import math
+import os
 import re
 import struct
 import sys
@@ -39,7 +40,19 @@ except ImportError:  # validate/build of shape-only themes still work
 # Constants and palettes
 # --------------------------------------------------------------------------
 MAX_PACKAGE, MAX_ENTRIES, MAX_MANIFEST = 3 * 1024 * 1024, 256, 16384
-MAX_LAYERS, MAX_BINDINGS, MAX_STOPS, MAX_TRANSLATION_BYTES = 32, 8, 8, 1024
+MAX_BINDINGS, MAX_STOPS, MAX_TRANSLATION_BYTES = 8, 8, 1024
+
+
+def max_layers():
+    """The layer limit of the firmware the theme is for: 32, the release images',
+    unless SMALLTV_THEME_MAX_LAYERS names a build's -DTHEME_MAX_LAYERS (1 to 255).
+    tools/theme_native.py reads it the same way (this folder stands alone)."""
+    value = os.environ.get('SMALLTV_THEME_MAX_LAYERS', '32')
+    if not re.fullmatch(r'[0-9]{1,4}', value) or not 1 <= int(value) <= 255:
+        raise ValueError('SMALLTV_THEME_MAX_LAYERS must be a number from 1 to 255')
+    return int(value)
+
+
 MAX_SHOW_RULES = 36  # the firmware's default (THEME_MAX_SHOW_RULES); a build may raise it
 ANCHORS = ['top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right',
            'bottom-left', 'bottom-center', 'bottom-right']
@@ -409,8 +422,9 @@ def validate(theme, assets=None):
                 fields.append(f'{s.get("id")}.{f.get("id")}')
 
     layers = theme.get('layers')
-    if not isinstance(layers, list) or len(layers) > MAX_LAYERS:
-        fail('layers', 'expected an array with at most 32 layers')
+    limit = max_layers()
+    if not isinstance(layers, list) or len(layers) > limit:
+        fail('layers', f'expected an array with at most {limit} layers')
         return errors
     ids, translation_bytes, show_rules = set(), 0, 0
     for i, o in enumerate(layers):

@@ -737,6 +737,53 @@ static void testShowRules() {
   assert(sky.loadLargest <= LargestBlockBudget);
 }
 
+// The layer limit (THEME_MAX_LAYERS, default 32). The 5,120 B load budget cannot
+// hold for ordinary layers at 31 or 32 of them on main already (the sky-shaped
+// theme above is 8 KB before its first rule), so a raised cap is held to what it
+// can keep: no single request over the largest-block budget however many layers
+// there are, and what one more layer costs. The load peak is printed.
+//   expected: EXPECTED_MAX_LAYERS says what the build under test must have
+//   (the header defines THEME_MAX_LAYERS itself when the build does not).
+#ifndef EXPECTED_MAX_LAYERS
+#define EXPECTED_MAX_LAYERS 32
+#endif
+static void testLayerCap() {
+  assert(MaxLayers == size_t(EXPECTED_MAX_LAYERS));
+  // The lightest layer there is: a plain rectangle, no text, no rule, no binding.
+  auto usage = [](size_t count) { return showUsage(showManifest(ShowShape{int(count), 0, 0, 1}, "weather.temperature", false)); };
+  const ShowUsage one = usage(1);
+  const ShowUsage cap = usage(MaxLayers);
+  const ShowUsage under = usage(MaxLayers - 1);
+  fprintf(stderr, "layers at the cap (%zu): load peak %zu B (budget %zu B, %zu B with one layer), loaded %zu B, largest block %zu B (budget %zu B), running %zu B (budget %zu B)\n",
+          MaxLayers, cap.loadPeak, LoadPeakBudget, one.loadPeak, cap.loaded, cap.loadLargest, LargestBlockBudget, cap.running, RunningBudget);
+  if (MaxLayers > 32) {
+    const ShowUsage at32 = usage(32);
+    fprintf(stderr, "layers at 32: load peak %zu B, loaded %zu B, largest block %zu B, running %zu B\n", at32.loadPeak, at32.loaded, at32.loadLargest, at32.running);
+  }
+  // However many layers, no single request is over the budget.
+  assert(cap.loadLargest <= LargestBlockBudget);
+  // Each layer past the first costs its record and a little for the block
+  // headers and the list of blocks (a whole block is never opened for one layer:
+  // the layers are reserved at the count the manifest declares). The running cost
+  // adds the engine's state for the layer.
+  const size_t layerBound = sizeof(Layer) + 16, runningBound = sizeof(Layer) + sizeof(LayerState) + 16;
+  fprintf(stderr, "one more layer: loaded %zu B (bound %zu B), load peak %zu B, running %zu B (bound %zu B)\n",
+          cap.loaded - under.loaded, layerBound, cap.loadPeak - under.loadPeak, cap.running - under.running, runningBound);
+  assert((cap.loaded - one.loaded) <= (MaxLayers - 1) * layerBound);
+  // The load peak grows a little faster than what is kept: while it loads, the
+  // parser also holds a range entry for each layer (measured on the host build at 32
+  // layers: 152 B a layer on average, 158 B at 40, against 112 to 128 B kept), so
+  // its bound is wider.
+  const size_t peakBound = sizeof(Layer) + 48;
+  assert((cap.loadPeak - one.loadPeak) <= (MaxLayers - 1) * peakBound);
+  assert((cap.running - one.running) <= (MaxLayers - 1) * runningBound);
+  // And the cap is the cap: one layer more is refused, with the limit named.
+  Theme theme;
+  std::string error;
+  assert(!parseTheme(showManifest(ShowShape{int(MaxLayers) + 1, 0, 0, 1}, "weather.temperature", false), theme, error));
+  assert(error == "layers: expected an array of at most " + std::to_string(MaxLayers) + " layers");
+}
+
 // A field's `decimals` (spec 2) is one byte in the field's record, and the
 // parser must not allocate for it. Four sources of eight fields is the most a
 // theme may declare; each field is stored as written, so the size of the
@@ -1048,6 +1095,7 @@ int main(int argc, char** argv) {
   if (sizeof(ShowRule) > 40) fprintf(stderr, "sizeof(ShowRule) %zu\n", sizeof(ShowRule));
   assert(sizeof(ShowRule) <= 40);
   testShowRules();
+  testLayerCap();
   testWorstValidSource();
   testDataReply();
   testDataReplyLists();

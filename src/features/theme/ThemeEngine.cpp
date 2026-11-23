@@ -1209,8 +1209,8 @@ __attribute__((noinline)) static bool parseHeader(JsonObjectConst root, const Ma
       t.data.push_back(std::move(data));
     }
   }
-  // ---- layers: 0-32, drawn back to front in array order ----
-  if (!scan.layersFound || scan.layerCount > MaxLayers) return r.fail("layers", "expected an array of at most 32 layers");
+  // ---- layers: 0 to MaxLayers (32 by default), drawn back to front in array order ----
+  if (!scan.layersFound || scan.layerCount > MaxLayers) return r.fail("layers", "expected an array of at most " SMALLTV_STRINGIFY(THEME_MAX_LAYERS) " layers");
   return true;
 }
 // One element of the root `layers` array, as its own document.

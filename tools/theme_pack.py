@@ -10,10 +10,10 @@ import re
 import struct
 import tempfile
 try:
-    from .theme_native import validate_manifest, validate_package
+    from .theme_native import max_layers, validate_manifest, validate_package
     from .theme_font import check_grain, compile_font
 except ImportError:
-    from theme_native import validate_manifest, validate_package
+    from theme_native import max_layers, validate_manifest, validate_package
     from theme_font import check_grain, compile_font
 from PIL import Image
 
@@ -193,8 +193,9 @@ def build(directory):
     if display.get('width') != 240 or display.get('height') != 240:
         raise ValueError('Canvas must be 240x240')
     layers = manifest.get('layers')
-    if not isinstance(layers, list) or len(layers) > 32:
-        raise ValueError('Expected at most 32 layers')
+    limit = max_layers()
+    if not isinstance(layers, list) or len(layers) > limit:
+        raise ValueError(f'Expected at most {limit} layers')
     json_bytes = json.dumps(manifest, separators=(',', ':'), ensure_ascii=True).encode('utf-8')
     if len(json_bytes) > 16384:
         raise ValueError('Manifest exceeds 16 KiB')

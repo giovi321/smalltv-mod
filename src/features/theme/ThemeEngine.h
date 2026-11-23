@@ -10,7 +10,20 @@
 namespace smalltv {
 constexpr int CanvasSize = 240;
 constexpr size_t MaxManifest = 16384;
-constexpr size_t MaxLayers = 32;
+#define SMALLTV_STRINGIFY_(x) #x
+#define SMALLTV_STRINGIFY(x) SMALLTV_STRINGIFY_(x)
+// The most layers a theme may have. Release images allow 32, the format's limit
+// (a package with more layers does not load on them). A build may raise it:
+// -DTHEME_MAX_LAYERS=<n>, 1 to 255 (a show rule keeps its layer in one byte).
+// A layer costs RAM: its record in the theme and its state in the engine, and
+// 2 bytes of stack in render() (its handle array). The packer and the skill
+// check against the same number from SMALLTV_THEME_MAX_LAYERS.
+#ifndef THEME_MAX_LAYERS
+#define THEME_MAX_LAYERS 32
+#endif
+static_assert(THEME_MAX_LAYERS >= 1 && THEME_MAX_LAYERS <= 255,
+              "THEME_MAX_LAYERS must be 1 to 255 (a show rule keeps its layer in one byte)");
+constexpr size_t MaxLayers = THEME_MAX_LAYERS;
 constexpr size_t MaxDataSources = 4;
 constexpr size_t MaxDataFields = 8;
 // The RAM all non-English texts of one theme may take together (spec 2
@@ -146,8 +159,6 @@ constexpr uint8_t ShowAgeField = 255;
 #ifndef THEME_MAX_SHOW_RULES
 #define THEME_MAX_SHOW_RULES 36
 #endif
-#define SMALLTV_STRINGIFY_(x) #x
-#define SMALLTV_STRINGIFY(x) SMALLTV_STRINGIFY_(x)
 constexpr size_t MaxShowRules = THEME_MAX_SHOW_RULES;
 bool parseFiniteNumber(const std::string& value, double& number);
 int resolveNumericBinding(const NumericBinding& binding, double value, int lo, int hi);

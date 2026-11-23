@@ -78,7 +78,7 @@ my-clock/
 
 Start from `scaffold` for digital faces, or write `theme.json` directly. Rules that matter:
 
-- Layers draw in array order, back to front. Max 32 layers, unique IDs.
+- Layers draw in array order, back to front. Max 32 layers on release images (a firmware build can raise it; set `SMALLTV_THEME_MAX_LAYERS` to the build's limit), unique IDs.
 - Text is the built-in 5×8 ASCII bitmap font, scaled: `size` is the cell height (8–96),
   cell width `ceil(size*6/8)`, text width = characters × cell width. Printable ASCII only:
   no `°`, `€`, accents or emoji (draw a small circle for a degree sign). Sizes that are
@@ -136,7 +136,7 @@ sources: the TV will poll those URLs, so only install themes the user trusts.
 
 ## Hard limits (quick list)
 
-240×240 canvas · 32 layers · manifest 16 KiB · package 3 MiB and 256 entries · 16 installed
+240×240 canvas · 32 layers (release images) · manifest 16 KiB · package 3 MiB and 256 entries · 16 installed
 themes · text 1–128 printable ASCII bytes · up to 4 data sources × 8 fields, response
 ≤ 2 KiB, interval ≥ 10 s · animation 1–240 frames, 1–15 FPS · up to 8 bindings per layer ·
 colors exactly `#RRGGBB`. No expressions, conditions, arrays, history or custom fonts.

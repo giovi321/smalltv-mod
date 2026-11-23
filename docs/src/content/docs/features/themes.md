@@ -1059,7 +1059,7 @@ preview it with the `--data` workflow documented above.
 | Item | V1 limit |
 | --- | --- |
 | Manifest | 16 KiB, nesting depth 8 |
-| Layers | 32 |
+| Layers | 32 on release images (a build can raise it with `-DTHEME_MAX_LAYERS=<n>`, see below) |
 | IDs | 1–48 ASCII letters, digits, `_`, `-` |
 | Theme name / author / version | 96 / 96 / 32 bytes |
 | Text template | 1–128 printable ASCII bytes |
@@ -1078,6 +1078,35 @@ preview it with the `--data` workflow documented above.
 | `show` (spec 2) | 1–4 rules per layer, at most 36 rules in a theme; 1–4 ranges per rule; `every` 2–3600 |
 | Container | 256 entries, at most 3 MiB |
 | Installed packages | 16, within available storage |
+
+### A higher layer limit (build flag)
+
+Release images allow 32 layers. A package with more layers does not load on
+them: the install is refused with `layers: expected an array of at most 32
+layers`. A firmware you build yourself can raise the limit with
+`-DTHEME_MAX_LAYERS=<n>` (1 to 255; the default is 32, and without the flag the
+image is the same as before). Each layer costs RAM (its record in the theme and
+its state in the engine) and 2 bytes of stack in `render()`. Measured on the
+32-bit host build with plain rectangle layers, each layer past the first holds
+about 125 bytes of heap once loaded and about 110 bytes more while it runs. A
+theme of 40 such layers holds about 5,250 bytes loaded and 4,460 bytes while
+running, and its load peak is about 8,500 bytes, against about 4,250, 3,580 and
+7,020 bytes at 32. The 3,840-byte running budget and the 5,120-byte load budget
+that the bundled themes are held to do not apply to a theme with this many
+layers, so check the free heap on your device before relying on a high limit.
+The error text names the limit of the build.
+
+The packer, the native tools and the skill check against the same number. Tell
+them the limit of the firmware the package is for with the environment variable
+`SMALLTV_THEME_MAX_LAYERS` (default 32, a number from 1 to 255; anything else is
+an error):
+
+```
+SMALLTV_THEME_MAX_LAYERS=40 python3 tools/theme_pack.py my-theme my-theme.stheme
+```
+
+A package packed for a raised limit still does not load on a release image if it
+has more than 32 layers.
 
 Packages live under `/themes/<id>.stheme`. Upload uses `/themes/.upload`; every
 entry, manifest, and referenced animation frame is checked before a rename makes

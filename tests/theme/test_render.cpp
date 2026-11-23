@@ -101,6 +101,33 @@ static void testRoundedRectRendering() {
   assert(e.states()[0].resolved.cornerRadius==2);
   assert(d.data[4]==0x0000);
 }
+// A theme with as many layers as the build allows renders, every layer on its
+// own asset handle (render() keeps one handle per layer on the stack, sized by
+// MaxLayers); one more layer than that is refused. Built with the default limit
+// and with -DTHEME_MAX_LAYERS=40 (tests/theme/run.sh).
+#ifndef EXPECTED_MAX_LAYERS
+#define EXPECTED_MAX_LAYERS 32
+#endif
+static void testLayerCapRendering() {
+  assert(MaxLayers==size_t(EXPECTED_MAX_LAYERS));
+  Theme theme;theme.background=0x0000;
+  Layer image;image.type=LayerType::Image;image.y=0;image.width=3;image.height=1;
+  for(size_t i=0;i<MaxLayers;++i){
+    image.x=int(i)*4;image.source=i%2?"001":"000";   // "001" resolves to red, anything else to green
+    theme.layers.push_back(image);
+  }
+  Engine e;Pixels d;Images assets;
+  e.setTheme(theme,0);
+  assert(render(e,e.update(0,nullptr),assets,d));
+  assert(assets.resolves==int(MaxLayers));
+  // The reader leaves the first pixel of a row clear (alpha 0), so each layer's
+  // second pixel shows its colour: the last layer too.
+  for(size_t i=0;i<MaxLayers;++i)assert(d.data[i*4+1]==(i%2?0xf800:0x07e0) && d.data[i*4+2]==(i%2?0xf800:0x07e0));
+  assert(d.data[(MaxLayers-1)*4+1]!=0x0000);
+  theme.layers.push_back(image);
+  e.setTheme(theme,0);
+  assert(!render(e,e.update(0,nullptr),assets,d));
+}
 // ---- Rotation shapes (#31 item 2) ----
 static Layer rotationLayer(Shape shape) {
   Layer l;l.type=LayerType::Shape;l.shape=shape;l.x=120;l.y=120;l.hasStroke=true;l.stroke=0xf800;l.strokeWidth=1;
@@ -282,6 +309,7 @@ static void testArcWedgeAgainstReference() {
   assert(compared>1000000&&edge*1000<compared);
 }
 int main() {
+ testLayerCapRendering();
  testScrollRendering();
  testRotationShapes();
  testArcWedgeAgainstReference();
