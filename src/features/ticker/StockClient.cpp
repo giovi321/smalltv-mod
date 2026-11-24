@@ -182,7 +182,7 @@ static String buildGithubUrl(const char* symbol) {
 }
 
 // ---- parse: custom webhook contract ---------------------------------------
-static bool parseWebhook(const Settings& s, StockData& d, Stream& stream) {
+__attribute__((noinline)) static bool parseWebhook(const Settings& s, StockData& d, Stream& stream) {
   // Filter so unexpected/large fields don't blow up the heap.
   JsonDocument filter;
   filter["symbol"] = true;
@@ -244,7 +244,7 @@ static bool parseWebhook(const Settings& s, StockData& d, Stream& stream) {
 }
 
 // ---- parse: Yahoo Finance chart payload -----------------------------------
-static bool parseYahoo(const Settings& s, StockData& d, Stream& stream) {
+__attribute__((noinline)) static bool parseYahoo(const Settings& s, StockData& d, Stream& stream) {
   // Keep only the handful of fields we need; the full payload is large and the
   // `meta` object alone has many nested members we don't care about.
   JsonDocument filter;
@@ -341,7 +341,7 @@ static bool parseYahoo(const Settings& s, StockData& d, Stream& stream) {
 // {"data":{"quoteList":{"quoteList":{"edges":[{"node":{"lval":"1086.51",
 //  "iNetVperprV":"7.36","perfPercentage":"0.68","mCur":"USD",...}}]}}}}
 // Numeric fields arrive as JSON *strings*, so read them as text and atof().
-static bool parseCashQuote(const Settings& s, StockData& d, Stream& stream) {
+__attribute__((noinline)) static bool parseCashQuote(const Settings& s, StockData& d, Stream& stream) {
   JsonDocument filter;
   JsonObject node =
       filter["data"]["quoteList"]["quoteList"]["edges"][0]["node"].to<JsonObject>();
@@ -396,7 +396,7 @@ static bool parseCashQuote(const Settings& s, StockData& d, Stream& stream) {
 // {"data":{"integration":{"solid":{"chart":{"timeserie":{"prices":
 //  [{"close":998.45},...]}}}}}} — closes are real JSON numbers here (unlike
 // the quote), oldest -> newest. Downsampling mirrors the Yahoo parser.
-static bool parseCashChart(const Settings& s, StockData& d, Stream& stream) {
+__attribute__((noinline)) static bool parseCashChart(const Settings& s, StockData& d, Stream& stream) {
   JsonDocument filter;
   filter["data"]["integration"]["solid"]["chart"]["timeserie"]["prices"][0]["close"] = true;
 
@@ -584,6 +584,10 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
     return false;
   }
 
+  // The parsers are noinline (#144): inlined, their JSON documents and filters
+  // sat in this frame during the TLS connect above, the deepest path on the
+  // loop stack. Called from here, they take that stack only after the
+  // connect has returned.
   bool ok;
   WaitingStream body(http.getStream(), s.httpTimeout);   // see WaitingStream.h
   switch (kind) {
