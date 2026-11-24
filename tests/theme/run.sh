@@ -54,6 +54,9 @@ c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCL
 /tmp/smalltv-theme-example-check examples/themes/bebas-clock.stheme
 c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" tests/theme/test_catalog.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-catalog-tests
 /tmp/smalltv-theme-catalog-tests
+# The memory margin after a load: the pure check and the wiring of the device code.
+c++ -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme tests/theme/test_margin.cpp -o /tmp/smalltv-margin-tests
+/tmp/smalltv-margin-tests
 # 32-bit, so allocation sizes match the ESP8266; the wraps let the test count
 # ArduinoJson's malloc calls as well as operator new.
 c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON_INCLUDE" -Wl,--wrap=malloc,--wrap=free,--wrap=realloc tests/theme/test_memory.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-memory-tests
@@ -62,3 +65,25 @@ c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -Isrc/features/theme -I"$THEME_JSON
 # one more layer costs stays in its bound, and the load peak is printed.
 c++ -m32 -std=c++11 -Wall -Wextra -Werror -g -DTHEME_MAX_LAYERS=40 -DEXPECTED_MAX_LAYERS=40 -Isrc/features/theme -I"$THEME_JSON_INCLUDE" -Wl,--wrap=malloc,--wrap=free,--wrap=realloc tests/theme/test_memory.cpp src/features/theme/ThemePackage.cpp src/features/theme/ThemeEngine.cpp -o /tmp/smalltv-theme-memory-40-tests
 /tmp/smalltv-theme-memory-40-tests
+# The Wi-Fi reserve: the largest test packages (32 and 31 layers of 128
+# characters) must leave less than the reserve, so they are refused. Since the
+# heap buffers moved off the static RAM (#139, #141) the 32 x 65 package of
+# the #132 report leaves about 8 KB and is let through (DeviceFreeLow in
+# test_memory.cpp).
+python3 tools/make_oom_theme.py /tmp/smalltv-oom-32x128.stheme 32 128
+python3 tools/make_oom_theme.py /tmp/smalltv-oom-31x128.stheme 31 128
+/tmp/smalltv-theme-memory-tests --below-reserve /tmp/smalltv-oom-32x128.stheme /tmp/smalltv-oom-31x128.stheme
+# The check before the engine builds a theme (#132): the estimate of what the
+# engine adds, against what it adds, for the measurement series (26 x 12 up to
+# 32 x 65, and 26 x 128 up to 32 x 128) and the bundled themes; the packages
+# that leave under the reserve are refused, the light ones and the bundled
+# themes are let through.
+SERIES=""
+for s in 26x12 32x12 32x20 32x28 32x36 32x40 32x50 32x55 32x60 32x64 32x65 26x128 28x128 31x128 32x128; do
+  python3 tools/make_oom_theme.py /tmp/smalltv-oom-$s.stheme "${s%x*}" "${s#*x}" > /dev/null
+  SERIES="$SERIES /tmp/smalltv-oom-$s.stheme"
+done
+BUNDLED="examples/themes/pixel-room.stheme examples/themes/live-status.stheme examples/themes/terminal-ops.stheme"
+/tmp/smalltv-theme-memory-tests --estimate $SERIES $BUNDLED
+/tmp/smalltv-theme-memory-tests --refused /tmp/smalltv-oom-32x128.stheme /tmp/smalltv-oom-31x128.stheme
+/tmp/smalltv-theme-memory-tests --accepted /tmp/smalltv-oom-26x12.stheme /tmp/smalltv-oom-32x12.stheme /tmp/smalltv-oom-32x20.stheme /tmp/smalltv-oom-32x65.stheme /tmp/smalltv-oom-26x128.stheme $BUNDLED

@@ -911,6 +911,13 @@ function haNote(c){
  if(c==='safe')return 'Off: the device is in safe mode after a crash. Restart it.';
  return '';
 }
+// A theme the device refused for lack of memory (the "themeError" field of
+// /api/status). The text comes from the device and goes into innerHTML, so
+// markup characters are dropped.
+function themeNote(e){
+ if(!e)return '';
+ return 'Not run: '+String(e).replace(/[<>&"]/g,'');
+}
 function showStatus(s){
  $('dot').className='dot'+(s.connected?' ok':'');
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
@@ -932,6 +939,7 @@ function showStatus(s){
   kv('Free heap',s.heap+' B'+(s.maxblk?' ('+s.maxblk+' B largest block)':''))+
   kv('Uptime',fmtUp(s.uptime))+kv('Last reset',s.reset||'-')+
   (haNote(s.ha)?kv('Home Assistant',haNote(s.ha)):'')+
+  (themeNote(s.themeError)?kv('Theme',themeNote(s.themeError)):'')+
   (s.lastCrash?kv('Last crash',crashLine(s.lastCrash)+' <a href="#" onclick="clearCrash();return false">clear</a>'):'')+
   ((s.wg&&s.wg.compiledIn)?kv('VPN',s.wg.held?'held':(s.wg.up?'up':(s.wg.enabled?'connecting':'off'))):'')+
   (s.radar?kv('Radar',radarLine(s.radar)):'');

@@ -23,6 +23,7 @@
 #include "WgClient.h"
 #if WITH_THEME
 #include "features/theme/ThemeMode.h"
+#include "features/theme/ThemeRefusal.h"
 #endif
 #if WITH_NOTIFY
 #include "NotifyMode.h"
@@ -323,6 +324,33 @@ void appReleaseForTls(uint32_t needFree, uint32_t needBlock) {
   (void)needFree; (void)needBlock;
 #endif
 }
+
+#if WITH_THEME && defined(SMALLTV_FAMILY_ESP8266)
+// Called by ThemeMode after it dropped a theme for lack of memory (ThemeMargin.h):
+// put the settings back to the previous mode, or at least take the theme out of
+// them, and save, so no boot loads it again. Called from the loop with the theme
+// already dropped, so the heap for the save is there (as in MqttClient). The
+// refusal of a reload of a theme that passed changes nothing (ThemeRefusal.h).
+void appThemeRefused(smalltv::PassedTheme& history, bool hasPrev, uint8_t prevMode, const String& prevId, const String& refusedId) {
+  smalltv::Selection sel{g_settings.themeId.c_str(), g_settings.mode, g_settings.carouselTheme};
+  if (!history.refused(sel, hasPrev, prevMode, prevId.c_str(), refusedId.c_str(), MODE_THEME)) return;
+  g_settings.themeId = sel.themeId.c_str();
+  g_settings.mode = sel.mode;
+  g_settings.carouselTheme = sel.carouselTheme;
+  saveSettings(g_settings);   // atomic: a failed save leaves the old file, and the refusal comes again at the next boot
+  appInvalidate();
+}
+#endif
+
+#if WITH_THEME
+// Called by ThemeMode once a theme picked in the web UI has loaded and passed
+// the memory check (ThemeSelection.h): the select request left the setting
+// unsaved, so a crash during the first load could not bring the theme back.
+// Called from the loop, with the theme released when the heap is short.
+void appThemeAccepted() {
+  saveSettings(g_settings);   // atomic: a failed save leaves the old file, and the old theme comes back at the next boot
+}
+#endif
 
 static void bootProgress(const char* msg) {
   gfxBoot("SmallTV", msg);

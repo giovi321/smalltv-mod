@@ -46,6 +46,7 @@ struct StatusData {
   const char* tz = "";
   const char* sun = "";         // today's sunrise-sunset; left out when empty
   const char* ha = "";          // why Home Assistant is not as set: memory, safe or reboot; left out when empty
+  const char* themeError = "";  // why a theme was refused (not enough memory); left out when empty
   bool connected = false, synced = false, night = false, nightHeld = false, clockFresh = false;
   int rssi = 0;
   int bl = 0;                   // backlight level now, 0..255
@@ -166,6 +167,7 @@ template <class Out> void writeStatusHead(Out& out, const StatusData& d) {
   if (d.sun[0]) member(out, PSTR(",\"sun\":"), d.sun);
   member(out, PSTR(",\"bl\":"), d.bl);
   if (d.ha[0]) member(out, PSTR(",\"ha\":"), d.ha);
+  if (d.themeError[0]) member(out, PSTR(",\"themeError\":"), d.themeError);
   const StatusWg& w = d.wg;
   member(out, PSTR(",\"wg\":{\"compiledIn\":"), w.compiledIn);
   member(out, PSTR(",\"enabled\":"), w.enabled);
