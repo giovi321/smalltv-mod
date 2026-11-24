@@ -259,8 +259,8 @@ const char* rainLastUrl()      { return S ? S->lastUrl.c_str() : ""; }
 static const char kStageNames[] PROGMEM =
     "idle\0fetching\0no home set\0connect failed\0http error\0parse failed\0"
     "no frames in feed\0png decode failed\0out of memory\0filesystem error\0"
-    "storage full\0low memory, tile skipped\0decode too slow, tile skipped\0ok";
-static_assert(RAIN_OK == 13, "kStageNames follows RainStage");
+    "storage full\0low memory, tile skipped\0decode too slow, tile skipped\0server too slow\0ok";
+static_assert(RAIN_OK == 14, "kStageNames follows RainStage");
 static const char* stageName(RainStage st, char* buf, size_t n) {
   uint8_t k = (uint8_t)st <= RAIN_OK ? (uint8_t)st : 0;
   PGM_P p = kStageNames;
@@ -386,6 +386,70 @@ static uint8_t cropFor(float lat, uint16_t rangeKm) {
   return (uint8_t)ki;
 }
 
+// ---- an HTTP body, read under a byte cap and an overall deadline -------------
+// The cores wait for each byte up to the client's timeout and start that wait
+// again on every byte (Stream::timedRead on the ESP8266, NetworkClient::
+// readBytes on the ESP32): alone, it let a server that sends a byte now and
+// then, just under httpTimeout, hold the main loop for as long as it liked
+// (a tile: up to 256 K bytes). Read through this wrapper, a body takes at most
+// `budgetMs` from its construction (after GET(): the headers are in): bytes
+// the client already holds are copied at once, and otherwise it waits for one
+// byte with the client's timeout set to the idle timeout or the time left,
+// whichever is shorter, so no wait runs past the deadline. The waits are the
+// core's, which yield (timedRead calls yield(), NetworkClient::readBytes
+// delay(2)). Past the deadline the stream reads as ended and expired() says
+// why. At most `cap` bytes come through; past them too it reads as ended (a
+// JSON body then fails to parse).
+class DeadlineStream : public Stream {
+ public:
+  DeadlineStream(Stream& in, size_t cap, uint32_t budgetMs, uint32_t idleMs)
+      : in_(in), left_(cap), start_(millis()), budget_(budgetMs), idle_(idleMs) {}
+  bool expired() const { return expired_; }
+  int available() override {
+    if (!left_ || over()) return 0;
+    const int a = in_.available();
+    return (a > 0 && (size_t)a > left_) ? (int)left_ : a;
+  }
+  int read() override {   // no wait, like a client's read()
+    if (!left_ || over()) return -1;
+    const int c = in_.read();
+    if (c >= 0) left_--;
+    return c;
+  }
+  int peek() override { return (left_ && !over()) ? in_.peek() : -1; }
+  size_t write(uint8_t) override { return 0; }
+  // ArduinoJson reads an Arduino Stream through readBytes(), the tile loop too.
+  size_t readBytes(char* buf, size_t n) override {
+    size_t got = 0;
+    while (got < n && left_) {
+      const uint32_t used = millis() - start_;   // wrap-safe
+      if (used >= budget_) { expired_ = true; break; }
+      size_t want = (n - got < left_) ? n - got : left_;
+      const int a = in_.available();
+      if (a > 0) { if ((size_t)a < want) want = (size_t)a; }   // already here: no wait
+      else want = 1;                                           // wait for the next byte
+      const uint32_t rest = budget_ - used;
+      in_.setTimeout(rest < idle_ ? rest : idle_);
+      const size_t r = in_.readBytes(buf + got, want);
+      got += r;
+      left_ -= r;
+      if (r < want) { over(); break; }   // idle timeout, connection closed, or the deadline
+    }
+    return got;
+  }
+  size_t readBytes(uint8_t* buf, size_t n) override { return readBytes((char*)buf, n); }
+
+ private:
+  bool over() {
+    if (!expired_ && millis() - start_ >= budget_) expired_ = true;
+    return expired_;
+  }
+  Stream&        in_;
+  size_t         left_;
+  const uint32_t start_, budget_, idle_;
+  bool           expired_ = false;
+};
+
 // ---- one HTTP GET + parse of the frame list --------------------------------
 static bool fetchFrameList(const Settings& s) {
   String url = scheme() + F(RAIN_API_HOST) + F(RAIN_API_PATH);
@@ -413,6 +477,7 @@ static bool fetchFrameList(const Settings& s) {
     S->stage = (code < 0) ? RAIN_CONNECT_FAIL : RAIN_HTTP_ERROR;
     return false;
   }
+  if (http.getSize() > RAIN_LIST_MAX_BYTES) { http.end(); S->stage = RAIN_HTTP_ERROR; return false; }
 
   // Filter so only the fields we need materialise: the doc is parsed while
   // the HTTP connection's buffers are allocated and, on the ESP8266, the
@@ -434,9 +499,10 @@ static bool fetchFrameList(const Settings& s) {
   }
 
   JsonDocument doc;
-  DeserializationError err = deserializeJson(
-      doc, http.getStream(), DeserializationOption::Filter(filter));
+  DeadlineStream body(http.getStream(), RAIN_LIST_MAX_BYTES, RAIN_BODY_DEADLINE_MS, s.httpTimeout);
+  DeserializationError err = deserializeJson(doc, body, DeserializationOption::Filter(filter));
   http.end();
+  if (body.expired()) { S->stage = RAIN_SLOW_SERVER; return false; }
   if (err) { S->stage = RAIN_PARSE_FAIL; return false; }
 
   const char* host = doc[F("host")] | "";
@@ -473,26 +539,6 @@ static bool fetchFrameList(const Settings& s) {
 }
 
 // ---- the wind: one GET to Open-Meteo ----------------------------------------
-// The answer has no Content-Length (HTTP/1.0, the body runs to the close):
-// the parser reads it through this cap, so a server that never stops costs
-// RAIN_WIND_MAX_BYTES at most, then the JSON fails to parse.
-class CappedStream : public Stream {
- public:
-  CappedStream(Stream& in, size_t cap) : in_(in), left_(cap) {}
-  int available() override { return left_ ? in_.available() : 0; }
-  int read() override {
-    if (!left_) return -1;
-    int c = in_.read();
-    if (c >= 0) left_--;
-    return c;
-  }
-  int peek() override { return left_ ? in_.peek() : -1; }
-  size_t write(uint8_t) override { return 0; }
- private:
-  Stream& in_;
-  size_t  left_;
-};
-
 // Both levels are asked for in one request (the setting picks the one shown,
 // so changing it needs no new request), in km/h (miles are a display matter).
 // A level missing from the answer or out of bounds is dropped on its own;
@@ -538,9 +584,12 @@ static bool fetchWind(const Settings& s) {
     f[F("wind_direction_10m")] = true;
   }
   JsonDocument doc;
-  CappedStream body(http.getStream(), RAIN_WIND_MAX_BYTES);
+  // No Content-Length (HTTP/1.0, the body runs to the close): a server that
+  // never stops costs RAIN_WIND_MAX_BYTES at most, then the JSON fails to parse.
+  DeadlineStream body(http.getStream(), RAIN_WIND_MAX_BYTES, RAIN_BODY_DEADLINE_MS, s.httpTimeout);
   DeserializationError err = deserializeJson(doc, body, DeserializationOption::Filter(filter));
   http.end();
+  if (body.expired()) { S->windStage = RAIN_SLOW_SERVER; return false; }
   if (err) { S->windStage = RAIN_PARSE_FAIL; return false; }
 
   JsonObjectConst cur = doc[F("current")].as<JsonObjectConst>();
@@ -737,20 +786,19 @@ static bool fetchFrame(const Settings& s, const String& host, uint8_t i) {
   // sized by its Content-Length (real tiles: 3-12 KB), RAIN_PNG_SIZE_GUESS
   // without one. The download stops at that size: never more on disk than
   // the room checked for it.
-  size_t pngLen;
-  {
-    int len = http.getSize();
-    pngLen = (len > 0 && len <= RAIN_PNG_MAX) ? (size_t)len : (size_t)RAIN_PNG_SIZE_GUESS;
-    if (len > RAIN_PNG_MAX) { http.end(); S->stage = RAIN_HTTP_ERROR; return false; }
-    if (!makeRoom(i, pngLen)) { http.end(); S->stage = RAIN_FS_FULL; return false; }
-  }
+  const int len = http.getSize();
+  const size_t pngLen = (len > 0 && len <= RAIN_PNG_MAX) ? (size_t)len : (size_t)RAIN_PNG_SIZE_GUESS;
+  if (len > RAIN_PNG_MAX) { http.end(); S->stage = RAIN_HTTP_ERROR; return false; }
+  // The body's deadline runs from here, GET() done. One byte past the room
+  // comes through, so a tile longer than announced is still seen as such.
+  DeadlineStream in(http.getStream(), pngLen + 1, RAIN_TILE_DEADLINE_MS, s.httpTimeout);
+  if (!makeRoom(i, pngLen)) { http.end(); S->stage = RAIN_FS_FULL; return false; }
 
   // Stream to /rain/tmp.png (sequential writes; ~3-12 KB).
   File tmp = LittleFS.open(RAIN_PATH("/tmp.png"), "w");
   if (!tmp) { http.end(); S->stage = RAIN_FS_FAIL; return false; }
   uint8_t* dlBuf = (uint8_t*)malloc(RAIN_DL_BUF);
   if (!dlBuf) { http.end(); tmp.close(); S->stage = RAIN_NO_MEM; return false; }
-  Stream& in = http.getStream();
   uint32_t total = 0;
   // readBytes: same signature on the ESP8266 and ESP32 cores (Stream::read
   // differs between them).
@@ -766,8 +814,15 @@ static bool fetchFrame(const Settings& s, const String& host, uint8_t i) {
   http.end();
   httpOwner.reset();   // its Strings are not needed for the decode
   tmp.close();
+  // Past the deadline: the server is too slow, the tile is dropped (the set
+  // stays as it is, the next poll asks again). Unless every announced byte
+  // came: the deadline then ran out in the last wait, for a byte after the
+  // end (both cores' readBytes() wait the idle timeout there, even once the
+  // server has closed).
+  const bool slowServer = in.expired() && !(len > 0 && total == (uint32_t)len);
   if (tooBig) { LittleFS.remove(RAIN_PATH("/tmp.png")); S->stage = RAIN_HTTP_ERROR; return false; }
   if (full) { LittleFS.remove(RAIN_PATH("/tmp.png")); S->stage = RAIN_FS_FULL; return false; }
+  if (slowServer) { LittleFS.remove(RAIN_PATH("/tmp.png")); S->stage = RAIN_SLOW_SERVER; return false; }
   if (total == 0) { LittleFS.remove(RAIN_PATH("/tmp.png")); S->stage = RAIN_HTTP_ERROR; return false; }
 
   url = String();   // free the URL's buffer before the decode

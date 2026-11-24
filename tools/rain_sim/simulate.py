@@ -71,7 +71,7 @@ def build(out):
            os.path.join(gfx, "Arduino_GFX.cpp"), os.path.join(gfx, "Arduino_G.cpp"),
            os.path.join(gfx, "canvas/Arduino_Canvas.cpp")]
     cmd = ["g++", "-std=c++17", "-O2", "-w",
-           "-DSMALLTV_ESP8266", "-DARDUINOJSON_USE_DOUBLE=0", "-DARDUINOJSON_ENABLE_ARDUINO_STRING=1",
+           "-DSMALLTV_ESP8266", "-DARDUINOJSON_USE_DOUBLE=0", "-DARDUINOJSON_ENABLE_ARDUINO_STRING=1", "-DARDUINOJSON_ENABLE_ARDUINO_STREAM=1",
            "-include", os.path.join(ROOT, "tests/rain/shim/rain_host.h"),
            "-include", os.path.join(ROOT, "tests/fuzz/shim/progmem.h"),
            "-I" + os.path.join(HERE, "shim"), "-I" + os.path.join(ROOT, "tests/rain/shim"),

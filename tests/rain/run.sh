@@ -10,7 +10,7 @@ OUT=${TMPDIR:-/tmp}/smalltv-rain-tests
 mkdir -p "$OUT"
 g++ -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-maybe-uninitialized \
   -fsanitize=address,undefined -fno-sanitize-recover=all \
-  -DSMALLTV_ESP8266 -DARDUINOJSON_USE_DOUBLE=0 -DARDUINOJSON_ENABLE_ARDUINO_STRING=1 \
+  -DSMALLTV_ESP8266 -DARDUINOJSON_USE_DOUBLE=0 -DARDUINOJSON_ENABLE_ARDUINO_STRING=1 -DARDUINOJSON_ENABLE_ARDUINO_STREAM=1 \
   -include tests/rain/shim/rain_host.h \
   -Itests/rain/shim -Itests/fuzz/shim -Isrc -Isrc/features/rain -I"$THEME_JSON_INCLUDE" \
   tests/rain/test_frameset.cpp src/features/rain/RainClient.cpp src/Settings.cpp \
@@ -22,7 +22,7 @@ echo "rain frame set tests: all passed"
 # state (RainState) and the decoder's work area live on the heap or the
 # stack while they are used; what stays static is pointers and a byte.
 # Built 32-bit like the ESP8266: no static object over 8 bytes.
-g++ -m32 -std=c++17 -O1 -c -DSMALLTV_ESP8266 -DARDUINOJSON_USE_DOUBLE=0 -DARDUINOJSON_ENABLE_ARDUINO_STRING=1 \
+g++ -m32 -std=c++17 -O1 -c -DSMALLTV_ESP8266 -DARDUINOJSON_USE_DOUBLE=0 -DARDUINOJSON_ENABLE_ARDUINO_STRING=1 -DARDUINOJSON_ENABLE_ARDUINO_STREAM=1 \
   -include tests/rain/shim/rain_host.h -Itests/rain/shim -Itests/fuzz/shim -Isrc -Isrc/features/rain \
   -I"$THEME_JSON_INCLUDE" src/features/rain/RainClient.cpp -o "$OUT/RainClient32.o"
 g++ -m32 -std=c++17 -O1 -c -Dmemcpy_P=memcpy -Itools/rain_fwtest -Isrc/features/rain \

@@ -83,6 +83,7 @@ static std::string g_newestPath;
 static bool g_badPathNowcast = false;  // ... given to a nowcast frame instead
 static std::set<uint32_t> g_tileFail;  // tile times answered with 500
 static size_t g_tilePad = 0;           // bytes added after "TILE <time>" (a bigger tile)
+static size_t g_listPad = 0;           // spaces added inside the list's root object (a bigger list)
 static const uint32_t kStep = 600;
 
 // ---- scripted Open-Meteo (the wind arrow) ----------------------------------
@@ -123,7 +124,7 @@ static int serve(const std::string& url, std::string& body) {
     body += "],\"nowcast\":[";
     if (g_badPathNowcast)
       body += "{\"time\":" + std::to_string(g_newest + kStep) + ",\"path\":\"" + g_newestPath + "\"}";
-    body += "]},\"satellite\":{\"infrared\":[]}}";
+    body += "]},\"satellite\":{\"infrared\":[]}" + std::string(g_listPad, ' ') + "}";
     return 200;
   }
   size_t p = url.find("/v2/radar/");
@@ -196,17 +197,24 @@ static const char* expectedStageName(RainStage st) {
     case RAIN_NO_FRAMES: return "no frames in feed"; case RAIN_PNG_FAIL: return "png decode failed";
     case RAIN_NO_MEM: return "out of memory";   case RAIN_FS_FAIL: return "filesystem error";
     case RAIN_FS_FULL: return "storage full";   case RAIN_LOW_HEAP: return "low memory, tile skipped";
-    case RAIN_SLOW_TILE: return "decode too slow, tile skipped"; case RAIN_OK: return "ok";
+    case RAIN_SLOW_TILE: return "decode too slow, tile skipped"; case RAIN_SLOW_SERVER: return "server too slow";
+    case RAIN_OK: return "ok";
   }
   return "?";
 }
 static std::set<int> g_stagesSeen;
 
 // Run one poll to the end, checking the invariants after every step.
+// g_longestStep: the longest rainService() call of the poll, in fake time
+// (the main loop is held that long).
+static uint32_t g_longestStep = 0;
 static void poll(const Settings& s, const char* when) {
   rainForceRefresh();
+  g_longestStep = 0;
   for (int step = 0; step < 40; step++) {
+    const uint32_t t0 = g_fakeMillis;
     rainService(s);
+    if (g_fakeMillis - t0 > g_longestStep) g_longestStep = g_fakeMillis - t0;
     g_fakeMillis += 25000;
     checkConsistent(when);
     if (rainStage() != RAIN_FETCHING) break;
@@ -911,6 +919,127 @@ int main() {
           rainWindUnitLabel(9, false) == 0, "wind unit labels");
     CHECK(rainWindValueOk(0, 0) && rainWindValueOk(360, 500) && !rainWindValueOk(-1, 5) &&
           !rainWindValueOk(10, -0.1f) && !rainWindValueOk(10, 501) && !rainWindValueOk(NAN, 5), "wind value bounds");
+  }
+
+  // 19. A slow server (PR #142 review): the per-byte timeout (httpTimeout)
+  //     alone let a server that trickles bytes just under it hold the loop
+  //     for as long as it liked. Every body is read under an overall
+  //     deadline: the step ends by it, the status says "server too slow",
+  //     the frames on screen and the last good wind stay, and the next
+  //     normal poll recovers.
+  {
+    char st[32];
+    int16_t dir = -1;
+    float kmh = -1;
+    const uint32_t slack = 100;   // ms past the deadline a read may take
+    auto noTemp = [] { return !hasFile("/rain/tmp.png") && !hasFile("/rain/tmp.raw"); };
+    auto times = [] { std::vector<uint32_t> t; for (uint8_t i = 0; i < rainCount(); i++) t.push_back(rainFrameTime(i)); return t; };
+    CHECK(s.httpTimeout > 1000, "slow server: an idle timeout to trickle under");
+
+    // a) A server slow but in time: everything arrives, nothing changes.
+    s.rain.wind = RAIN_WIND_CLOUDS;
+    g_newest += kStep;
+    g_net.msPerByte = 5;                 // ~1 KB list or wind answer: ~5 s
+    g_net.slowUrl = "";                  // every request
+    g_net.log.clear();
+    poll(s, "slow but in time");
+    CHECK(rainStage() == RAIN_OK && !rainError() && rainCount() == 13 && rainFrameTime(12) == g_newest,
+          "slow but in time: the poll completes");
+    CHECK(rainWindNow(s, dir, kmh) && dir == 306 && std::string(rainWindStageName(st, sizeof st)) == "ok",
+          "slow but in time: the wind is read");
+    CHECK(g_longestStep > 1000 && g_longestStep < RAIN_BODY_DEADLINE_MS, "slow but in time: the reads took their time");
+
+    // b) The frame list trickles, one byte just under the idle timeout.
+    g_net.msPerByte = s.httpTimeout - 100;
+    g_net.slowUrl = "weather-maps.json";
+    g_newest += kStep;
+    std::vector<uint32_t> before = times();
+    g_net.log.clear();
+    poll(s, "list trickles");
+    CHECK(rainStage() == RAIN_SLOW_SERVER && rainError() && stageName() == "server too slow", "list trickles: server too slow");
+    CHECK(g_longestStep <= RAIN_BODY_DEADLINE_MS + slack, "list trickles: the step ends by the deadline");
+    CHECK(times() == before && tileRequests() == 0, "list trickles: the set is kept, no tile requested");
+    CHECK(rainWindNow(s, dir, kmh) && dir == 306, "list trickles: the wind is unaffected");
+    g_net.msPerByte = 0;
+    poll(s, "list back to speed");
+    CHECK(rainStage() == RAIN_OK && rainCount() == 13 && rainFrameTime(12) == g_newest, "list trickles: the next poll recovers");
+
+    // c) The wind answer trickles: the radar goes on, the last good wind stays.
+    g_net.msPerByte = 900;
+    g_net.slowUrl = "open-meteo";
+    poll(s, "wind trickles");
+    CHECK(std::string(rainWindStageName(st, sizeof st)) == "server too slow", "wind trickles: server too slow");
+    CHECK(g_longestStep <= RAIN_BODY_DEADLINE_MS + slack, "wind trickles: the step ends by the deadline");
+    CHECK(rainStage() == RAIN_OK && !rainError() && rainCount() == 13, "wind trickles: the radar is unaffected");
+    CHECK(rainWindNow(s, dir, kmh) && dir == 306, "wind trickles: the last good wind kept");
+    g_net.msPerByte = 0;
+    poll(s, "wind back to speed");
+    CHECK(std::string(rainWindStageName(st, sizeof st)) == "ok", "wind trickles: the next poll recovers");
+    s.rain.wind = RAIN_WIND_OFF;
+
+    // d) A tile trickles: dropped, the set kept, no temp file.
+    g_net.msPerByte = 900;
+    g_net.slowUrl = "/v2/radar/";
+    g_tilePad = 2000;                    // ~30 min at that pace
+    g_newest += kStep;
+    g_net.log.clear();
+    poll(s, "tile trickles");
+    CHECK(rainStage() == RAIN_SLOW_SERVER && rainError() && stageName() == "server too slow", "tile trickles: server too slow");
+    CHECK(g_longestStep <= RAIN_TILE_DEADLINE_MS + slack, "tile trickles: the step ends by the deadline");
+    CHECK(tileRequests() == 1 && rainCount() == 12 && rainFrameTime(11) == g_newest - kStep,
+          "tile trickles: the frames kept are whole, newest good one last");
+    CHECK(noTemp() && !hasFile(("/rain/t" + std::to_string(g_newest) + ".raw").c_str()), "tile trickles: no temp file, no frame");
+    g_net.msPerByte = 0;
+    poll(s, "tile back to speed");
+    CHECK(rainStage() == RAIN_OK && rainCount() == 13 && rainFrameTime(12) == g_newest, "tile trickles: the next poll recovers");
+
+    // e) A tile in full, then the server keeps the connection open: the
+    //    deadline runs out in the wait for a byte after the end. Every
+    //    announced byte came: the tile is kept. Without a Content-Length
+    //    the end cannot be told from a stall: too slow.
+    g_net.msPerByte = 100;
+    g_tilePad = 235;                     // ~250 B at 100 ms: 25 s, then the idle wait
+    g_net.holdOpen = true;
+    g_newest += kStep;
+    poll(s, "tile held open");
+    CHECK(rainStage() == RAIN_OK && rainCount() == 13 && rainFrameTime(12) == g_newest, "tile held open: complete, kept");
+    CHECK(g_longestStep <= RAIN_TILE_DEADLINE_MS + slack, "tile held open: the step ends by the deadline");
+    g_net.noLength = true;
+    g_newest += kStep;
+    poll(s, "tile held open, no length");
+    CHECK(rainStage() == RAIN_SLOW_SERVER && rainCount() == 12 && noTemp(), "tile held open without a length: too slow");
+    g_net.noLength = false;
+    g_net.holdOpen = false;
+    g_net.msPerByte = 0;
+    g_tilePad = 0;
+    poll(s, "tile not held open");
+    CHECK(rainStage() == RAIN_OK && rainCount() == 13 && rainFrameTime(12) == g_newest, "tile held open: recovered");
+
+    // f) The frame list is read up to RAIN_LIST_MAX_BYTES: one announced
+    //    larger is refused at once, one without a length past it fails to
+    //    parse. Exactly the cap passes, either way.
+    std::string probe;
+    serve("http://api.rainviewer.com/public/weather-maps.json", probe);
+    CHECK(probe.size() < RAIN_LIST_MAX_BYTES, "list cap: the list fits");
+    for (int noLen = 0; noLen < 2; noLen++) {
+      g_net.noLength = noLen != 0;
+      g_listPad = RAIN_LIST_MAX_BYTES - probe.size();
+      g_newest += kStep;
+      poll(s, "list at the cap");
+      CHECK(rainStage() == RAIN_OK && rainCount() == 13 && rainFrameTime(12) == g_newest, "list cap: a list of exactly the cap is read");
+      g_listPad++;
+      g_newest += kStep;
+      before = times();
+      g_net.log.clear();
+      poll(s, "list over the cap");
+      CHECK(rainError() && rainStage() == (noLen ? RAIN_PARSE_FAIL : RAIN_HTTP_ERROR),
+            noLen ? "list cap: past the cap without a length, parse failed" : "list cap: announced past the cap, http error");
+      CHECK(times() == before && tileRequests() == 0, "list cap: the set is kept, no tile requested");
+    }
+    g_net.noLength = false;
+    g_listPad = 0;
+    poll(s, "list under the cap again");
+    CHECK(rainStage() == RAIN_OK && rainCount() == 13, "list cap: recovered");
   }
 
   // The names checked against the stages above: most of them were reached.
