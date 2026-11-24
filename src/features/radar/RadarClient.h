@@ -26,6 +26,7 @@ enum RadarStage : uint8_t {
   RADAR_PARSE_FAIL,    // 200, but the JSON did not deserialize (truncated stream?)
   RADAR_NO_AC,         // parsed fine, but the "ac" array was missing or empty
   RADAR_FILTERED_ALL,  // parsed fine, aircraft present, all dropped by minAltFt
+  RADAR_NO_MFLN,       // ESP8266: the direct feed does not negotiate MFLN, so no poll is sent
   RADAR_OK,            // aircraft plotted
 };
 

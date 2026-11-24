@@ -33,6 +33,14 @@ static uint16_t    g_tlsRx = 0;
 // Host g_tlsRx was probed against, compared by pointer: both candidates are the
 // same two string literals every time, so identity is enough.
 static const char* g_tlsProbedHost = nullptr;
+// The probe found no MFLN at 512 or 1024 (ESP8266 only). The 4 KB fallback
+// then fails on every poll: both open-data feeds send 16 KB records since
+// 2026-11 (#140), and BearSSL cannot read a record larger than its buffer.
+// A direct poll is not sent while this holds; the probe runs again after
+// RADAR_REPROBE_MS or at the next settings save, in case the server changes.
+static bool        g_tlsNoMfln = false;
+static uint32_t    g_tlsProbedMs = 0;
+static const uint32_t RADAR_REPROBE_MS = 60UL * 60UL * 1000UL;
 
 // Last-poll diagnostics (see RadarStage in the header).
 static RadarStage g_stage = RADAR_IDLE;
@@ -62,6 +70,7 @@ const char* radarStageName() {
     case RADAR_PARSE_FAIL:    return "parse failed";
     case RADAR_NO_AC:         return "no aircraft in feed";
     case RADAR_FILTERED_ALL:  return "all filtered out";
+    case RADAR_NO_MFLN:       return "server needs 16 KB TLS records";
     case RADAR_OK:            return "ok";
     default:                  return "idle";
   }
@@ -83,6 +92,7 @@ static void radarHeapGive() {
   g_heap = nullptr;
   g_tlsRx = 0;                 // the session went with it: probe again
   g_tlsProbedHost = nullptr;
+  g_tlsNoMfln = false;
 }
 
 void radarInit(const Settings& s) {
@@ -90,6 +100,13 @@ void radarInit(const Settings& s) {
   // whole, given back as soon as the radar is switched off.
   if (radarWanted(s)) radarHeapTake();
   else                radarHeapGive();
+  // A feed found without MFLN is probed again after a save: the user may have
+  // switched the source, or wants to try the server again now.
+  if (g_tlsNoMfln) {
+    g_tlsRx = 0;
+    g_tlsProbedHost = nullptr;
+    g_tlsNoMfln = false;
+  }
   g_count = 0;
   g_error = false;
   g_lastOkMs = 0;
@@ -137,17 +154,25 @@ static const char* directPath(const Settings& s) {
 }
 
 // ---- probe MFLN once so TLS can use the smallest safe buffer ---------------
-// Re-probed when the provider changes: the two hosts answer differently
-// (adsb.lol negotiates MFLN, adsb.fi behind Cloudflare does not).
+static bool reprobeDue() { return (uint32_t)(millis() - g_tlsProbedMs) >= RADAR_REPROBE_MS; }
+// The current direct feed was probed without MFLN, and it is not time to ask
+// it again: the poll is not sent, whatever the heap.
+static bool noMflnHolds(const Settings& s) {
+  return g_tlsNoMfln && g_tlsProbedHost == directHost(s) && !reprobeDue();
+}
+// Re-probed when the provider changes, since each host answers for itself.
+// Neither adsb.lol nor adsb.fi negotiates MFLN since 2026-11 (#140).
 static void probeTls(const Settings& s) {
 #if defined(SMALLTV_FAMILY_ESP8266)
   const char* host = directHost(s);
-  if (g_tlsRx && g_tlsProbedHost == host) return;
+  if (g_tlsRx && g_tlsProbedHost == host && !(g_tlsNoMfln && reprobeDue())) return;
   g_tlsProbedHost = host;
+  g_tlsProbedMs = millis();
   g_heap->session = TlsSession();   // stored params are per-host; drop them with it
+  g_tlsNoMfln = false;
   if (BearSSL::WiFiClientSecure::probeMaxFragmentLength(host, 443, 512))       g_tlsRx = 512;
   else if (BearSSL::WiFiClientSecure::probeMaxFragmentLength(host, 443, 1024)) g_tlsRx = 1024;
-  else                                                                         g_tlsRx = 4096;
+  else { g_tlsRx = 4096; g_tlsNoMfln = true; }
 #else
   (void)s;
 #endif
@@ -238,7 +263,7 @@ static bool parseAdsb(const Settings& s, Stream& stream) {
 }
 
 // ---- one HTTP(S) GET + parse ----------------------------------------------
-static bool fetchUrl(const Settings& s, const String& url) {
+static bool fetchUrl(const Settings& s, const String& url, bool direct) {
   bool https = url.startsWith("https://");
 
   std::unique_ptr<NetClient> client;
@@ -247,8 +272,12 @@ static bool fetchUrl(const Settings& s, const String& url) {
     // the same floor the cash.ch fetch uses for this identical handshake shape.
     // (The old total-heap >= 18000 test passed on fragmented heaps that then
     // failed the allocation, and failed healthy ones that would have worked.)
+    if (direct && noMflnHolds(s)) { g_stage = RADAR_NO_MFLN; return false; }
     if (platformMaxFreeBlock() < 16000) { g_stage = RADAR_LOW_HEAP; return false; }
     probeTls(s);
+    // Without MFLN the handshake to an open-data feed fails on every poll
+    // (#140): say so, and send nothing until the probe finds MFLN again.
+    if (direct && g_tlsNoMfln) { g_stage = RADAR_NO_MFLN; return false; }
     client.reset(platformMakeSecureClient(g_tlsRx, &g_heap->session));   // no cert validation (public read-only API)
   } else {
     client.reset(new WiFiClient());
@@ -303,5 +332,5 @@ void radarService(const Settings& s) {
   String url = useWebhook ? buildWebhookUrl(s) : buildDirectUrl(s);
   g_lastUrl = url;
   g_lastTryMs = millis();
-  if (!fetchUrl(s, url)) g_error = true;   // keep stale aircraft, flag the error
+  if (!fetchUrl(s, url, !useWebhook)) g_error = true;   // keep stale aircraft, flag the error
 }

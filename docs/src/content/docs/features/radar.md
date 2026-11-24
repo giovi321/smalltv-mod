@@ -35,7 +35,7 @@ The device fetches the free [adsb.lol](https://adsb.lol) API directly over HTTPS
 GET https://api.adsb.lol/v2/lat/<lat>/lon/<lon>/dist/<nm>
 ```
 
-No API key. The request goes out as HTTP/1.1, because adsb.lol answers HTTP/1.0 with `426 Upgrade Required`. The device parses the feed and keeps the closest 24 aircraft. The endpoint is rate-limited to about one request a second, so keep the refresh interval sensible. The default is 10 seconds.
+No API key. On the ESP8266 this feed does not work since November 2026; see [Which direct feed to pick](#which-direct-feed-to-pick). The request goes out as HTTP/1.1, because adsb.lol answers HTTP/1.0 with `426 Upgrade Required`. The device parses the feed and keeps the closest 24 aircraft. The endpoint is rate-limited to about one request a second, so keep the refresh interval sensible. The default is 10 seconds.
 
 ### adsb.fi, the default on the ESP32
 
@@ -49,17 +49,19 @@ GET https://opendata.adsb.fi/api/v3/lat/<lat>/lon/<lon>/dist/<nm>
 
 On the ESP8266, HTTPS is tight on RAM, and the deciding factor is the TLS record size the server uses. The device probes the server's Maximum Fragment Length support so its buffer can stay at 512 bytes; without MFLN it has to fall back to 4 KB, and if the server then sends a record larger than that, the read fails part-way through and the scope stays empty.
 
-adsb.fi moved behind Cloudflare in August 2026. Cloudflare does not negotiate MFLN and ramps its record size up on large responses, so **direct adsb.fi no longer works on the ESP8266**. A 50 nm response is around 50 KB and the connection breaks mid-stream. adsb.lol still honours MFLN, which is why it is the ESP8266 default.
+adsb.fi moved behind Cloudflare in August 2026 and stopped negotiating MFLN. Since November 2026 adsb.lol does not negotiate it either (checked with `openssl s_client -maxfraglen 512` on 2026-11-23, [#140](https://github.com/giovi321/smalltv-mod/issues/140)). Both send records of up to 16 KB, which do not fit the 4 KB buffer, so **neither direct feed works on the ESP8266 today**. Use the [custom webhook](#custom-webhook-a-lan-proxy) instead: the proxy does the TLS handshake and the device fetches over plain HTTP.
+
+When the probe finds no MFLN, the Radar line in the Status tab reads `server needs 16 KB TLS records` and the device sends no poll to that feed. It probes the feed again after an hour and after every settings save, so the direct feed comes back on its own if the server turns MFLN on again.
 
 The ESP32 boards use mbedTLS with dynamically sized buffers and are unaffected, so either feed works there.
 
-If your chosen feed ever goes behind a CDN too, switch to the other one or to the webhook below.
-
 ### When the scope stays empty on an ESP8266
 
-Start at the **Radar** line in the Status tab. Since 2.12.1 it reports what the last poll actually did: `ok` with an aircraft count, `skipped, low heap`, `connect failed`, `http error` with the code, `parse failed`, `no aircraft in feed`, or `all filtered out` when traffic was there but your minimum-altitude setting dropped it. The same detail is in `/api/status` under `radar`.
+Start at the **Radar** line in the Status tab. Since 2.12.1 it reports what the last poll actually did: `ok` with an aircraft count, `skipped, low heap`, `connect failed`, `http error` with the code, `parse failed`, `no aircraft in feed`, `all filtered out` when traffic was there but your minimum-altitude setting dropped it, or `server needs 16 KB TLS records`. The same detail is in `/api/status` under `radar`.
 
-Two of those stages have known causes on the ESP8266:
+These stages have known causes on the ESP8266:
+
+- `server needs 16 KB TLS records`: the direct feed does not negotiate MFLN (see [Which direct feed to pick](#which-direct-feed-to-pick)). Switch the source to the webhook. Firmware before this stage existed shows `connect failed` with `http` -4 on every poll for the same cause.
 
 - `skipped, low heap`: the radar refuses to start a TLS handshake unless a 16,000-byte contiguous block is free (shown in the Status tab next to Free heap). If you do not use Home Assistant screens, leave the broker host blank in the Home Assistant tab and restart (v3.5.0 or later), which gives back about 6.5 KB. Otherwise install `smalltv-mod-firmware-lean.bin`, which compiles out Home Assistant screens, the usage meter and theme clocks, or use the webhook below, which is plain HTTP and skips the check. See [Which release file to download](/smalltv-mod/reference/release-assets/).
 - `no aircraft in feed` on every poll while flightradar shows a full sky: before 2.12.1 this is what a device pointed at adsb.fi showed after Cloudflare fronted that feed, because Cloudflare's chunked responses misparsed as empty. 2.12.1 requests HTTP/1.0, which cannot be chunked; on older firmware, switch the source to adsb.lol.
