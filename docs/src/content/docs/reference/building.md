@@ -72,7 +72,7 @@ Two caveats if you publish your own combination. `UPDATE_ASSET` still points at 
 
 ## Build options for forks
 
-Two build flags are for people who build and flash their own firmware, for example a fork that should not update itself over the original project's releases. Both are off by default, so every published image is built as before. They are build options only: there is no setting for either one in the web UI or in `/api/config`, and a device cannot change them after it is flashed.
+Three build flags are for people who build and flash their own firmware, for example a fork that should not update itself over the original project's releases. None of them is set in the published images, which are built as before. They are build options only: there is no setting for any of them in the web UI or in `/api/config`, and a device cannot change them after it is flashed.
 
 Set them in an env's `build_flags` in `platformio.ini`, or pass them through `PLATFORMIO_BUILD_FLAGS`.
 
@@ -80,6 +80,7 @@ Set them in an env's `build_flags` in `platformio.ini`, or pass them through `PL
 |------|--------|
 | `-D FW_VERSION_SUFFIX=\"-fork\"` | The label the device shows becomes `3.7.0-fork` instead of `3.7.0`. |
 | `-D FW_NO_GITHUB_UPDATE` | The GitHub self-update is left out of the image. |
+| `-D THEME_MAX_LAYERS=<n>` | The most layers a theme may have. The default is 32, and without the flag the image is the same as before. `<n>` is a plain decimal number from 1 to 255, so it can raise the limit or lower it (see below). |
 
 **The version suffix is display only.** `FW_VERSION` in `src/config.h` stays the plain release number. The suffix goes into `FW_VERSION_FULL` (`src/BuildInfo.h`), which is shown in the `version` field of `/api/status`, on the serial line, on the boot screen and in the `ver` entry of the mDNS record (builds with the usage meter). The update check compares `FW_VERSION`, so the suffix never changes a version comparison, and the crash record keeps the plain number in its 16-byte field.
 
@@ -93,7 +94,7 @@ The manual firmware upload in the System tab is not affected.
 
 `smalltv_noupdate` is a ready-made env for the second flag: it extends `smalltv` and adds `-D FW_NO_GITHUB_UPDATE`. CI builds it on every run, so the option keeps compiling, and `tests/buildflags/check_images.py` checks that its image holds none of the download code. It is not a release image and has no release asset. For your own fork, copy the pattern: an env that extends `smalltv` and interpolates `${env:smalltv.build_flags}` before adding the flags.
 
-**A third flag, `-D THEME_MAX_LAYERS=<n>`, raises the theme layer limit** (default 32, allowed 1 to 255). Without it the image is the same as before. Release images allow 32 layers, and a package with more layers does not load on them. See [A higher layer limit](/smalltv-mod/features/themes/#a-higher-layer-limit-build-flag) for the cost per layer and for `SMALLTV_THEME_MAX_LAYERS`, which tells the packer the limit of your build.
+**`THEME_MAX_LAYERS` sets the theme layer limit.** Release images allow 32 layers, and a package with more layers does not load on them. Write `<n>` as a plain decimal number, with no leading zero and no `0x`: `=040` is read by the compiler as octal, which is 32, while the error text prints `040` and the packer's tools read it as 40. See [A higher layer limit](/smalltv-mod/features/themes/#a-higher-layer-limit-build-flag) for the cost per layer and for `SMALLTV_THEME_MAX_LAYERS`, which tells the packer the limit of your build.
 
 ## The smalltv_loader env
 
