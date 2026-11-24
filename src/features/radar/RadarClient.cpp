@@ -207,7 +207,7 @@ static String buildWebhookUrl(const Settings& s) {
 }
 
 // ---- parse the open-data / webhook "ac" array ------------------------------
-static bool parseAdsb(const Settings& s, Stream& stream) {
+__attribute__((noinline)) static bool parseAdsb(const Settings& s, Stream& stream) {   // noinline: its locals stay out of the TLS connect path (#144)
   // Filter to just the fields we plot; applied to every element of "ac".
   JsonDocument filter;
   JsonObject fe = filter["ac"][0].to<JsonObject>();
