@@ -448,6 +448,14 @@
 #define RAIN_PNG_SIZE_GUESS 32768          // when the server sends no Content-Length
                                            // (the download then stops at this size)
 #define RAIN_PNG_MAX       262144          // a tile announced larger is refused
+// Every HTTP body is read under an overall deadline, counted from the end of
+// GET() (the headers): the per-byte timeout (httpTimeout) alone let a server
+// that trickles bytes just under it hold the main loop for minutes. Past the
+// deadline the read stops and the status says "server too slow"; the frames
+// on screen and the last good wind stay. Real bodies arrive in well under 1 s.
+#define RAIN_BODY_DEADLINE_MS 15000        // frame list and wind answer
+#define RAIN_TILE_DEADLINE_MS 30000        // one tile download (3-12 KB)
+#define RAIN_LIST_MAX_BYTES   8192         // frame list (~0.8 KB today): read up to this, refused if announced larger
 
 // Wind arrow (opt in, rain.wind): the current wind at the home position from
 // Open-Meteo (no API key, CC BY 4.0), over plain HTTP like the radar (no TLS

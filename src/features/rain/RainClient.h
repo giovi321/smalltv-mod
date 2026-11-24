@@ -47,6 +47,7 @@ enum RainStage : uint8_t {
   RAIN_FS_FULL,       // not enough free space for another frame (see RAIN_FS_KEEP_FREE)
   RAIN_LOW_HEAP,      // a decode would take free heap under RAIN_DECODE_MIN_HEAP: tile skipped
   RAIN_SLOW_TILE,     // a decode ran past RAIN_DECODE_MAX_MS: tile skipped, and in later polls
+  RAIN_SLOW_SERVER,   // a body read ran past its deadline (RAIN_BODY_DEADLINE_MS, RAIN_TILE_DEADLINE_MS)
   RAIN_OK,            // frames stored
 };
 
