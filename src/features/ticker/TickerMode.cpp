@@ -63,7 +63,12 @@ static void drawStock(const StockData& d, uint8_t pageIndex, uint8_t pageCount,
   // No data yet for this symbol.
   if (!d.valid) {
     gfxDrawCentered(d.symbol[0] ? d.symbol : "----", 80, 3, C_WHITE);
-    gfxDrawCentered(d.error ? "fetch error" : "loading...", 120, 2, C_GRAY);
+    if (d.error && d.lowHeap) {
+      gfxDrawCentered("not enough memory", 120, 2, C_GRAY);
+      gfxDrawCentered("for HTTPS", 142, 2, C_GRAY);
+    } else {
+      gfxDrawCentered(d.error ? "fetch error" : "loading...", 120, 2, C_GRAY);
+    }
     if (s.ticker.showPageDots) {
       int total = pageCount * 10 - 4;
       int x0 = (TFT_WIDTH - total) / 2;
@@ -268,7 +273,7 @@ static void drawPortfolio(uint8_t pageIndex, uint8_t pageCount, const Settings& 
         if (d.cost > 0) totC[b] += d.qty * d.cost;
       }
     } else {
-      const char* st = d.error ? "err" : "...";
+      const char* st = d.error ? (d.lowHeap ? "mem" : "err") : "...";
       gfx->setTextColor(d.error ? C_RED : C_GRAY);
       gfx->setCursor(TFT_WIDTH - gfxTextW(st, 2) - 4, y);
       gfx->print(st);

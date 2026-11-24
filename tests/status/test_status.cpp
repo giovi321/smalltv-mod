@@ -102,6 +102,7 @@ static std::string reference(const Case& c) {
       t["valid"] = d.valid;
       t["error"] = d.error;
       if (d.error) t["retryIn"] = d.retryIn;
+      if (d.error && d.lowHeap) t["reason"] = "not enough memory for HTTPS";
       if (d.valid) {
         t["price"] = d.price;
         if (d.hasChange) {
@@ -217,7 +218,10 @@ static std::vector<Case> cases() {
   StatusTicker bad{};  bad.symbol = "NOPE"; bad.error = true; bad.retryIn = 45;
   StatusTicker both{}; both.symbol = "KEPT"; both.valid = true; both.error = true; both.retryIn = 0; both.price = 12.0f; both.hasChange = true; both.changePct = 0.0f;
   StatusTicker wait{}; wait.symbol = "SOON";
-  full.tickers = {aapl, btc, nochg, bad, both, wait};
+  StatusTicker heap{}; heap.symbol = "XMR-USD"; heap.error = true; heap.lowHeap = true; heap.retryIn = 24;
+  StatusTicker stale{}; stale.symbol = "OLD"; stale.valid = true; stale.price = 3.5f; stale.error = true; stale.lowHeap = true; stale.retryIn = 12;
+  StatusTicker okHeap{}; okHeap.symbol = "FINE"; okHeap.valid = true; okHeap.price = 1.0f; okHeap.lowHeap = true;   // no error: no reason
+  full.tickers = {aapl, btc, nochg, bad, both, wait, heap, stale, okHeap};
   full.radar.count = 12;
   full.radar.error = true;
   full.radar.stage = "all filtered out";
@@ -456,6 +460,28 @@ int main() {
     // The call sits in a sibling of handleStatus (its frame must not grow), only where themes are built.
     assert(code.find("__attribute__((noinline)) static void statusFetch(") != std::string::npos);
     assert(code.find("smalltv::writeStatusFetch(out, stats.refused, stats.last);") != std::string::npos);
+  }
+  {  // TLS gate: nothing before the first check, then what it saw and the skips
+    StringSink none;
+    { PieceWriter<128> out(none); writeStatusTls(out, 0, 0, 0); out.flush(); }
+    assert(none.text.empty());
+    StringSink s;
+    { PieceWriter<5> out(s); writeStatusTls(out, 14736, 12544, 16); out.flush(); }
+    assert(s.text == ",\"tlsGate\":{\"free\":14736,\"block\":12544,\"skipped\":16}");
+    StringSink top;
+    { PieceWriter<128> out(top); writeStatusTls(out, 4294967295u, 4294967295u, 65535); out.flush(); }
+    assert(top.text == ",\"tlsGate\":{\"free\":4294967295,\"block\":4294967295,\"skipped\":65535}");
+    // After the theme fetch keys, before the tickers, in a sibling of handleStatus.
+    std::ifstream in("src/WebPortal.cpp");
+    assert(in.good());
+    std::stringstream file;
+    file << in.rdbuf();
+    const std::string code = file.str();
+    const size_t fetch = code.find("statusFetch(out);");
+    const size_t tls = code.find("  statusTls(out);");
+    const size_t tickers = code.find("smalltv::writeStatusTickers(");
+    assert(fetch != std::string::npos && tls != std::string::npos && tickers != std::string::npos && fetch < tls && tls < tickers);
+    assert(code.find("__attribute__((noinline)) static void statusTls(") != std::string::npos);
   }
   std::printf("status reply tests passed (%d replies, byte for byte)\n", checked);
   return 0;

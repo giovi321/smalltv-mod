@@ -56,6 +56,7 @@ struct StatusTicker {
   const char* symbol = "";
   bool valid = false, error = false;
   uint32_t retryIn = 0;         // written when `error`
+  bool lowHeap = false;         // the error is a TLS heap skip: `reason` follows
   float price = 0;              // written when `valid`
   bool hasChange = false;       // changePct and basis follow price
   float changePct = 0;
@@ -237,6 +238,19 @@ template <class Out> void writeStatusFetch(Out& out, uint16_t refused, uint8_t l
   jsonout::raw(out, last == 1 ? PSTR(",\"fetchLast\":\"ok\"") : last == 2 ? PSTR(",\"fetchLast\":\"refused\"") : PSTR(",\"fetchLast\":\"failed\""));
 }
 
+// `,"tlsGate":{"free":N,"block":N,"skipped":N}`: what the TLS heap check
+// (TlsGate.h) saw at the last handshake it was asked about, and how many it
+// skipped since boot. Nothing before the first check (`free` 0). Added after
+// the 3.9.0 keys.
+template <class Out> void writeStatusTls(Out& out, uint32_t free, uint32_t block, uint16_t skipped) {
+  if (!free) return;
+  using statusout::member;
+  member(out, PSTR(",\"tlsGate\":{\"free\":"), free);
+  member(out, PSTR(",\"block\":"), block);
+  member(out, PSTR(",\"skipped\":"), skipped);
+  jsonout::raw(out, PSTR("}"));
+}
+
 // `,"tickers":[...]`, row i from rowAt(i).
 template <class Out, class Row> void writeStatusTickers(Out& out, size_t count, Row&& rowAt) {
   using statusout::member;
@@ -247,6 +261,7 @@ template <class Out, class Row> void writeStatusTickers(Out& out, size_t count, 
     member(out, PSTR(",\"valid\":"), t.valid);
     member(out, PSTR(",\"error\":"), t.error);
     if (t.error) member(out, PSTR(",\"retryIn\":"), t.retryIn);
+    if (t.error && t.lowHeap) jsonout::raw(out, PSTR(",\"reason\":\"not enough memory for HTTPS\""));
     if (t.valid) {
       member(out, PSTR(",\"price\":"), t.price);
       if (t.hasChange) {

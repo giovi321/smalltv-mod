@@ -1,6 +1,7 @@
 #include "StockClient.h"
 #include "Platform.h"
 #include "WaitingStream.h"
+#include "TlsGate.h"
 #include <ArduinoJson.h>
 #include <math.h>
 
@@ -96,7 +97,10 @@ static String buildWebhookUrl(const Settings& s, const char* symbol) {
 // Map the chart timeframe to a sensible Yahoo candle interval (mirrors the
 // reference n8n workflow so the sparkline has a useful number of points).
 static const char* yahooInterval(const String& r) {
-  if (r == "1d")  return "5m";
+  // 15m, not 5m: a 24 h crypto day at 5m is 288 closes held in the JSON
+  // document while the TLS client is still open; 96 is plenty for the
+  // default 48-point sparkline. Stocks get 26 instead of 78 points.
+  if (r == "1d")  return "15m";
   if (r == "5d")  return "30m";
   if (r == "1mo" || r == "3mo" || r == "6mo" || r == "ytd") return "1d";
   if (r == "1y"  || r == "2y")  return "1wk";
@@ -444,29 +448,107 @@ enum ParseKind : uint8_t { PARSE_WEBHOOK, PARSE_YAHOO, PARSE_CASH_QUOTE, PARSE_C
 // cash.ch is the only host we let negotiate ECDHE, and only the first handshake
 // pays for it: this session resumes the rest for ~23 h.
 static TlsSession g_cashSession;
+// cash.ch's ECDHE handshake needs this much in one block, on top of the TLS
+// gate (the check it had before the gate, kept).
+static const uint32_t CASH_LARGEST_BLOCK = 16000;
+// Yahoo keeps the session ID of the last handshake: later fetches resume
+// instead of repeating the RSA key exchange.
+static TlsSession g_yahooSession;
+
+// Yahoo's receive buffer. Yahoo honours TLS max_fragment_length with the
+// static-RSA suites, so 512 B is enough (1.5 KB less heap per handshake than
+// 2048). Probed like OtaUpdate.cpp's probeMfln(): a host that does not accept
+// 512 gets the old 2048. The ESP32 ignores the size.
+//  - A no is asked again up to three times in a row, since a probe also fails
+//    on a dropped connection; after that once an hour, so an outage does not
+//    leave Yahoo at 2048 (1.5 KB more for the gate) for the rest of the boot.
+//  - A yes holds until a fetch at 512 fails (yahooMflnFailed()): servers do
+//    stop offering MFLN (#140), and the next fetch then probes again.
+#if defined(SMALLTV_FAMILY_ESP8266)
+static const uint32_t YAHOO_REPROBE_MS = 60UL * 60UL * 1000UL;
+static bool     g_yahooMfln = false;
+static uint8_t  g_yahooProbes = 0;     // failed probes in a row, up to 3
+static uint32_t g_yahooProbeMs = 0;    // millis() of the last probe
+
+static bool yahooMayProbe() {
+  if (g_yahooMfln) return false;
+  return g_yahooProbes < 3 || (uint32_t)(millis() - g_yahooProbeMs) >= YAHOO_REPROBE_MS;
+}
+#endif
+
+// The buffer to check the heap for before the probe, without touching the
+// network: 512 while a probe is due or MFLN is known. The probe only gives
+// the same or 2048, which is checked again then.
+static uint16_t yahooRxGuess() {
+#if defined(SMALLTV_FAMILY_ESP8266)
+  return (g_yahooMfln || yahooMayProbe()) ? 512 : 2048;
+#else
+  return 2048;
+#endif
+}
+
+static uint16_t yahooRxBuf() {
+#if defined(SMALLTV_FAMILY_ESP8266)
+  if (yahooMayProbe()) {
+    g_yahooProbeMs = millis();
+    g_yahooMfln = BearSSL::WiFiClientSecure::probeMaxFragmentLength(YAHOO_CHART_HOST1, 443, 512);
+    if (g_yahooMfln)             g_yahooProbes = 0;
+    else if (g_yahooProbes < 3)  g_yahooProbes++;
+  }
+  return g_yahooMfln ? 512 : 2048;
+#else
+  return 2048;
+#endif
+}
+
+#if defined(SMALLTV_FAMILY_ESP8266)
+// A fetch at 512 B failed. The session goes too: a resumed handshake fits in
+// 512 B records even when the server no longer limits the reply's.
+static void yahooMflnFailed() {
+  g_yahooMfln = false;
+  g_yahooProbes = 0;
+  g_yahooSession = TlsSession();
+}
+#endif
 
 static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, StockData& d) {
   bool https = url.startsWith("https://");
   bool cash = (kind == PARSE_CASH_QUOTE || kind == PARSE_CASH_CHART);
+  d.lowHeap = false;
 
   std::unique_ptr<NetClient> client;
+  uint16_t rx = 0;
   if (https) {
     // Per-source TLS shaping (ESP8266; the ESP32 ignores the hints):
     //  - cash.ch: must do ECDHE. Keep it cheap — 512 B buffers (it honors MFLN)
-    //    and session resumption, and require a large CONTIGUOUS free block up
-    //    front so a fragmented heap skips the fetch instead of crashing inside
-    //    the handshake. The full cipher list (default) is left on for it.
+    //    and session resumption. The full cipher list (default) is left on.
     //  - Yahoo / GitHub / webhook: forced to the cheap static-RSA suites, so
     //    those handshakes stay as light as the old BASIC build.
+    // Every source passes the TLS gate first: total heap and largest block,
+    // with room left for the Wi-Fi SDK (TlsGate.h). Short: skipped like any
+    // failed fetch, retried on the backoff, and shown as "not enough memory
+    // for HTTPS" rather than a fetch error.
     if (cash) {
-      if (platformMaxFreeBlock() < 16000) return false;   // largest contiguous block, not total
-      client.reset(platformMakeSecureClient(512, &g_cashSession, 512, /*cheapCiphers=*/false));
+      // The ECDHE math also needs a large CONTIGUOUS block, so a fragmented
+      // heap skips the fetch instead of crashing inside the handshake.
+      rx = 512;
+      if (!tlsHeapReady(rx, CASH_LARGEST_BLOCK)) { d.lowHeap = true; return false; }
+      client.reset(platformMakeSecureClient(rx, &g_cashSession, 512, /*cheapCiphers=*/false));
     } else {
       // raw.githubusercontent.com sends a ~4 KB cert record and won't negotiate
       // MFLN, so it needs a bigger receive buffer than Yahoo's small records.
-      uint16_t rx = (kind == PARSE_GITHUB) ? GH_QUOTES_RXBUF : 2048;
-      if (ESP.getFreeHeap() < (uint32_t)rx + 12000) return false;
-      client.reset(platformMakeSecureClient(rx, nullptr, 512, /*cheapCiphers=*/true));
+      rx = (kind == PARSE_GITHUB) ? GH_QUOTES_RXBUF
+         : (kind == PARSE_YAHOO)  ? yahooRxGuess() : 2048;
+      if (!tlsHeapReady(rx)) { d.lowHeap = true; return false; }
+      if (kind == PARSE_YAHOO) {
+        // The MFLN probe opens a connection of its own, so it runs only once
+        // the gate has passed; a no means 2048, checked again.
+        const uint16_t probed = yahooRxBuf();
+        if (probed > rx && !tlsHeapReady(probed)) { d.lowHeap = true; return false; }
+        rx = probed;
+      }
+      client.reset(platformMakeSecureClient(rx, (kind == PARSE_YAHOO) ? &g_yahooSession : nullptr,
+                                            512, /*cheapCiphers=*/true));
     }
   } else {
     client.reset(new WiFiClient());
@@ -492,6 +574,12 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
 
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
+#if defined(SMALLTV_FAMILY_ESP8266)
+    // Any transport error at 512 B records (connect, or a read that hit a
+    // record too large for the buffer: -4, -5, -11 as in #140): Yahoo may have
+    // stopped offering MFLN. Costs at most one extra probe after a failure.
+    if (kind == PARSE_YAHOO && rx == 512 && code < 0) yahooMflnFailed();
+#endif
     http.end();
     return false;
   }
@@ -521,6 +609,10 @@ static bool stepSymbol(const Settings& s, StockData& d) {
   if (d.source == SRC_YAHOO) {
     if (g_fetchPhase == 0) {
       if (fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST1, d.symbol), PARSE_YAHOO, d)) return true;
+      // Skipped by the TLS gate: the mirror would only run the gate and the
+      // theme release again a tick later. One check per cycle; the backoff
+      // tries again.
+      if (d.lowHeap) { d.error = true; return true; }
       g_fetchPhase = 1;                 // transient drop: retry the mirror next tick
       return false;
     }
@@ -531,6 +623,7 @@ static bool stepSymbol(const Settings& s, StockData& d) {
   if (d.source == SRC_CASH) {
     if (g_fetchPhase == 0) {            // quote: price + day change (~200 B)
       if (fetchUrl(s, buildCashQuoteUrl(d.symbol), PARSE_CASH_QUOTE, d)) { g_fetchPhase = 2; return false; }
+      if (d.lowHeap) { d.error = true; return true; }   // gate skip: as for Yahoo above
       g_fetchPhase = 1;                 // retry the quote next tick
       return false;
     }
