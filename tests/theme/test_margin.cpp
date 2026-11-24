@@ -526,6 +526,103 @@ static void testPassedIsCheapToRepeat() {
   CHECK(!h.reload());
 }
 
+// ---- a release by the TLS gate (appReleaseForTls, main.cpp) ------------------------
+//
+// Before a ticker handshake the carousel's loaded theme is released when the
+// heap is short: ThemeMode::release(), the same call a web request makes. The
+// theme loads again when its page returns, through the same checks. Three
+// moments for the release: before the watch passed, during it, and after.
+// The release must change none of the state below; the reload then follows
+// the rules of the three cases.
+
+// Before the first frame was drawn (the watch has not started): the theme has
+// not passed, so the reload is a first load. A refusal puts the old selection back.
+static void testTlsReleaseBeforeTheWatchStarted() {
+  PassedTheme h;
+  PendingSelection p;
+  p.pick("big");                             // picked, not saved
+  h.loadStarts("big");                       // the first load starts
+  // ... released here, before the engine built anything: nothing to undo ...
+  h.loadStarts("big");                       // the load starts again
+  CHECK(!h.reload());
+  Selection s = sel("big", kTheme);
+  CHECK(h.refused(s, true, kStocks, "pixel-room", "big", kTheme));
+  CHECK(s.mode == kStocks && s.themeId == "pixel-room");
+  p.drop();                                  // refuseForMemory() ends the wait
+  CHECK(!p.accept("big", true));             // and the refused pick is never saved
+}
+
+// During the watch: the pick has not passed. The reload restarts the watch, so
+// the pick is saved 8 s after the RELOAD, not after the first load.
+static void testTlsReleaseDuringTheWatch() {
+  PassedTheme h;
+  PendingSelection p;
+  MarginWatch w;
+  const MarginLimits lim{5120, 1536};
+  p.pick("big");
+  h.loadStarts("big");
+  w.restart(1000);                           // the first load, watch on
+  CHECK(!w.check(4000, 9000, 4096, lim) && w.active());
+  CHECK(!p.accept("big", !w.active()));      // not passed: no save
+  // Released at 4000 (state untouched), loaded again at 4500.
+  h.loadStarts("big");
+  CHECK(!h.reload());                        // nothing passed yet: a first load
+  w.restart(4500);
+  CHECK(!w.check(9000, 9000, 4096, lim) && w.active());   // 8000 ms after the FIRST load: still watching
+  CHECK(!p.accept("big", !w.active()));
+  CHECK(!w.check(12499, 9000, 4096, lim) && w.active());
+  CHECK(!w.check(12500, 9000, 4096, lim) && !w.active()); // 8000 ms after the reload: passed
+  CHECK(p.accept("big", !w.active()));       // saved now, once
+  CHECK(!p.accept("big", !w.active()));
+  // A refusal of the reload, during the watch, is a first-load refusal.
+  PassedTheme g;
+  g.loadStarts("big");
+  g.loadStarts("big");
+  Selection s = sel("big", kTheme);
+  CHECK(g.refused(s, true, kStocks, "pixel-room", "big", kTheme));
+  CHECK(s.themeId == "pixel-room");
+}
+
+// After the pass: the theme passed, the pick is saved. A reload is refused
+// only because of this moment's heap; the settings stay, the watch runs again.
+static void testTlsReleaseAfterThePass() {
+  PassedTheme h;
+  PendingSelection p;
+  MarginWatch w;
+  const MarginLimits lim{5120, 1536};
+  p.pick("big");
+  h.loadStarts("big");
+  w.restart(0);
+  CHECK(!w.check(8000, 9000, 4096, lim) && !w.active());
+  h.passed("big");                           // checkMargin()
+  CHECK(p.accept("big", !w.active()));       // acceptSelection(): saved
+  h.loadStarts("big");                       // released for TLS, loaded again
+  CHECK(h.reload());
+  w.restart(20000);
+  Selection s = sel("big", kTheme);
+  CHECK(!h.refused(s, false, 0, "", "big", kTheme));   // a refusal of the reload: no save
+  CHECK(s.themeId == "big" && s.mode == kTheme);
+  CHECK(!p.pending());
+}
+
+// release() changes none of this state, and only the pass and the watch end move it.
+static void testTlsReleaseTouchesNoMarginState() {
+  const std::string mode = slurp("src/features/theme/ThemeMode.cpp");
+  const std::string rel = body(mode, "void ThemeMode::release(");
+  CHECK(!rel.empty());
+  CHECK(rel.find("marginWatch_") == std::string::npos);
+  CHECK(rel.find("passedTheme_") == std::string::npos);
+  CHECK(rel.find("pending_") == std::string::npos);
+  CHECK(rel.find("hasPrev_") == std::string::npos);
+  CHECK(rel.find("refusal_") == std::string::npos);
+  // The TLS gate's hook is that same release.
+  const std::string app = body(slurp("src/main.cpp"), "void appReleaseForTls(");
+  CHECK(app.find("g_themeMode.release(needFree, needBlock);") != std::string::npos);
+  // A reload starts the watch again (and says whether it is a reload first).
+  const std::string service = body(mode, "void ThemeMode::service(");
+  CHECK(before(service, "passedTheme_.loadStarts(", "marginWatch_.restart("));
+}
+
 // ---- constants ---------------------------------------------------------------
 
 static void testConstants() {
@@ -846,6 +943,10 @@ int main() {
   testAReloadIsOfTheSameThemeOnly();
   testNewPickOrReinstallMakesItAFirstLoad();
   testPassedIsCheapToRepeat();
+  testTlsReleaseBeforeTheWatchStarted();
+  testTlsReleaseDuringTheWatch();
+  testTlsReleaseAfterThePass();
+  testTlsReleaseTouchesNoMarginState();
   testConstants();
   testModeWiring();
   testBuildWiring();
