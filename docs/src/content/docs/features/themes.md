@@ -1059,7 +1059,7 @@ preview it with the `--data` workflow documented above.
 | Item | V1 limit |
 | --- | --- |
 | Manifest | 16 KiB, nesting depth 8 |
-| Layers | 32 on release images (a build can raise it with `-DTHEME_MAX_LAYERS=<n>`, see below) |
+| Layers | 32 on release images (a build can set another limit, 1 to 255, with `-DTHEME_MAX_LAYERS=<n>`, see below) |
 | IDs | 1–48 ASCII letters, digits, `_`, `-` |
 | Theme name / author / version | 96 / 96 / 32 bytes |
 | Text template | 1–128 printable ASCII bytes |
@@ -1083,18 +1083,23 @@ preview it with the `--data` workflow documented above.
 
 Release images allow 32 layers. A package with more layers does not load on
 them: the install is refused with `layers: expected an array of at most 32
-layers`. A firmware you build yourself can raise the limit with
-`-DTHEME_MAX_LAYERS=<n>` (1 to 255; the default is 32, and without the flag the
-image is the same as before). Each layer costs RAM (its record in the theme and
-its state in the engine) and 2 bytes of stack in `render()`. Measured on the
-32-bit host build with plain rectangle layers, each layer past the first holds
-about 125 bytes of heap once loaded and about 110 bytes more while it runs. A
-theme of 40 such layers holds about 5,250 bytes loaded and 4,460 bytes while
-running, and its load peak is about 8,500 bytes, against about 4,250, 3,580 and
-7,020 bytes at 32. The 3,840-byte running budget and the 5,120-byte load budget
-that the bundled themes are held to do not apply to a theme with this many
-layers, so check the free heap on your device before relying on a high limit.
-The error text names the limit of the build.
+layers`. A firmware you build yourself can set another limit with
+`-DTHEME_MAX_LAYERS=<n>`, usually a higher one (1 to 255; the default is 32, and
+without the flag the image is the same as before). Write `<n>` as a plain decimal
+number (see [Build options for forks](/smalltv-mod/reference/building/#build-options-for-forks)).
+
+Each layer costs RAM (its record in the theme and its state in the engine) and 2
+bytes of stack in `render()`. Measured on the 32-bit host build with plain
+rectangle layers, each layer past the first takes about 125 bytes of heap for the
+loaded theme, and the running engine takes about 110 bytes more for its state of
+that layer: about 235 bytes in all while the theme runs. In total, a theme of 40
+such layers holds about 9,700 bytes while it runs (5,250 for the loaded theme
+plus 4,460 for the engine), against about 7,840 bytes at 32 layers (4,250 plus
+3,580). The load peak is about 8,500 bytes at 40 layers and 7,020 at 32. The
+3,840-byte running budget (the theme, the package's entry index and the engine
+together) and the 5,120-byte load budget that the bundled themes are held to do
+not apply to a theme with this many layers, so check the free heap on your device
+before relying on a high limit. The error text names the limit of the build.
 
 The packer, the native tools and the skill check against the same number. Tell
 them the limit of the firmware the package is for with the environment variable
@@ -1105,8 +1110,8 @@ an error):
 SMALLTV_THEME_MAX_LAYERS=40 python3 tools/theme_pack.py my-theme my-theme.stheme
 ```
 
-A package packed for a raised limit still does not load on a release image if it
-has more than 32 layers.
+A package packed for a limit above 32 still does not load on a release image if
+it has more than 32 layers.
 
 Packages live under `/themes/<id>.stheme`. Upload uses `/themes/.upload`; every
 entry, manifest, and referenced animation frame is checked before a rename makes

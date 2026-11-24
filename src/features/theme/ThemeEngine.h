@@ -12,9 +12,10 @@ constexpr int CanvasSize = 240;
 constexpr size_t MaxManifest = 16384;
 #define SMALLTV_STRINGIFY_(x) #x
 #define SMALLTV_STRINGIFY(x) SMALLTV_STRINGIFY_(x)
-// The most layers a theme may have. Release images allow 32, the format's limit
-// (a package with more layers does not load on them). A build may raise it:
+// The most layers a theme may have. Release images allow 32, the default (a
+// package with more layers does not load on them). A build may set another:
 // -DTHEME_MAX_LAYERS=<n>, 1 to 255 (a show rule keeps its layer in one byte).
+// Write <n> as a plain decimal (no leading zero: 040 is octal 32 to the compiler).
 // A layer costs RAM: its record in the theme and its state in the engine, and
 // 2 bytes of stack in render() (its handle array). The packer and the skill
 // check against the same number from SMALLTV_THEME_MAX_LAYERS.
