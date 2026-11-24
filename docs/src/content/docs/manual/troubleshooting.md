@@ -57,6 +57,8 @@ Four things bring it back, in the order worth trying:
 
 A busy office or lab network makes this worse than a quiet home one. Broadcast and multicast traffic all gets buffered by the device, so the same firmware on the same hardware can work on one network and go quiet on another.
 
+If the Radar line reads `server needs 16 KB TLS records`, or `connect failed` with `http` -4 on every poll on older firmware, memory is not the cause: the direct feed no longer negotiates the small TLS records the ESP8266 needs. Neither adsb.lol nor adsb.fi does since November 2026. Switch the radar to a **Custom webhook**, as in [Plane radar](/smalltv-mod/features/radar/#which-direct-feed-to-pick).
+
 The ESP32 models have several times the RAM and manage their TLS buffers dynamically, so none of this applies to them.
 
 ## A ticker stopped working after I turned on night mode
