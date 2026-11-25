@@ -358,10 +358,9 @@
 #define ADSB_LOL_PATH    "/v2/lat/"
 #define ADSB_USER_AGENT  "Mozilla/5.0 (SmallTV)"
 
-// Preserve the platform defaults for new settings. ESP8266 HTTPS can fail
-// when TLS records exceed its 4096-byte fallback buffer or heap is low.
-// A plain HTTP LAN receiver/proxy avoids the TLS cost. ESP32 uses a different
-// TLS stack and does not use this BearSSL fallback.
+// Default source selectors: adsb.lol on ESP8266, adsb.fi on ESP32.
+// An ESP8266 direct feed is polled only when its server negotiates MFLN;
+// otherwise use a plain-HTTP LAN receiver or proxy.
 #if defined(SMALLTV_FAMILY_ESP8266)
   #define DEFAULT_RADAR_SRC  RADAR_SRC_ADSBLOL
 #else

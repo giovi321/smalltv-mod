@@ -15,10 +15,12 @@ class WiFiClient : public Client {
 };
 using NetClient = WiFiClient;
 class SecureClient : public WiFiClient {};
+inline bool& probeSupportsMfln() { static bool supported = true; return supported; }
+inline unsigned& probeCalls() { static unsigned calls = 0; return calls; }
 namespace BearSSL {
 class WiFiClientSecure {
  public:
-  static bool probeMaxFragmentLength(const char*, unsigned, unsigned) { return false; }
+  static bool probeMaxFragmentLength(const char*, unsigned, unsigned) { ++probeCalls(); return probeSupportsMfln(); }
 };
 }
 inline SecureClient* platformMakeSecureClient(unsigned, TlsSession*) { return new SecureClient; }
@@ -30,6 +32,7 @@ class HTTPClient {
  public:
   static Stream* body;
   static int status;
+  static unsigned requests;
   static bool chunked;
   static bool http10;
   static unsigned headerDelay;
@@ -42,7 +45,7 @@ class HTTPClient {
   void addHeader(const char*, const char*) {}
   void setUserAgent(const char*) {}
   void setFollowRedirects(unsigned) {}
-  int GET() { delay(headerDelay); return status; }
+  int GET() { ++requests; delay(headerDelay); return status; }
   Client& getStream() { return *client_; }
   String header(const char*) { return chunked ? transferEncoding : ""; }
   void end() {}

@@ -10,6 +10,7 @@ unsigned long ticks = 0;
 EspClass ESP;
 Stream* HTTPClient::body = nullptr;
 int HTTPClient::status = 200;
+unsigned HTTPClient::requests = 0;
 bool HTTPClient::chunked = false;
 bool HTTPClient::http10 = true;
 unsigned HTTPClient::headerDelay = 0;
@@ -173,5 +174,34 @@ int main() {
   assert(!radarError() && radarCount() == 1);
   s.mode = MODE_STOCKS; radarInit(s);
   assert(!g_heap && !radarCount());
+  // Preserve upstream #148: no direct GET without MFLN, bounded re-probes,
+  // and a working local receiver even while the direct host is blocked.
+  probeSupportsMfln() = false;
+  s.mode = MODE_RADAR; s.radar.source = RADAR_SRC_ADSBLOL; radarInit(s);
+  unsigned probes = probeCalls(), requests = HTTPClient::requests;
+  poll(s, feed("ac", local));
+  assert(radarError() && radarStage() == RADAR_NO_MFLN && radarLastHttp() == 0);
+  assert(std::string(radarStageName()) == "server needs 16 KB TLS records");
+  assert(probeCalls() == probes + 2 && HTTPClient::requests == requests);
+  probes = probeCalls();
+  poll(s, feed("ac", local));
+  assert(radarStage() == RADAR_NO_MFLN && probeCalls() == probes && HTTPClient::requests == requests);
+  ticks += RADAR_REPROBE_MS;
+  poll(s, feed("ac", local));
+  assert(probeCalls() == probes + 2 && HTTPClient::requests == requests);
+  probes = probeCalls();
+  radarInit(s); poll(s, feed("ac", local));
+  assert(probeCalls() == probes + 2 && HTTPClient::requests == requests);
+  probes = probeCalls();
+  s.radar.source = RADAR_SRC_ADSBFI; poll(s, feed("ac", local));
+  assert(probeCalls() == probes + 2 && radarStage() == RADAR_NO_MFLN);
+  probes = probeCalls();
+  s.radar.source = RADAR_SRC_WEBHOOK; poll(s, feed("aircraft", local));
+  assert(!radarError() && radarCount() == 1 && probeCalls() == probes);
+  assert(HTTPClient::requests == requests + 1);
+  probeSupportsMfln() = true;
+  s.radar.source = RADAR_SRC_ADSBLOL; radarInit(s); poll(s, feed("ac", local));
+  assert(!radarError() && radarCount() == 1 && probeCalls() == probes + 1);
+  s.mode = MODE_STOCKS; radarInit(s);
   puts("radar streaming client: 100/500/5000-aircraft, nearest-last, metadata, framing, truncation, cache and heap tests passed");
 }

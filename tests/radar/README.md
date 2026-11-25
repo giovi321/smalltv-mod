@@ -12,7 +12,8 @@ installs no packages and makes no network requests.
   overflow, allocation failure and the total heap reserve and contiguous allocation fit.
 - `fixtures/aircraft.json` is a small synthetic readsb/dump1090 receiver sample.
 - `test_client.cpp` compiles the actual client with deterministic network and
-  heap stand-ins, including radar/carousel storage release and reacquisition.
+  heap stand-ins, including radar/carousel storage release and reacquisition,
+  direct-feed MFLN backoff/re-probing, and local-receiver bypass.
   Both `ac` and `aircraft` feeds contain 100, 500 and 5,000
   background aircraft plus a nearer aircraft arriving last. Metadata before
   and after the list, numeric metadata lookahead, decoded top-level keys, nested
@@ -36,7 +37,9 @@ records can still leave insufficient ordinary heap for packets or parsing.
 HTTPS webhooks currently share the adsb.fi probe/cache key, rather than probing
 their own URL's host. A plain HTTP LAN URL bypasses TLS, not parser allocation
 checks. The 16000-byte TLS largest-block floor is a conservative preflight,
-not a measured handshake allocation size or a guarantee against resets.
+not a measured handshake allocation size or a guarantee against resets. Direct
+ESP8266 feeds without MFLN are not polled; upstream re-probes after an hour
+or a settings save.
 
 ## Memory and parsing contract
 
