@@ -425,9 +425,9 @@ void RadarSettings::setDefaults() {
   showRimDots = true;
   uiScale = 1;            // medium
   minAltFt = 0;           // show all
-  markerColor = 0xFF0000; // original red aircraft markers
-  lineColor = 0x424142;   // original C_DGRAY (RGB565 0x4208)
-  textColor = 0x848284;   // original C_GRAY (RGB565 0x8410)
+  markerColor = 0xFF0000;  // original red aircraft markers
+  lineColor = 0x424142;    // original C_DGRAY (RGB565 0x4208)
+  textColor = 0x848284;    // original C_GRAY (RGB565 0x8410)
   airportColor = 0x0082FF; // original blue airport names and diamonds
   airportCount = 0;
   for (uint8_t i = 0; i < MAX_AIRPORTS; i++) {
