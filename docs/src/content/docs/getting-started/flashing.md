@@ -66,6 +66,8 @@ The fix is a two-step install through a tiny loader, no soldering. The loader is
 4. Upload `smalltv-mod-firmware.bin` there. It fits because the loader uses this firmware's flash layout, which gives the sketch 1,044,464 bytes against an image of about 850 KB (v3.10.0). The device reboots into the full smalltv-mod.
 5. It comes up in the usual `SmallTV-Setup` captive portal for WiFi. From here it is a normal ESP8266 smalltv-mod device.
 
+If the browser shows `ERR_CONNECTION_RESET` during the upload and the loader page comes back a few minutes later, the upload was cut off before it reached the device. Stay joined to `SmallTV-Loader` for the whole upload, since it has no internet and phones leave such networks, and try another browser: in [#151](https://github.com/giovi321/smalltv-mod/issues/151) the upload failed in Opera and worked in Edge. `curl -F "firmware=@smalltv-mod-firmware.bin" http://192.168.4.1/update` shows the loader's own answer.
+
 After this first install, normal OTA works from the System tab, because this firmware's layout has room for two sketch copies. You only need the loader once.
 
 The loader path does not erase the flash, so the ESP8266's stored RF settings from the stock firmware survive it. If the device then never joins your WiFi and the router log shows `router refused (203)`, update to a firmware that has the join fix (it resets those settings before every join). If it still fails, erase the flash over the serial header (`esptool.py --port COM5 erase_flash`) and write the image as in the [UART recovery](#uart-header-for-recovery-or-a-direct-install) steps.
