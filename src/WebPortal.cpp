@@ -125,8 +125,16 @@ static bool requireAuth() {
 
 // ---------------------------------------------------------------------------
 static void sendJson(JsonDocument& doc, int code = 200) {
+  // On a low heap the document can drop members, or the String can stop
+  // growing part way. Either would reach the page as a 200 with incomplete
+  // settings, so refuse it and let the page show the error instead.
   String out;
-  serializeJson(doc, out);
+  size_t expected = measureJson(doc);
+  if (doc.overflowed() || !out.reserve(expected) ||
+      serializeJson(doc, out) != expected || out.length() != expected) {
+    server.send(503, "application/json", "{\"error\":\"not enough memory to send this, try again\"}");
+    return;
+  }
   server.send(code, "application/json", out);
 }
 
