@@ -20,6 +20,7 @@ A radar set up on an older firmware, with its own coordinates, keeps them: the b
 The Radar tab's **What to show** card tunes what appears. Alongside the two settings below it carries independent toggles for the callsign and altitude labels, the speed vectors, and the rim dots for traffic beyond the outer ring.
 
 - **Marker and label size** (Small, Medium, Large) scales the triangles, markers, and text together. Medium is the default. Large reads from across the room; Small keeps a busy sky uncluttered.
+- **Radar colors** provide four independent controls: aircraft markers, rings and crosshairs, radar text (callsigns, altitudes, north indicator, distance, and aircraft count), and airport names and diamonds. The controls wrap to fit narrow screens. Defaults match the original palette. Reset fills the controls; Save settings applies them. Other screens keep their existing colors.
 - **Hide aircraft below (ft)** drops ground and low traffic. Set it to `500` and planes taxiing at the airport disappear; `0` shows everything.
 - Callsigns are placed nearest first, and any label that would overlap one already on screen is skipped, so a crowded scope stays legible. The triangle still shows even when its label was dropped.
 
