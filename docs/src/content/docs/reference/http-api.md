@@ -16,7 +16,7 @@ The settings page talks to the device through a small JSON API over plain HTTP, 
 | Method and route | What it does |
 |---|---|
 | `GET /` | The settings page |
-| `GET /api/config` | The settings as JSON, without passwords or the WireGuard private key, plus `features` (which of `ticker`, `usage`, `radar`, `ha`, `theme`, `wireguard` and `button` the build has) and `chip` (`esp8266`, `esp32c2` or `esp32`) |
+| `GET /api/config` | The settings as JSON, without passwords or the WireGuard private key, plus `features` (which of `ticker`, `usage`, `radar`, `ha`, `theme`, `wireguard` and `button` the build has) and `chip` (`esp8266`, `esp32c2` or `esp32`). `503` with `not enough memory` when the device cannot build the whole reply; try again |
 | `POST /api/config` | Applies the settings in the JSON body and saves them. Answers `{"ok":true,"reboot":<bool>}`; `reboot` is true when the WiFi list or the hostname changed, and the device then restarts. An `ha` member says that Home Assistant needs a restart. `400` for a body that is not JSON, `503` with `not enough memory` when the device has no heap for the save, which keeps the old settings |
 | `GET /api/status` | Live device state, see [below](#the-status-reply) |
 | `GET /api/scan` | A WiFi scan: a list of up to 25 `{"ssid","rssi","enc"}` |
