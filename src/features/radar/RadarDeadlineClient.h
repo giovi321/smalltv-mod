@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include "Platform.h"
 
 // One budget for HTTP headers, redirects and the streamed body, even when
@@ -52,6 +53,16 @@ class RadarDeadlineClient : public NetClient {
         ? static_cast<int32_t>(left) : timeout;
     int result = in_.connect(ip, port, bounded);
     return expired() ? 0 : result;
+  }
+#endif
+#if !defined(SMALLTV_FAMILY_ESP32)
+  // The ESP8266 HTTPClient does not keep the client it is given: begin()
+  // stores client.clone() (core 3.1). WiFiClient::clone() would copy only the
+  // plain WiFiClient part of this wrapper, so an HTTPS URL would go out as
+  // cleartext TCP and the deadline would be skipped. The copy wraps the same
+  // client, which outlives the HTTPClient in fetchUrl.
+  std::unique_ptr<WiFiClient> clone() const override {
+    return std::unique_ptr<WiFiClient>(new RadarDeadlineClient(in_, start_, budget_));
   }
 #endif
   int available() override { return expired() ? 0 : in_.available(); }

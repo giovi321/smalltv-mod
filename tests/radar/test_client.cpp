@@ -132,6 +132,12 @@ int main() {
     s.radar.source = source; poll(s, chunks(envelope, 1), true, 3);
     assert(!HTTPClient::http10 && !radarError() && radarSeenAc() == 1);
   }
+  // HTTPClient reads through its clone of the client. An HTTPS feed must still
+  // read through the TLS client, not a plain WiFiClient copy of the wrapper.
+  unsigned tls = secureReads();
+  s.radar.source = RADAR_SRC_ADSBFI; poll(s, feed("ac", local));
+  assert(!radarError() && secureReads() > tls);
+  s.radar.source = RADAR_SRC_WEBHOOK;
   failedPoll(s, "40\r\n{\"ac\":[{\"lat\":39.8", "IncompleteInput", true);
   // Preserve the prior complete-JSON contract; terminal chunk framing is not drained.
   poll(s, "9\r\n{\"ac\":[]}", true);
