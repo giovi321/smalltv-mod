@@ -1,0 +1,8 @@
+{
+  "now": 1700000000.0,
+  "messages": 42,
+  "aircraft": [
+    {"hex":"abc001","flight":"LOCAL01 ","lat":51.51,"lon":-0.10,"alt_baro":10000,"track":90,"gs":200},
+    {"hex":"abc002","seen":1.5,"messages":3}
+  ]
+}

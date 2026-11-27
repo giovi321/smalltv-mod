@@ -10,6 +10,6 @@ struct Aircraft {
   float   gs;          // ground speed, knots; NAN if unknown
   int32_t altFt;       // barometric altitude, ft (0 when on ground / unknown)
   char    callsign[9]; // flight id, trimmed
-  float   distKm;      // great-circle-ish distance from home
+  float   distKm;      // flat-earth distance approximation from home
   float   bearingDeg;  // bearing from home, degrees (0 = N)
 };

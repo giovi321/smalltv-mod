@@ -340,7 +340,7 @@
 // Plane radar (MODE_RADAR)
 //   Data source (radar's own selector, independent of the stock one):
 //     0 = adsb.fi opendata, fetched directly by the device over HTTPS (no key)
-//     1 = custom webhook (a LAN proxy that pre-filters — robust on the ESP8266)
+//     1 = custom URL (a LAN proxy or a local receiver aircraft.json)
 //     2 = adsb.lol opendata, same JSON shape, also direct over HTTPS (no key)
 // ---------------------------------------------------------------------------
 #define RADAR_SRC_ADSBFI   0
@@ -358,11 +358,9 @@
 #define ADSB_LOL_PATH    "/v2/lat/"
 #define ADSB_USER_AGENT  "Mozilla/5.0 (SmallTV)"
 
-// Default direct provider. adsb.fi sits behind Cloudflare, which does not
-// negotiate the TLS max_fragment_length extension and sends records larger
-// than BearSSL's fallback 4 KB buffer, so the ESP8266 cannot read a busy
-// response; adsb.lol still honours MFLN and keeps the TLS footprint tiny.
-// The ESP32 uses mbedTLS with dynamic buffers and is not affected either way.
+// Default source selectors: adsb.lol on ESP8266, adsb.fi on ESP32.
+// An ESP8266 direct feed is polled only when its server negotiates MFLN;
+// otherwise use a plain-HTTP LAN receiver or proxy.
 #if defined(SMALLTV_FAMILY_ESP8266)
   #define DEFAULT_RADAR_SRC  RADAR_SRC_ADSBLOL
 #else
@@ -378,7 +376,7 @@
 #define DEFAULT_RADAR_LAT       0.0f
 #define DEFAULT_RADAR_LON       0.0f
 #define DEFAULT_RADAR_RANGE_KM  20
-#define DEFAULT_RADAR_POLL_SEC  10     // >=3 keeps us under the 1 req/s limit
+#define DEFAULT_RADAR_POLL_SEC  10     // seconds; minimum 3 s stays below the ~1 req/s public limit
 
 // ---------------------------------------------------------------------------
 // Rain radar (MODE_RAIN)
